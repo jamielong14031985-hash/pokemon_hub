@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "161177907512",
+    "project_id": "cardmon-7dc24",
+    "storage_bucket": "cardmon-7dc24.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:161177907512:android:be982be8613436cc9291cd",
+        "android_client_info": {
+          "package_name": "com.Cardmon.uk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3NIffpuen34S0M43DiySxvtCpFiu4jnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:161177907512:android:ef8efd6ebbc228089291cd",
+        "android_client_info": {
+          "package_name": "com.example.pokemon_hub"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3NIffpuen34S0M43DiySxvtCpFiu4jnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
