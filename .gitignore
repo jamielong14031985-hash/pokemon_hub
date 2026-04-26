@@ -1,0 +1,102 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
+
+# Firebase cache
+.firebase/
+
+# Firebase config
+# Leave .firebaserc committed if you want the Mac to use the same Firebase project.
+# Uncomment this only if each machine should use a different Firebase project.
+# .firebaserc
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Node / npm / Firebase functions
+node_modules/
+functions/node_modules/
+.npm/
+.eslintcache
+*.tgz
+.yarn-integrity
+
+# Build output
+build/
+**/build/
+build/Release/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android generated files
+android/.gradle/
+android/app/build/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+
+# iOS generated files
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# macOS generated files
+macos/Flutter/ephemeral/
+macos/Flutter/GeneratedPluginRegistrant.swift
+
+# Windows generated files
+windows/flutter/ephemeral/
+
+# Linux generated files
+linux/flutter/ephemeral/
+
+# IDE files
+.idea/
+*.iml
+.vscode/.dart_tool/
+.vscode/launch.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local AI/tooling files
+.agents/
+
+# Dataconnect generated files
+.dataconnect/
+
+# Do NOT ignore these for your Flutter app:
+# pubspec.lock should be committed.
+# firebase.json should be committed.
+# firestore.rules should be committed.
+# firestore.indexes.json should be committed.
+# assets/ should be committed.

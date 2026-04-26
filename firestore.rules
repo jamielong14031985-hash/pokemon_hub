@@ -1,0 +1,396 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function userExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function hasDob(uid) {
+      return userExists(uid) && userDoc(uid).data.dateOfBirthMs is int;
+    }
+
+    function dobDate(uid) {
+      return timestamp.value(userDoc(uid).data.dateOfBirthMs).date();
+    }
+
+    function isAdult(uid) {
+      return hasDob(uid) && (
+        (request.time.date().year() - dobDate(uid).year()) > 18 ||
+        (
+          (request.time.date().year() - dobDate(uid).year()) == 18 &&
+          (
+            request.time.date().month() > dobDate(uid).month() ||
+            (
+              request.time.date().month() == dobDate(uid).month() &&
+              request.time.date().day() >= dobDate(uid).day()
+            )
+          )
+        )
+      );
+    }
+
+    function canUseCommunity() {
+      return signedIn() && isAdult(request.auth.uid);
+    }
+
+    function areFriends(viewerUid, ownerUid) {
+      return
+        exists(/databases/$(database)/documents/users/$(ownerUid)/friends/$(viewerUid)) &&
+        exists(/databases/$(database)/documents/users/$(viewerUid)/friends/$(ownerUid));
+    }
+
+    function canViewSharedCollection(ownerUid) {
+      return signedIn() &&
+        (request.auth.uid == ownerUid || areFriends(request.auth.uid, ownerUid));
+    }
+
+    function friendRequestExists(fromUid, toUid) {
+      return exists(/databases/$(database)/documents/friend_requests/$(fromUid + "_to_" + toUid));
+    }
+
+    function friendRequestDoc(fromUid, toUid) {
+      return get(/databases/$(database)/documents/friend_requests/$(fromUid + "_to_" + toUid));
+    }
+
+    function pendingFriendRequestExists(fromUid, toUid) {
+      return friendRequestExists(fromUid, toUid) &&
+        friendRequestDoc(fromUid, toUid).data.status == "pending";
+    }
+
+    function acceptedFriendRequestExists(fromUid, toUid) {
+      return friendRequestExists(fromUid, toUid) &&
+        friendRequestDoc(fromUid, toUid).data.status == "accepted";
+    }
+
+    function hasPendingFriendRequestBetween(uidA, uidB) {
+      return pendingFriendRequestExists(uidA, uidB) ||
+        pendingFriendRequestExists(uidB, uidA);
+    }
+
+    function hasAcceptedFriendRequestBetween(uidA, uidB) {
+      return acceptedFriendRequestExists(uidA, uidB) ||
+        acceptedFriendRequestExists(uidB, uidA);
+    }
+
+    function pendingRequestRecipientIsCurrentUser(uidA, uidB) {
+      return
+        (
+          pendingFriendRequestExists(uidA, uidB) &&
+          friendRequestDoc(uidA, uidB).data.toUid == request.auth.uid
+        ) ||
+        (
+          pendingFriendRequestExists(uidB, uidA) &&
+          friendRequestDoc(uidB, uidA).data.toUid == request.auth.uid
+        );
+    }
+
+    function canCreateFriendDoc(userId, friendUid) {
+      return signedIn() &&
+        userExists(userId) &&
+        userExists(friendUid) &&
+        (
+          pendingRequestRecipientIsCurrentUser(userId, friendUid) ||
+          (
+            hasAcceptedFriendRequestBetween(userId, friendUid) &&
+            (request.auth.uid == userId || request.auth.uid == friendUid)
+          )
+        );
+    }
+
+    function twoAdultParticipants(participants) {
+      return participants is list &&
+        participants.size() == 2 &&
+        isAdult(participants[0]) &&
+        isAdult(participants[1]);
+    }
+
+    function validPrivateConversationData(data) {
+      return data.participants is list
+        && data.participants.size() == 2
+        && request.auth.uid in data.participants
+        && data.participantNames is map
+        && data.relatedPostId is string
+        && data.relatedPostTitle is string
+        && data.createdAtMs is int
+        && data.updatedAtMs is int
+        && data.lastMessage is string
+        && data.lastSenderId is string
+        && twoAdultParticipants(data.participants);
+    }
+
+    function validPrivateMessageData(data) {
+      return data.authorId == request.auth.uid
+        && data.authorName is string
+        && data.message is string
+        && data.createdAtMs is int;
+    }
+
+    function isChatMember(chatId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/chats/$(chatId))
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    function validChatData(data) {
+      return data.keys().hasOnly([
+          'participants',
+          'lastMessage',
+          'updatedAt'
+        ])
+        && data.participants is list
+        && data.participants.size() == 2
+        && request.auth.uid in data.participants
+        && data.lastMessage is string
+        && data.updatedAt is timestamp
+        && twoAdultParticipants(data.participants);
+    }
+
+    function validChatMessageData(data) {
+      return data.keys().hasOnly([
+          'senderId',
+          'text',
+          'createdAt'
+        ])
+        && data.senderId == request.auth.uid
+        && data.text is string
+        && data.text.size() > 0
+        && data.text.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+
+      allow create: if isSelf(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email is string
+        && request.resource.data.username is string
+        && request.resource.data.createdAtMs is int
+        && request.resource.data.updatedAtMs is int
+        && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int);
+
+      allow update: if isSelf(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email is string
+        && request.resource.data.username is string
+        && request.resource.data.createdAtMs is int
+        && request.resource.data.updatedAtMs is int
+        && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int);
+
+      allow delete: if false;
+
+      match /friends/{friendUid} {
+        allow read: if canViewSharedCollection(userId);
+
+        allow create: if canCreateFriendDoc(userId, friendUid)
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'sinceMs'])
+          && request.resource.data.uid == friendUid
+          && request.resource.data.username is string
+          && request.resource.data.sinceMs is int;
+
+        allow update: if isSelf(userId);
+        allow delete: if isSelf(userId);
+      }
+
+      match /wishlist/{cardId} {
+        allow read: if canViewSharedCollection(userId);
+        allow create, update, delete: if isSelf(userId);
+      }
+
+      match /pokedex_sets/{setId} {
+        allow read: if canViewSharedCollection(userId);
+        allow create, update, delete: if isSelf(userId);
+
+        match /cards/{cardId} {
+          allow read: if canViewSharedCollection(userId);
+          allow create, update, delete: if isSelf(userId);
+        }
+      }
+
+      match /community_private_conversations/{conversationId} {
+        allow read: if canUseCommunity()
+          && request.auth.uid == userId
+          && request.auth.uid in resource.data.participants
+          && twoAdultParticipants(resource.data.participants);
+
+        allow create: if canUseCommunity()
+          && userId in request.resource.data.participants
+          && validPrivateConversationData(request.resource.data);
+
+        allow update: if canUseCommunity()
+          && request.auth.uid in resource.data.participants
+          && userId in request.resource.data.participants
+          && validPrivateConversationData(request.resource.data);
+
+        allow delete: if false;
+
+        match /messages/{messageId} {
+          allow read: if canUseCommunity()
+            && exists(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId))
+            && request.auth.uid in get(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants
+            && twoAdultParticipants(get(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants);
+
+          allow create: if canUseCommunity()
+            && request.auth.uid in getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants
+            && userId in getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants
+            && twoAdultParticipants(getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants)
+            && validPrivateMessageData(request.resource.data);
+
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    match /friend_requests/{requestId} {
+      allow get: if signedIn()
+        && (
+          requestId.matches(request.auth.uid + "_to_.*") ||
+          requestId.matches(".*_to_" + request.auth.uid) ||
+          request.auth.uid == resource.data.fromUid ||
+          request.auth.uid == resource.data.toUid
+        );
+
+      allow list: if signedIn()
+        && (
+          request.auth.uid == resource.data.fromUid ||
+          request.auth.uid == resource.data.toUid
+        );
+
+      allow create: if signedIn()
+        && userExists(request.auth.uid)
+        && userExists(request.resource.data.toUid)
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.toUid != request.auth.uid
+        && request.resource.data.fromName is string
+        && request.resource.data.toName is string
+        && request.resource.data.status == "pending"
+        && request.resource.data.createdAtMs is int
+        && request.resource.data.updatedAtMs is int
+        && requestId == (request.resource.data.fromUid + "_to_" + request.resource.data.toUid)
+        && !areFriends(request.resource.data.fromUid, request.resource.data.toUid)
+        && !hasPendingFriendRequestBetween(request.resource.data.fromUid, request.resource.data.toUid)
+        && !hasAcceptedFriendRequestBetween(request.resource.data.fromUid, request.resource.data.toUid);
+
+      allow update: if signedIn()
+        && request.auth.uid == resource.data.toUid
+        && request.resource.data.fromUid == resource.data.fromUid
+        && request.resource.data.toUid == resource.data.toUid
+        && request.resource.data.fromName == resource.data.fromName
+        && request.resource.data.toName == resource.data.toName
+        && request.resource.data.createdAtMs == resource.data.createdAtMs
+        && request.resource.data.updatedAtMs is int
+        && (
+          request.resource.data.status == "accepted" ||
+          request.resource.data.status == "declined"
+        );
+
+      allow delete: if false;
+    }
+
+    match /community_posts/{postId} {
+      allow read: if canUseCommunity();
+
+      allow create: if canUseCommunity()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.authorName is string
+        && request.resource.data.postType is string
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.contact is string
+        && request.resource.data.createdAtMs is int;
+
+      allow update: if canUseCommunity()
+        && request.auth.uid == resource.data.authorId
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.createdAtMs == resource.data.createdAtMs;
+
+      allow delete: if canUseCommunity()
+        && request.auth.uid == resource.data.authorId;
+
+      match /replies/{replyId} {
+        allow read: if canUseCommunity();
+
+        allow create: if canUseCommunity()
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.authorName is string
+          && request.resource.data.message is string
+          && request.resource.data.createdAtMs is int;
+
+        allow update: if canUseCommunity()
+          && request.auth.uid == resource.data.authorId;
+
+        allow delete: if canUseCommunity()
+          && (
+            request.auth.uid == resource.data.authorId ||
+            request.auth.uid == get(/databases/$(database)/documents/community_posts/$(postId)).data.authorId
+          );
+      }
+    }
+
+    match /community_private_conversations/{conversationId} {
+      allow read: if canUseCommunity()
+        && request.auth.uid in resource.data.participants
+        && twoAdultParticipants(resource.data.participants);
+
+      allow create: if canUseCommunity()
+        && validPrivateConversationData(request.resource.data);
+
+      allow update: if canUseCommunity()
+        && request.auth.uid in resource.data.participants
+        && validPrivateConversationData(request.resource.data);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if canUseCommunity()
+          && exists(/databases/$(database)/documents/community_private_conversations/$(conversationId))
+          && request.auth.uid in get(/databases/$(database)/documents/community_private_conversations/$(conversationId)).data.participants
+          && twoAdultParticipants(get(/databases/$(database)/documents/community_private_conversations/$(conversationId)).data.participants);
+
+        allow create: if canUseCommunity()
+          && request.auth.uid in getAfter(/databases/$(database)/documents/community_private_conversations/$(conversationId)).data.participants
+          && twoAdultParticipants(getAfter(/databases/$(database)/documents/community_private_conversations/$(conversationId)).data.participants)
+          && validPrivateMessageData(request.resource.data);
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /chats/{chatId} {
+      allow read: if isChatMember(chatId);
+
+      allow create: if canUseCommunity()
+        && validChatData(request.resource.data);
+
+      allow update: if isChatMember(chatId)
+        && request.resource.data.participants == resource.data.participants
+        && validChatData(request.resource.data);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isChatMember(chatId);
+
+        allow create: if isChatMember(chatId)
+          && validChatMessageData(request.resource.data);
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}
