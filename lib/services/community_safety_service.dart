@@ -3,31 +3,70 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/app_user_profile.dart';
 import '../models/community_blocked_user.dart';
 
+const Duration _kFirebaseReadTimeout = Duration(seconds: 12);
+const Duration _kFirebaseWriteTimeout = Duration(seconds: 15);
+
+String _safeDisplayName(String value) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? 'Trainer' : trimmed;
+}
+
+String _safeText(String value, {required String fallback}) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? fallback : trimmed;
+}
+
 class CommunitySafetyService {
   static FirebaseFirestore get _db => FirebaseFirestore.instance;
 
   static CollectionReference<Map<String, dynamic>> get _reports =>
       _db.collection('community_reports');
 
-  static CollectionReference<Map<String, dynamic>> _blockedUsers(String ownerUid) =>
-      _db.collection('users').doc(ownerUid).collection('blocked_users');
+  static CollectionReference<Map<String, dynamic>> _blockedUsers(
+    String ownerUid,
+  ) =>
+      _db.collection('users').doc(ownerUid.trim()).collection('blocked_users');
 
-  static Stream<List<CommunityBlockedUser>> blockedUsersStream(String ownerUid) {
+  static CommunityBlockedUser? _safeBlockedUserFromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    try {
+      return CommunityBlockedUser.fromDoc(doc);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Stream<List<CommunityBlockedUser>> blockedUsersStream(
+    String ownerUid,
+  ) async* {
     final trimmedOwnerUid = ownerUid.trim();
     if (trimmedOwnerUid.isEmpty) {
-      return Stream<List<CommunityBlockedUser>>.value(const <CommunityBlockedUser>[]);
+      yield const <CommunityBlockedUser>[];
+      return;
     }
 
-    return _blockedUsers(trimmedOwnerUid).snapshots().map((snapshot) {
-      final items = snapshot.docs.map(CommunityBlockedUser.fromDoc).toList()
-        ..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
-      return items;
-    });
+    try {
+      await for (final snapshot in _blockedUsers(trimmedOwnerUid).snapshots()) {
+        final items = snapshot.docs
+            .map(_safeBlockedUserFromDoc)
+            .whereType<CommunityBlockedUser>()
+            .toList()
+          ..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
+
+        yield items;
+      }
+    } catch (_) {
+      yield const <CommunityBlockedUser>[];
+    }
   }
 
   static Stream<Set<String>> blockedUserIdsStream(String ownerUid) {
     return blockedUsersStream(ownerUid).map(
-      (items) => items.map((item) => item.blockedUid.trim()).where((uid) => uid.isNotEmpty).toSet(),
+      (items) => items
+          .map((item) => item.blockedUid.trim())
+          .where((uid) => uid.isNotEmpty)
+          .toSet(),
     );
   }
 
@@ -35,11 +74,18 @@ class CommunitySafetyService {
     final trimmedOwnerUid = ownerUid.trim();
     if (trimmedOwnerUid.isEmpty) return const <String>{};
 
-    final snapshot = await _blockedUsers(trimmedOwnerUid).get();
-    return snapshot.docs
-        .map((doc) => (doc.data()['blockedUid'] ?? doc.id).toString().trim())
-        .where((uid) => uid.isNotEmpty)
-        .toSet();
+    try {
+      final snapshot = await _blockedUsers(trimmedOwnerUid).get().timeout(
+            _kFirebaseReadTimeout,
+          );
+
+      return snapshot.docs
+          .map((doc) => (doc.data()['blockedUid'] ?? doc.id).toString().trim())
+          .where((uid) => uid.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return const <String>{};
+    }
   }
 
   static Future<bool> isBlocked({
@@ -48,9 +94,21 @@ class CommunitySafetyService {
   }) async {
     final trimmedOwnerUid = ownerUid.trim();
     final trimmedBlockedUid = blockedUid.trim();
-    if (trimmedOwnerUid.isEmpty || trimmedBlockedUid.isEmpty) return false;
-    final doc = await _blockedUsers(trimmedOwnerUid).doc(trimmedBlockedUid).get();
-    return doc.exists;
+
+    if (trimmedOwnerUid.isEmpty || trimmedBlockedUid.isEmpty) {
+      return false;
+    }
+
+    try {
+      final doc = await _blockedUsers(trimmedOwnerUid)
+          .doc(trimmedBlockedUid)
+          .get()
+          .timeout(_kFirebaseReadTimeout);
+
+      return doc.exists;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> blockUser({
@@ -61,23 +119,32 @@ class CommunitySafetyService {
   }) async {
     final ownerUid = currentProfile.uid.trim();
     final targetUid = blockedUid.trim();
+
     if (ownerUid.isEmpty || targetUid.isEmpty) {
       throw StateError('Missing user details.');
     }
+
     if (ownerUid == targetUid) {
       throw StateError('You cannot block yourself.');
     }
 
     final now = DateTime.now().millisecondsSinceEpoch;
-    await _blockedUsers(ownerUid).doc(targetUid).set({
-      'blockedUid': targetUid,
-      'blockedName': blockedName.trim().isEmpty ? 'Trainer' : blockedName.trim(),
-      'blockedByUid': ownerUid,
-      'blockedByName': currentProfile.displayName,
-      'source': source.trim().isEmpty ? 'community' : source.trim(),
-      'createdAtMs': now,
-      'updatedAtMs': now,
-    }, SetOptions(merge: true));
+
+    try {
+      await _blockedUsers(ownerUid).doc(targetUid).set({
+        'blockedUid': targetUid,
+        'blockedName': _safeDisplayName(blockedName),
+        'blockedByUid': ownerUid,
+        'blockedByName': _safeDisplayName(currentProfile.displayName),
+        'source': _safeText(source, fallback: 'community'),
+        'createdAtMs': now,
+        'updatedAtMs': now,
+      }, SetOptions(merge: true)).timeout(_kFirebaseWriteTimeout);
+    } catch (_) {
+      throw Exception(
+        'Could not block this user. Please check your connection and try again.',
+      );
+    }
   }
 
   static Future<void> unblockUser({
@@ -86,8 +153,19 @@ class CommunitySafetyService {
   }) async {
     final trimmedOwnerUid = ownerUid.trim();
     final trimmedBlockedUid = blockedUid.trim();
+
     if (trimmedOwnerUid.isEmpty || trimmedBlockedUid.isEmpty) return;
-    await _blockedUsers(trimmedOwnerUid).doc(trimmedBlockedUid).delete();
+
+    try {
+      await _blockedUsers(trimmedOwnerUid)
+          .doc(trimmedBlockedUid)
+          .delete()
+          .timeout(_kFirebaseWriteTimeout);
+    } catch (_) {
+      throw Exception(
+        'Could not unblock this user. Please check your connection and try again.',
+      );
+    }
   }
 
   static Future<void> submitReport({
@@ -102,31 +180,39 @@ class CommunitySafetyService {
   }) async {
     final reporterUid = currentProfile.uid.trim();
     final targetUid = reportedUid.trim();
-    final normalizedTargetType = targetType.trim().isEmpty ? 'unknown' : targetType.trim();
-    final normalizedReason = reason.trim().isEmpty ? 'Other' : reason.trim();
+    final normalizedTargetType = _safeText(targetType, fallback: 'unknown');
+    final normalizedReason = _safeText(reason, fallback: 'Other');
 
     if (reporterUid.isEmpty) {
       throw StateError('You need to be signed in to report this.');
     }
+
     if (targetUid.isNotEmpty && targetUid == reporterUid) {
       throw StateError('You cannot report yourself.');
     }
 
     final now = DateTime.now().millisecondsSinceEpoch;
-    await _reports.add({
-      'reporterUid': reporterUid,
-      'reporterName': currentProfile.displayName,
-      'reportedUid': targetUid,
-      'reportedName': reportedName.trim().isEmpty ? 'Trainer' : reportedName.trim(),
-      'targetType': normalizedTargetType,
-      'targetId': targetId.trim(),
-      'targetTitle': targetTitle.trim(),
-      'reason': normalizedReason,
-      'details': details.trim(),
-      'status': 'open',
-      'appArea': 'community',
-      'createdAtMs': now,
-      'updatedAtMs': now,
-    });
+
+    try {
+      await _reports.add({
+        'reporterUid': reporterUid,
+        'reporterName': _safeDisplayName(currentProfile.displayName),
+        'reportedUid': targetUid,
+        'reportedName': _safeDisplayName(reportedName),
+        'targetType': normalizedTargetType,
+        'targetId': targetId.trim(),
+        'targetTitle': targetTitle.trim(),
+        'reason': normalizedReason,
+        'details': details.trim(),
+        'status': 'open',
+        'appArea': 'community',
+        'createdAtMs': now,
+        'updatedAtMs': now,
+      }).timeout(_kFirebaseWriteTimeout);
+    } catch (_) {
+      throw Exception(
+        'Could not submit your report. Please check your connection and try again.',
+      );
+    }
   }
 }
