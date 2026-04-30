@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyC3NIffpuen34S0M43DiySxvtCpFiu4jnM',
-    appId: '1:161177907512:android:ef8efd6ebbc228089291cd',
+    appId: '1:161177907512:android:cca345667d77950d9291cd',
     messagingSenderId: '161177907512',
     projectId: 'cardmon-7dc24',
     storageBucket: 'cardmon-7dc24.firebasestorage.app',
@@ -66,3 +66,4 @@ class DefaultFirebaseOptions {
     iosBundleId: 'com.example.pokemonHub',
   );
 }
+

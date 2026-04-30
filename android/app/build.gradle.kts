@@ -8,12 +8,12 @@ plugins {
 }
 
 android {
-    namespace = "com.example.pokemon_hub"
+    namespace = "com.jamielong.pocketchase"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
-        applicationId = "com.example.pokemon_hub"
+        applicationId = "com.jamielong.pocketchase"
         minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = 36
         versionCode = flutter.versionCode
