@@ -98,6 +98,10 @@ class CardSearchPageState extends State<CardSearchPage> {
       return;
     }
 
+    if (mounted) {
+      setState(() {});
+    }
+
     _searchDebounce = Timer(_kCardSearchDebounce, _search);
   }
 
@@ -175,13 +179,22 @@ class CardSearchPageState extends State<CardSearchPage> {
           border: Border.all(
             color: selected ? const Color(0xFFF7DE77) : const Color(0xFF3F5C96),
           ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFFF7DE77).withValues(alpha: 0.18),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : null,
         ),
         child: Center(
           child: Text(
             label,
             style: TextStyle(
               color: selected ? Colors.black : const Color(0xFFE4ECFF),
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
               fontSize: 15,
             ),
           ),
@@ -193,8 +206,10 @@ class CardSearchPageState extends State<CardSearchPage> {
   Widget _buildSearchTopCard() {
     return Card(
       color: const Color(0xFF102754),
+      elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -215,6 +230,18 @@ class CardSearchPageState extends State<CardSearchPage> {
                 fillColor: const Color(0xFF0E2A5E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Color(0xFF3F5C96)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Color(0xFF3F5C96)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFF7DE77),
+                    width: 1.5,
+                  ),
                 ),
                 prefixIcon: IconButton(
                   tooltip: 'Search',
@@ -251,6 +278,17 @@ class CardSearchPageState extends State<CardSearchPage> {
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            Text(
+              _searchMode == CardSearchMode.cards
+                  ? 'Search by card name or collector number, like 4/102.'
+                  : 'Set search is cached after first load, so repeat searches should feel quicker.',
+              style: const TextStyle(
+                color: Color(0xFFAFC0E6),
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
           ],
         ),
       ),
@@ -258,75 +296,80 @@ class CardSearchPageState extends State<CardSearchPage> {
   }
 
   Widget _buildShortSearchMessage() {
-    return const Card(
-      color: Color(0xFF102754),
-      child: Padding(
-        padding: EdgeInsets.all(18),
-        child: Row(
-          children: [
-            Icon(Icons.keyboard, color: Color(0xFFF7DE77)),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Type at least 2 characters to search.',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const _SearchInfoCard(
+      icon: Icons.keyboard_alt_outlined,
+      title: 'Keep typing',
+      message: 'Type at least 2 characters to search, or use a collector number like 4/102.',
+      accent: Color(0xFFF7DE77),
     );
   }
 
-  Widget _buildLoadingMessage() {
-    return const Card(
-      color: Color(0xFF102754),
-      child: Padding(
-        padding: EdgeInsets.all(18),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Searching Pokémon TCG...',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-      ),
+  Widget _buildLoadingMessage(String query) {
+    final label = _searchMode == CardSearchMode.cards ? 'cards' : 'sets';
+
+    return _SearchLoadingCard(
+      title: 'Searching $label...',
+      message: 'Looking for “$query” in the Pokémon TCG database.',
     );
   }
 
   Widget _buildErrorMessage(Object? error) {
-    return const Card(
-      color: Color(0xFF5B1D28),
-      child: Padding(
-        padding: EdgeInsets.all(18),
-        child: Text(
-          'Could not load results. Please check your connection and try again.',
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
+    return const _SearchInfoCard(
+      icon: Icons.wifi_off_rounded,
+      title: 'Could not load results',
+      message: 'Check your connection and try again. If it keeps happening, the card database may be busy.',
+      accent: Color(0xFFE85D5D),
+      danger: true,
     );
   }
 
-  Widget _buildNoResultsMessage(String message) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Center(
-        child: Text(
-          message,
-          style: const TextStyle(color: Colors.white),
-        ),
+  Widget _buildNoResultsMessage({
+    required String query,
+    required bool searchingCards,
+  }) {
+    return _NoResultsCard(
+      query: query,
+      searchingCards: searchingCards,
+      onClear: _clearSearch,
+    );
+  }
+
+  Widget _buildResultsHeader({
+    required int count,
+    required bool cards,
+    required String query,
+  }) {
+    final label = cards ? 'card' : 'set';
+    final plural = count == 1 ? label : '${label}s';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$count $plural found',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Flexible(
+            child: Text(
+              query,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Color(0xFFF7DE77),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -351,26 +394,26 @@ class CardSearchPageState extends State<CardSearchPage> {
         } else if (!_canSearch(query)) {
           children.add(_buildShortSearchMessage());
         } else if (snapshot.connectionState == ConnectionState.waiting) {
-          children.add(_buildLoadingMessage());
+          children.add(_buildLoadingMessage(query));
         } else if (snapshot.hasError) {
           children.add(_buildErrorMessage(snapshot.error));
         } else if (_searchMode == CardSearchMode.cards) {
           if (cards.isEmpty) {
-            children.add(_buildNoResultsMessage('No cards found.'));
-          } else {
             children.add(
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 8),
-                child: Text(
-                  '${cards.length} card results',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              _buildNoResultsMessage(
+                query: query,
+                searchingCards: true,
               ),
             );
+          } else {
+            children.add(
+              _buildResultsHeader(
+                count: cards.length,
+                cards: true,
+                query: query,
+              ),
+            );
+            children.add(const SizedBox(height: 8));
 
             children.addAll(
               cards.map(
@@ -392,21 +435,21 @@ class CardSearchPageState extends State<CardSearchPage> {
           }
         } else {
           if (sets.isEmpty) {
-            children.add(_buildNoResultsMessage('No sets found.'));
-          } else {
             children.add(
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 8),
-                child: Text(
-                  '${sets.length} set results',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              _buildNoResultsMessage(
+                query: query,
+                searchingCards: false,
               ),
             );
+          } else {
+            children.add(
+              _buildResultsHeader(
+                count: sets.length,
+                cards: false,
+                query: query,
+              ),
+            );
+            children.add(const SizedBox(height: 8));
 
             children.addAll(
               sets.map(
@@ -425,6 +468,242 @@ class CardSearchPageState extends State<CardSearchPage> {
           children: children,
         );
       },
+    );
+  }
+}
+
+class _SearchLoadingCard extends StatelessWidget {
+  const _SearchLoadingCard({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: const Color(0xFF102754),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7DE77).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.26),
+                ),
+              ),
+              child: const Padding(
+                padding: EdgeInsets.all(11),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFF7DE77)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: Color(0xFFC8D4F0),
+                      fontSize: 12.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchInfoCard extends StatelessWidget {
+  const _SearchInfoCard({
+    required this.icon,
+    required this.title,
+    required this.message,
+    required this.accent,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final Color accent;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: danger ? const Color(0xFF5B1D28) : const Color(0xFF102754),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: accent.withValues(alpha: 0.24)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+                border: Border.all(color: accent.withValues(alpha: 0.28)),
+              ),
+              child: Icon(icon, color: accent, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: Color(0xFFE4ECFF),
+                      fontSize: 12.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoResultsCard extends StatelessWidget {
+  const _NoResultsCard({
+    required this.query,
+    required this.searchingCards,
+    required this.onClear,
+  });
+
+  final String query;
+  final bool searchingCards;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = searchingCards ? 'No cards found' : 'No sets found';
+    final message = searchingCards
+        ? 'Try a shorter card name, remove extra words, or search by collector number like 4/102.'
+        : 'Try a shorter set name, for example “Base”, “151”, “Obsidian”, or “Evolving”.';
+
+    return Card(
+      color: const Color(0xFF102754),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7DE77).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.26),
+                ),
+              ),
+              child: Icon(
+                searchingCards
+                    ? Icons.search_off_rounded
+                    : Icons.collections_bookmark_outlined,
+                color: const Color(0xFFF7DE77),
+                size: 30,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Nothing matched “$query”.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFC8D4F0),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onClear,
+              icon: const Icon(Icons.close_rounded),
+              label: const Text('Clear search'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0xFF3F5C96)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
