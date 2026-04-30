@@ -2,6 +2,19 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/community_private_models.dart';
 
+const Duration _kFirebaseReadTimeout = Duration(seconds: 12);
+const Duration _kFirebaseWriteTimeout = Duration(seconds: 15);
+
+String _safeText(String value, {String fallback = ''}) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? fallback : trimmed;
+}
+
+String _safeDisplayName(String value) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? 'Trainer' : trimmed;
+}
+
 String formatCommunityDate(DateTime dt) {
   final day = dt.day.toString().padLeft(2, '0');
   final month = dt.month.toString().padLeft(2, '0');
@@ -25,14 +38,33 @@ String communityConversationIdForPost({
   required String userAId,
   required String userBId,
 }) {
-  final ids = <String>[userAId, userBId]..sort();
-  final safePostId = postId.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-  return '${safePostId}_${ids.join('_')}';
+  final ids = <String>[
+    userAId.trim(),
+    userBId.trim(),
+  ].where((uid) => uid.isNotEmpty).toList()
+    ..sort();
+
+  final safePostId = postId
+      .trim()
+      .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+
+  if (safePostId.isEmpty || ids.length < 2) {
+    return '';
+  }
+
+  final safeUserPart = ids
+      .map((uid) => uid.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_'))
+      .join('_');
+
+  return '${safePostId}_$safeUserPart';
 }
 
-
-DocumentReference<Map<String, dynamic>> _communityPrivateConversationRef(String conversationId) =>
-    FirebaseFirestore.instance.collection('community_private_conversations').doc(conversationId);
+DocumentReference<Map<String, dynamic>> _communityPrivateConversationRef(
+  String conversationId,
+) =>
+    FirebaseFirestore.instance
+        .collection('community_private_conversations')
+        .doc(conversationId.trim());
 
 DocumentReference<Map<String, dynamic>> userCommunityPrivateConversationRef({
   required String ownerUid,
@@ -40,9 +72,9 @@ DocumentReference<Map<String, dynamic>> userCommunityPrivateConversationRef({
 }) =>
     FirebaseFirestore.instance
         .collection('users')
-        .doc(ownerUid)
+        .doc(ownerUid.trim())
         .collection('community_private_conversations')
-        .doc(conversationId);
+        .doc(conversationId.trim());
 
 Map<String, dynamic> _communityPrivateConversationData({
   required String currentUid,
@@ -56,18 +88,21 @@ Map<String, dynamic> _communityPrivateConversationData({
   required String lastMessage,
   required String lastSenderId,
 }) {
+  final safeCurrentUid = currentUid.trim();
+  final safeOtherUserId = otherUserId.trim();
+
   return <String, dynamic>{
-    'participants': <String>[currentUid, otherUserId],
+    'participants': <String>[safeCurrentUid, safeOtherUserId],
     'participantNames': <String, String>{
-      currentUid: currentUserName,
-      otherUserId: otherUserName,
+      safeCurrentUid: _safeDisplayName(currentUserName),
+      safeOtherUserId: _safeDisplayName(otherUserName),
     },
-    'relatedPostId': relatedPostId,
-    'relatedPostTitle': relatedPostTitle,
+    'relatedPostId': relatedPostId.trim(),
+    'relatedPostTitle': relatedPostTitle.trim(),
     'createdAtMs': createdAtMs,
     'updatedAtMs': updatedAtMs,
-    'lastMessage': lastMessage,
-    'lastSenderId': lastSenderId,
+    'lastMessage': lastMessage.trim(),
+    'lastSenderId': lastSenderId.trim(),
   };
 }
 
@@ -84,17 +119,21 @@ Future<void> syncCommunityPrivateConversation({
   String lastMessage = '',
   String lastSenderId = '',
 }) async {
-  if (conversationId.trim().isEmpty ||
-      currentUid.trim().isEmpty ||
-      otherUserId.trim().isEmpty ||
-      currentUid == otherUserId) {
+  final safeConversationId = conversationId.trim();
+  final safeCurrentUid = currentUid.trim();
+  final safeOtherUserId = otherUserId.trim();
+
+  if (safeConversationId.isEmpty ||
+      safeCurrentUid.isEmpty ||
+      safeOtherUserId.isEmpty ||
+      safeCurrentUid == safeOtherUserId) {
     return;
   }
 
   final data = _communityPrivateConversationData(
-    currentUid: currentUid,
+    currentUid: safeCurrentUid,
     currentUserName: currentUserName,
-    otherUserId: otherUserId,
+    otherUserId: safeOtherUserId,
     otherUserName: otherUserName,
     relatedPostId: relatedPostId,
     relatedPostTitle: relatedPostTitle,
@@ -105,18 +144,38 @@ Future<void> syncCommunityPrivateConversation({
   );
 
   final batch = FirebaseFirestore.instance.batch();
-  batch.set(_communityPrivateConversationRef(conversationId), data, SetOptions(merge: true));
+
   batch.set(
-    userCommunityPrivateConversationRef(ownerUid: currentUid, conversationId: conversationId),
+    _communityPrivateConversationRef(safeConversationId),
     data,
     SetOptions(merge: true),
   );
+
   batch.set(
-    userCommunityPrivateConversationRef(ownerUid: otherUserId, conversationId: conversationId),
+    userCommunityPrivateConversationRef(
+      ownerUid: safeCurrentUid,
+      conversationId: safeConversationId,
+    ),
     data,
     SetOptions(merge: true),
   );
-  await batch.commit();
+
+  batch.set(
+    userCommunityPrivateConversationRef(
+      ownerUid: safeOtherUserId,
+      conversationId: safeConversationId,
+    ),
+    data,
+    SetOptions(merge: true),
+  );
+
+  try {
+    await batch.commit().timeout(_kFirebaseWriteTimeout);
+  } catch (_) {
+    throw Exception(
+      'Could not sync this private conversation. Please check your connection and try again.',
+    );
+  }
 }
 
 Future<void> syncCommunityPrivateMessage({
@@ -129,17 +188,23 @@ Future<void> syncCommunityPrivateMessage({
   required String relatedPostTitle,
   required CommunityPrivateMessage message,
 }) async {
-  if (conversationId.trim().isEmpty ||
-      currentUid.trim().isEmpty ||
-      otherUserId.trim().isEmpty ||
-      currentUid == otherUserId) {
+  final safeConversationId = conversationId.trim();
+  final safeCurrentUid = currentUid.trim();
+  final safeOtherUserId = otherUserId.trim();
+  final safeMessageId = message.id.trim();
+
+  if (safeConversationId.isEmpty ||
+      safeCurrentUid.isEmpty ||
+      safeOtherUserId.isEmpty ||
+      safeMessageId.isEmpty ||
+      safeCurrentUid == safeOtherUserId) {
     return;
   }
 
   final conversationData = _communityPrivateConversationData(
-    currentUid: currentUid,
+    currentUid: safeCurrentUid,
     currentUserName: currentUserName,
-    otherUserId: otherUserId,
+    otherUserId: safeOtherUserId,
     otherUserName: otherUserName,
     relatedPostId: relatedPostId,
     relatedPostTitle: relatedPostTitle,
@@ -149,37 +214,59 @@ Future<void> syncCommunityPrivateMessage({
     lastSenderId: message.authorId,
   );
 
-  final messageData = message.toJson();
-  final sharedConversationRef = _communityPrivateConversationRef(conversationId);
-  final currentConversationRef = userCommunityPrivateConversationRef(
-    ownerUid: currentUid,
-    conversationId: conversationId,
+  final messageData = <String, dynamic>{
+    ...message.toJson(),
+    'id': safeMessageId,
+    'message': _safeText(message.message),
+    'authorId': message.authorId.trim(),
+    'authorName': _safeDisplayName(message.authorName),
+  };
+
+  final sharedConversationRef = _communityPrivateConversationRef(
+    safeConversationId,
   );
+
+  final currentConversationRef = userCommunityPrivateConversationRef(
+    ownerUid: safeCurrentUid,
+    conversationId: safeConversationId,
+  );
+
   final otherConversationRef = userCommunityPrivateConversationRef(
-    ownerUid: otherUserId,
-    conversationId: conversationId,
+    ownerUid: safeOtherUserId,
+    conversationId: safeConversationId,
   );
 
   final batch = FirebaseFirestore.instance.batch();
+
   batch.set(sharedConversationRef, conversationData, SetOptions(merge: true));
   batch.set(currentConversationRef, conversationData, SetOptions(merge: true));
   batch.set(otherConversationRef, conversationData, SetOptions(merge: true));
+
   batch.set(
-    sharedConversationRef.collection('messages').doc(message.id),
+    sharedConversationRef.collection('messages').doc(safeMessageId),
     messageData,
     SetOptions(merge: true),
   );
+
   batch.set(
-    currentConversationRef.collection('messages').doc(message.id),
+    currentConversationRef.collection('messages').doc(safeMessageId),
     messageData,
     SetOptions(merge: true),
   );
+
   batch.set(
-    otherConversationRef.collection('messages').doc(message.id),
+    otherConversationRef.collection('messages').doc(safeMessageId),
     messageData,
     SetOptions(merge: true),
   );
-  await batch.commit();
+
+  try {
+    await batch.commit().timeout(_kFirebaseWriteTimeout);
+  } catch (_) {
+    throw Exception(
+      'Could not send this private message. Please check your connection and try again.',
+    );
+  }
 }
 
 Future<void> deleteCommunityPrivateConversationForUser({
@@ -188,6 +275,7 @@ Future<void> deleteCommunityPrivateConversationForUser({
 }) async {
   final trimmedOwnerUid = ownerUid.trim();
   final trimmedConversationId = conversationId.trim();
+
   if (trimmedOwnerUid.isEmpty || trimmedConversationId.isEmpty) return;
 
   final conversationRef = userCommunityPrivateConversationRef(
@@ -195,16 +283,28 @@ Future<void> deleteCommunityPrivateConversationForUser({
     conversationId: trimmedConversationId,
   );
 
-  while (true) {
-    final messagesSnapshot = await conversationRef.collection('messages').limit(400).get();
-    if (messagesSnapshot.docs.isEmpty) break;
+  try {
+    while (true) {
+      final messagesSnapshot = await conversationRef
+          .collection('messages')
+          .limit(400)
+          .get()
+          .timeout(_kFirebaseReadTimeout);
 
-    final batch = FirebaseFirestore.instance.batch();
-    for (final messageDoc in messagesSnapshot.docs) {
-      batch.delete(messageDoc.reference);
+      if (messagesSnapshot.docs.isEmpty) break;
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final messageDoc in messagesSnapshot.docs) {
+        batch.delete(messageDoc.reference);
+      }
+
+      await batch.commit().timeout(_kFirebaseWriteTimeout);
     }
-    await batch.commit();
-  }
 
-  await conversationRef.delete();
+    await conversationRef.delete().timeout(_kFirebaseWriteTimeout);
+  } catch (_) {
+    throw Exception(
+      'Could not delete this private conversation. Please check your connection and try again.',
+    );
+  }
 }
