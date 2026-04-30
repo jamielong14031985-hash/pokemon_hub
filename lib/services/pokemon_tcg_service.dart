@@ -39,6 +39,9 @@ class PokemonTcgService {
   static final Map<String, Future<TcgSet?>> _setByIdInFlight =
       <String, Future<TcgSet?>>{};
 
+  static List<TcgSet>? _allSetsCache;
+  static Future<List<TcgSet>>? _allSetsInFlight;
+
   static Future<CardSearchResult> searchCardsAndSets(String query) async {
     final results = await Future.wait<dynamic>([
       searchCardsOnly(query),
@@ -316,63 +319,57 @@ class PokemonTcgService {
       return const <TcgSet>[];
     }
 
-    final terms = cleanQuery
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
+    final normalizedQuery = _normalizeSearchMatchText(cleanQuery);
+    final queryWords = normalizedQuery
+        .split(' ')
+        .where((word) => word.isNotEmpty)
         .toList();
-    if (terms.isEmpty) return const <TcgSet>[];
 
-    final escapedTerms = terms.map(_escapeTcgQueryValue).toList();
-    final exactPrefixSearch = escapedTerms
-        .map((term) => 'name:$term*')
-        .join(' AND ');
-    final broadSearch = escapedTerms
-        .map((term) => 'name:*$term*')
-        .join(' AND ');
-
-    final setsById = <String, TcgSet>{};
-
-    Future<void> fetchSets(String setSearch, {int maxPages = _kFastSetSearchMaxPages}) async {
-      var page = 1;
-      while (true) {
-        final uri = Uri.parse(
-          '$_baseUrl/sets?q=$setSearch&pageSize=100&page=$page&orderBy=releaseDate',
-        );
-        final response = await http.get(uri);
-        if (response.statusCode != 200) {
-          throw Exception('HTTP ${response.statusCode}');
-        }
-
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final items = (data['data'] as List<dynamic>? ?? const []);
-        if (items.isEmpty) break;
-
-        for (final item in items) {
-          final set = TcgSet.fromJson(item as Map<String, dynamic>);
-          setsById.putIfAbsent(set.id, () => set);
-        }
-
-        if (items.length < 100 || page >= maxPages) break;
-        page++;
-      }
+    if (normalizedQuery.isEmpty || queryWords.isEmpty) {
+      return const <TcgSet>[];
     }
 
-    await fetchSets(exactPrefixSearch);
-    if (setsById.isEmpty) {
-      await fetchSets(broadSearch);
-    }
+    final allSets = await fetchSets();
 
-    final sets = setsById.values.toList()
+    final sets = allSets
+        .where(
+          (set) => _doesLocalSetMatch(
+            set: set,
+            normalizedQuery: normalizedQuery,
+            queryWords: queryWords,
+          ),
+        )
+        .toList()
       ..sort((a, b) => _compareSetSearchResults(a, b, cleanQuery));
 
     final prefixMatches = sets
         .where((set) => _matchesSetPrefixSearch(set, cleanQuery))
         .toList();
+
     if (prefixMatches.isNotEmpty) {
-      return prefixMatches;
+      return prefixMatches.take(80).toList();
     }
 
-    return sets;
+    return sets.take(80).toList();
+  }
+
+  static bool _doesLocalSetMatch({
+    required TcgSet set,
+    required String normalizedQuery,
+    required List<String> queryWords,
+  }) {
+    final normalizedName = _normalizeSearchMatchText(set.name);
+    final normalizedId = _normalizeSearchMatchText(set.id);
+
+    if (normalizedName.isEmpty) return false;
+
+    if (normalizedName == normalizedQuery) return true;
+    if (normalizedName.startsWith(normalizedQuery)) return true;
+    if (normalizedName.contains(normalizedQuery)) return true;
+
+    return queryWords.every(
+      (word) => normalizedName.contains(word) || normalizedId.contains(word),
+    );
   }
 
   static String _escapeTcgQueryValue(String value) {
@@ -1968,7 +1965,46 @@ class PokemonTcgService {
     return 1 - (distance / math.max(a.length, b.length));
   }
 
-  static Future<List<TcgSet>> fetchSets() async {
+  static Future<List<TcgSet>> fetchSets({bool forceRefresh = false}) async {
+    if (!forceRefresh) {
+      final cachedSets = _allSetsCache;
+      if (cachedSets != null) {
+        return List<TcgSet>.from(cachedSets);
+      }
+
+      final inFlightRequest = _allSetsInFlight;
+      if (inFlightRequest != null) {
+        final sets = await inFlightRequest;
+        return List<TcgSet>.from(sets);
+      }
+    }
+
+    final request = _fetchAllSetsFromApi();
+
+    if (!forceRefresh) {
+      _allSetsInFlight = request;
+    }
+
+    try {
+      final sets = await request;
+      _allSetsCache = List<TcgSet>.from(sets);
+      return List<TcgSet>.from(sets);
+    } finally {
+      if (!forceRefresh) {
+        _allSetsInFlight = null;
+      }
+    }
+  }
+
+  static Future<void> warmSetSearchCache() async {
+    try {
+      await fetchSets();
+    } catch (_) {
+      // Ignore preloading errors. The normal search error UI will handle it later.
+    }
+  }
+
+  static Future<List<TcgSet>> _fetchAllSetsFromApi() async {
     final allSets = <TcgSet>[];
     int page = 1;
 
