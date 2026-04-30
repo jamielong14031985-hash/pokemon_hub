@@ -1,5 +1,5 @@
 name: pokemon_hub_flutter
-description: PocketDex Flutter app
+description: PocketChase app
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -22,6 +22,7 @@ dependencies:
   camera: ^0.12.0+1
   image: ^4.2.0
   cloud_functions: ^6.2.0
+  firebase_storage: ^13.3.0
 
 dev_dependencies:
   flutter_lints: ^6.0.0
@@ -33,14 +34,13 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/pocketdex_icon.png
-    - assets/pocketdex_header_logo.png
+    - assets/images/
 
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/pocketdex_icon.png"
+  image_path: assets/images/pocketdex_icon.png
   adaptive_icon_background: "#FFD21F"
-  adaptive_icon_foreground: "assets/pocketdex_icon.png"
+  adaptive_icon_foreground: assets/images/pocketdex_icon.png
   remove_alpha_ios: true
   min_sdk_android: 21

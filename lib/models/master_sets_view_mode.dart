@@ -1,0 +1,4 @@
+enum MasterSetsViewMode {
+  setPokedex,
+  customBinders,
+}

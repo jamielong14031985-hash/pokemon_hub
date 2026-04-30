@@ -1,0 +1,480 @@
+import 'package:flutter/material.dart';
+
+import '../models/app_user_profile.dart';
+import '../models/community_models.dart';
+import '../models/community_post_menu_action.dart';
+import '../pages/social_pages.dart';
+import '../utils/community_market_helpers.dart';
+import '../utils/community_private_helpers.dart';
+import 'community_image_widgets.dart';
+import 'community_new_badge.dart';
+import 'community_seller_trust_widgets.dart';
+import 'community_user_avatar.dart';
+import 'friend_action_button.dart';
+import 'marketplace_listing_snapshot.dart';
+import 'trade_safety_panel.dart';
+
+class CommunityPostCard extends StatelessWidget {
+  const CommunityPostCard({
+    super.key,
+    required this.post,
+    required this.currentProfile,
+    required this.canEdit,
+    required this.canMessage,
+    required this.isNew,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onMessage,
+    required this.onOpen,
+    this.onAuthorTap,
+    this.onReport,
+    this.onBlock,
+    this.onSetMarketStatus,
+    this.onBump,
+  });
+
+  final CommunityPost post;
+  final AppUserProfile currentProfile;
+  final bool canEdit;
+  final bool canMessage;
+  final bool isNew;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final VoidCallback onMessage;
+  final VoidCallback onOpen;
+  final VoidCallback? onAuthorTap;
+  final VoidCallback? onReport;
+  final VoidCallback? onBlock;
+  final ValueChanged<String>? onSetMarketStatus;
+  final VoidCallback? onBump;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDiscussion = post.isDiscussion;
+    final accentColor = communityPostAccentColor(post);
+    final canManageListing = canEdit && post.isMarketplace && onSetMarketStatus != null;
+
+    void handleMenuAction(CommunityPostMenuAction value) {
+      switch (value) {
+        case CommunityPostMenuAction.edit:
+          onEdit();
+          break;
+        case CommunityPostMenuAction.available:
+          onSetMarketStatus?.call('Available');
+          break;
+        case CommunityPostMenuAction.pending:
+          onSetMarketStatus?.call('Pending');
+          break;
+        case CommunityPostMenuAction.sold:
+          onSetMarketStatus?.call('Sold');
+          break;
+        case CommunityPostMenuAction.traded:
+          onSetMarketStatus?.call('Traded');
+          break;
+        case CommunityPostMenuAction.found:
+          onSetMarketStatus?.call('Found');
+          break;
+        case CommunityPostMenuAction.bump:
+          onBump?.call();
+          break;
+        case CommunityPostMenuAction.report:
+          onReport?.call();
+          break;
+        case CommunityPostMenuAction.block:
+          onBlock?.call();
+          break;
+        case CommunityPostMenuAction.delete:
+          onDelete();
+          break;
+      }
+    }
+
+    List<PopupMenuEntry<CommunityPostMenuAction>> buildMenuItems() {
+      final items = <PopupMenuEntry<CommunityPostMenuAction>>[];
+
+      if (canEdit) {
+        items.add(
+          const PopupMenuItem<CommunityPostMenuAction>(
+            value: CommunityPostMenuAction.edit,
+            child: Row(
+              children: [
+                Icon(Icons.edit_outlined, color: Color(0xFFF7DE77)),
+                SizedBox(width: 10),
+                Text(
+                  'Edit post',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        if (canManageListing) {
+          items.addAll([
+            const PopupMenuDivider(),
+            const PopupMenuItem<CommunityPostMenuAction>(
+              value: CommunityPostMenuAction.available,
+              child: Row(
+                children: [
+                  Icon(Icons.storefront_outlined, color: Colors.lightBlueAccent),
+                  SizedBox(width: 10),
+                  Text(
+                    'Mark available',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuItem<CommunityPostMenuAction>(
+              value: CommunityPostMenuAction.pending,
+              child: Row(
+                children: [
+                  Icon(Icons.schedule_outlined, color: Color(0xFFF0A83A)),
+                  SizedBox(width: 10),
+                  Text(
+                    'Mark pending',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+            PopupMenuItem<CommunityPostMenuAction>(
+              value: post.isForSale
+                  ? CommunityPostMenuAction.sold
+                  : post.isWanted
+                      ? CommunityPostMenuAction.found
+                      : CommunityPostMenuAction.traded,
+              child: Row(
+                children: [
+                  Icon(
+                    post.isForSale
+                        ? Icons.check_circle_outline_rounded
+                        : post.isWanted
+                            ? Icons.task_alt_rounded
+                            : Icons.swap_horiz_rounded,
+                    color: post.isForSale ? Colors.redAccent : const Color(0xFF54D39A),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    post.isForSale
+                        ? 'Mark sold'
+                        : post.isWanted
+                            ? 'Mark found'
+                            : 'Mark traded',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuItem<CommunityPostMenuAction>(
+              value: CommunityPostMenuAction.bump,
+              child: Row(
+                children: [
+                  Icon(Icons.north_rounded, color: Color(0xFFF7DE77)),
+                  SizedBox(width: 10),
+                  Text(
+                    'Bump listing',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ]);
+        }
+
+        items.addAll(const [
+          PopupMenuDivider(),
+          PopupMenuItem<CommunityPostMenuAction>(
+            value: CommunityPostMenuAction.delete,
+            child: Row(
+              children: [
+                Icon(Icons.delete_outline, color: Colors.redAccent),
+                SizedBox(width: 10),
+                Text(
+                  'Delete post',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ]);
+      } else {
+        if (onReport != null) {
+          items.add(
+            const PopupMenuItem<CommunityPostMenuAction>(
+              value: CommunityPostMenuAction.report,
+              child: Row(
+                children: [
+                  Icon(Icons.flag_outlined, color: Color(0xFFF7DE77)),
+                  SizedBox(width: 10),
+                  Text(
+                    'Report post',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (onBlock != null) {
+          items.add(
+            const PopupMenuItem<CommunityPostMenuAction>(
+              value: CommunityPostMenuAction.block,
+              child: Row(
+                children: [
+                  Icon(Icons.block_outlined, color: Colors.redAccent),
+                  SizedBox(width: 10),
+                  Text(
+                    'Block member',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      }
+
+      return items;
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isNew
+              ? const Color(0xFFF7DE77).withValues(alpha: 0.34)
+              : Colors.white.withValues(alpha: 0.07),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onOpen,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 5,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      accentColor,
+                      const Color(0xFF143163),
+                    ],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CommunityUserAvatar(
+                          userId: post.authorId,
+                          displayName: post.authorName,
+                          size: 36,
+                          onTap: onAuthorTap,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      post.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w900,
+                                        height: 1.15,
+                                      ),
+                                    ),
+                                  ),
+                                  if (isNew) ...[
+                                    const SizedBox(width: 6),
+                                    const CommunityNewBadge(compact: true),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${post.authorName} • ${formatCommunityRelativeTime(post.createdAt)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (post.isMarketplace) ...[
+                                const SizedBox(height: 5),
+                                CommunitySellerRatingBadge(
+                                  sellerId: post.authorId,
+                                  compact: true,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (canEdit || onReport != null || onBlock != null)
+                          SizedBox(
+                            width: 34,
+                            height: 34,
+                            child: PopupMenuButton<CommunityPostMenuAction>(
+                              padding: EdgeInsets.zero,
+                              iconSize: 20,
+                              iconColor: Colors.white70,
+                              color: const Color(0xFF143163),
+                              onSelected: handleMenuAction,
+                              itemBuilder: (_) => buildMenuItems(),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (post.hasImages) ...[
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: CommunityImageStrip(
+                          imageBase64List: post.imageBase64List,
+                          height: 112,
+                        ),
+                      ),
+                    ],
+                    if (post.isMarketplace) ...[
+                      const SizedBox(height: 9),
+                      MarketplaceListingSnapshot(post: post),
+                    ],
+                    if (post.description.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        post.description.trim(),
+                        maxLines: post.isMarketplace ? 2 : 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFD8E3FB),
+                          fontSize: 13,
+                          height: 1.32,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (post.isMarketplace) ...[
+                      const SizedBox(height: 8),
+                      TradeSafetyPanel(
+                        post: post,
+                        compact: true,
+                        showGuideButton: false,
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onOpen,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                              backgroundColor: const Color(0xFF16366E),
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: const Icon(Icons.forum_outlined, size: 17),
+                            label: Text(
+                              isDiscussion ? 'Open' : 'Thread',
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
+                        if (canMessage) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: onMessage,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFF7DE77),
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: const Icon(Icons.mail_outline_rounded, size: 17),
+                              label: const Text(
+                                'Message',
+                                style: TextStyle(fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (canMessage) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FriendActionButton(
+                          currentProfile: currentProfile,
+                          otherUserId: post.authorId,
+                          otherUserName: post.authorName,
+                          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                          onOpenFriendProfile: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => FriendProfilePage(
+                                  currentProfile: currentProfile,
+                                  friendUid: post.authorId,
+                                  friendName: post.authorName,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

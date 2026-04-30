@@ -1,0 +1,4 @@
+enum CardSearchMode {
+  cards,
+  sets,
+}

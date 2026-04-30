@@ -1,0 +1,1242 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../models/app_user_profile.dart';
+import '../models/community_models.dart';
+import '../services/community_image_services.dart';
+import '../services/community_safety_service.dart';
+import '../services/local_image_store.dart';
+import '../services/user_profile_service.dart';
+import '../utils/community_dialog_helpers.dart';
+import '../utils/community_market_helpers.dart';
+import '../widgets/community_image_widgets.dart';
+import '../widgets/community_info_row.dart';
+import '../widgets/community_meta_chip.dart';
+import '../widgets/community_seller_trust_widgets.dart';
+import '../widgets/community_user_avatar.dart';
+import '../widgets/friend_action_button.dart';
+import '../widgets/stored_image.dart';
+import '../widgets/trade_safety_panel.dart';
+import 'social_pages.dart';
+
+class CommunityPostThreadPage extends StatefulWidget {
+  const CommunityPostThreadPage({
+    super.key,
+    required this.post,
+    required this.currentProfile,
+  });
+
+  final CommunityPost post;
+  final AppUserProfile currentProfile;
+
+  @override
+  State<CommunityPostThreadPage> createState() => _CommunityPostThreadPageState();
+}
+
+class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
+  final TextEditingController _replyController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  StreamSubscription<Set<String>>? _blockedUsersSub;
+  Set<String> _blockedUserIds = <String>{};
+  bool _sending = false;
+  bool _pendingScrollToLatestReply = false;
+  String? _replyImageBase64;
+
+  DocumentReference<Map<String, dynamic>> get _postRef =>
+      FirebaseFirestore.instance.collection('community_posts').doc(widget.post.id);
+
+  CollectionReference<Map<String, dynamic>> get _repliesRef => _postRef.collection('replies');
+
+  @override
+  void initState() {
+    super.initState();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    _blockedUsersSub = CommunitySafetyService.blockedUserIdsStream(currentUid).listen((blockedUserIds) {
+      if (!mounted) return;
+      setState(() {
+        _blockedUserIds = blockedUserIds;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _blockedUsersSub?.cancel();
+    _replyController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _requestScrollToLatestReply() {
+    _pendingScrollToLatestReply = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollRepliesToLatest();
+    });
+    Future<void>.delayed(const Duration(milliseconds: 140), () {
+      if (!mounted) return;
+      _scrollRepliesToLatest();
+    });
+  }
+
+  void _scrollRepliesToLatest() {
+    if (!_scrollController.hasClients) return;
+    final target = _scrollController.position.maxScrollExtent;
+    _pendingScrollToLatestReply = false;
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Future<String?> _currentProfileImageBase64ForCommunity() async {
+    final sharedImage = widget.currentProfile.profileImageBase64?.trim() ?? '';
+    if (sharedImage.isNotEmpty) {
+      return sharedImage;
+    }
+
+    try {
+      final localImagePath = await LocalProfileImageStore.loadForUser(widget.currentProfile.uid);
+      if (localImagePath == null || localImagePath.trim().isEmpty) {
+        return null;
+      }
+
+      final imageRef = await CommunityImageCodec.storeFileForFirestore(
+        localImagePath,
+        storageFolder: 'profile_images',
+      );
+      await UserProfileService.updateProfileImageBase64(
+        uid: widget.currentProfile.uid,
+        imageBase64: imageRef,
+      );
+      return imageRef;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _pickReplyImage() async {
+    if (_sending) return;
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFF102754),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined, color: Colors.white),
+                title: const Text(
+                  'Take photo',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onTap: () => Navigator.of(sheetContext).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: Colors.white),
+                title: const Text(
+                  'Choose from gallery',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onTap: () => Navigator.of(sheetContext).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (source == null) return;
+
+    try {
+      final encoded = await CommunityImageCodec.pickAndEncodeSingle(source);
+      if (encoded == null || !mounted) return;
+      setState(() {
+        _replyImageBase64 = encoded;
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not add photo right now.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _addReply() async {
+    final message = _replyController.text.trim();
+    final imageBase64 = _replyImageBase64?.trim();
+    if ((message.isEmpty && (imageBase64 == null || imageBase64.isEmpty)) || _sending) {
+      return;
+    }
+
+    setState(() {
+      _sending = true;
+    });
+
+    try {
+      final replyDoc = _repliesRef.doc();
+      final authorProfileImageBase64 = await _currentProfileImageBase64ForCommunity();
+      await replyDoc.set(
+        CommunityReply(
+          id: replyDoc.id,
+          authorId: FirebaseAuth.instance.currentUser!.uid,
+          authorName: widget.currentProfile.displayName,
+          message: message,
+          createdAtMs: DateTime.now().millisecondsSinceEpoch,
+          imageBase64: imageBase64,
+          authorProfileImageBase64: authorProfileImageBase64,
+        ).toJson(),
+      );
+      _replyController.clear();
+      if (mounted) {
+        setState(() {
+          _replyImageBase64 = null;
+        });
+      }
+      _requestScrollToLatestReply();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not send reply')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sending = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _deleteReply(CommunityReply reply) async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) {
+      _showThreadMessage('You need to be signed in to delete comments.');
+      return;
+    }
+
+    try {
+      if (currentUid == reply.authorId) {
+        await _repliesRef.doc(reply.id).delete();
+        unawaited(FirebaseImageStorageService.deleteByDownloadUrl(reply.imageBase64));
+      } else if (currentUid == widget.post.authorId) {
+        await _postRef.set(
+          {
+            'hiddenReplyIds': FieldValue.arrayUnion([reply.id]),
+          },
+          SetOptions(merge: true),
+        );
+      } else {
+        _showThreadMessage('Only the comment author or post owner can delete comments.');
+        return;
+      }
+      _showThreadMessage('Comment deleted.');
+    } on FirebaseException catch (error) {
+      _showThreadMessage(error.message ?? 'Could not delete comment.');
+    } catch (_) {
+      _showThreadMessage('Could not delete comment.');
+    }
+  }
+
+  Future<void> _openReplyMemberSheet({
+    required CommunityReply reply,
+    required CommunityPost livePost,
+  }) async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    final replyAuthorId = reply.authorId.trim();
+    final replyAuthorName = reply.authorName.trim().isEmpty ? 'Trainer' : reply.authorName.trim();
+    final canDelete = currentUid == reply.authorId || currentUid == livePost.authorId;
+    final canAddFriend = replyAuthorId.isNotEmpty && replyAuthorId != currentUid;
+
+    if (!canDelete && !canAddFriend) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF102754),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 48,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  replyAuthorName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Choose an action for this reply.',
+                  style: TextStyle(
+                    color: Color(0xFFC8D4F0),
+                    fontSize: 14,
+                    height: 1.35,
+                  ),
+                ),
+                if (canAddFriend) ...[
+                  const SizedBox(height: 16),
+                  CommunitySellerTrustPanel(
+                    sellerId: replyAuthorId,
+                    sellerName: replyAuthorName,
+                    compact: true,
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(sheetContext).pop();
+                      _openMemberRatingSheet(
+                        memberId: replyAuthorId,
+                        memberName: replyAuthorName,
+                        livePost: livePost,
+                      );
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: const Color(0xFFF7DE77),
+                      foregroundColor: Colors.black,
+                    ),
+                    icon: const Icon(Icons.star_outline_rounded),
+                    label: const Text(
+                      'Rate this member',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  FriendActionButton(
+                    currentProfile: widget.currentProfile,
+                    otherUserId: replyAuthorId,
+                    otherUserName: replyAuthorName,
+                    onOpenFriendProfile: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => FriendProfilePage(
+                            currentProfile: widget.currentProfile,
+                            friendUid: replyAuthorId,
+                            friendName: replyAuthorName,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(sheetContext).pop();
+                      _reportReply(reply: reply, livePost: livePost);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0xFF3F5C96)),
+                    ),
+                    icon: const Icon(Icons.flag_outlined),
+                    label: const Text(
+                      'Report reply',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(sheetContext).pop();
+                      _blockCommunityMember(
+                        memberId: replyAuthorId,
+                        memberName: replyAuthorName,
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      foregroundColor: const Color(0xFFFFCDD2),
+                      side: const BorderSide(color: Color(0xFFB13B59)),
+                    ),
+                    icon: const Icon(Icons.block_outlined),
+                    label: const Text(
+                      'Block member',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+                if (canDelete) ...[
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(sheetContext).pop();
+                      _deleteReply(reply);
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: const Color(0xFFB13B59),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text(
+                      'Delete message',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openSellerRatingSheet(CommunityPost livePost) async {
+    final sellerId = livePost.authorId.trim();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    if (sellerId.isEmpty) {
+      _showThreadMessage('This member cannot be rated right now.');
+      return;
+    }
+    if (sellerId == currentUid) {
+      _showThreadMessage('You cannot rate yourself.');
+      return;
+    }
+
+    final saved = await showCommunityRatingSheet(
+      context: context,
+      currentProfile: widget.currentProfile,
+      sellerId: sellerId,
+      sellerName: livePost.authorName,
+      sourcePostId: livePost.id,
+      sourcePostTitle: livePost.title,
+    );
+    if (saved == true) {
+      _showThreadMessage('Rating saved.');
+    }
+  }
+
+  Future<void> _openMemberRatingSheet({
+    required String memberId,
+    required String memberName,
+    required CommunityPost livePost,
+  }) async {
+    final trimmedMemberId = memberId.trim();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    if (trimmedMemberId.isEmpty) {
+      _showThreadMessage('This member cannot be rated right now.');
+      return;
+    }
+    if (trimmedMemberId == currentUid) {
+      _showThreadMessage('You cannot rate yourself.');
+      return;
+    }
+
+    final saved = await showCommunityRatingSheet(
+      context: context,
+      currentProfile: widget.currentProfile,
+      sellerId: trimmedMemberId,
+      sellerName: memberName,
+      sourcePostId: livePost.id,
+      sourcePostTitle: livePost.title,
+    );
+    if (saved == true) {
+      _showThreadMessage('Rating saved.');
+    }
+  }
+
+  Future<void> _reportPost(CommunityPost livePost) async {
+    await showCommunityReportSheet(
+      context: context,
+      currentProfile: widget.currentProfile,
+      reportedUid: livePost.authorId,
+      reportedName: livePost.authorName,
+      targetType: 'post',
+      targetId: livePost.id,
+      targetTitle: livePost.title,
+    );
+  }
+
+  Future<void> _reportReply({
+    required CommunityReply reply,
+    required CommunityPost livePost,
+  }) async {
+    await showCommunityReportSheet(
+      context: context,
+      currentProfile: widget.currentProfile,
+      reportedUid: reply.authorId,
+      reportedName: reply.authorName,
+      targetType: 'reply',
+      targetId: reply.id,
+      targetTitle: livePost.title,
+    );
+  }
+
+  Future<void> _blockCommunityMember({
+    required String memberId,
+    required String memberName,
+  }) async {
+    final blocked = await confirmBlockCommunityUser(
+      context: context,
+      currentProfile: widget.currentProfile,
+      blockedUid: memberId,
+      blockedName: memberName,
+      source: 'community_thread',
+    );
+    if (blocked && mounted) {
+      setState(() {
+        _blockedUserIds = <String>{..._blockedUserIds, memberId.trim()};
+      });
+    }
+  }
+
+  void _showThreadMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _updateMarketStatus(CommunityPost livePost, String status) async {
+    if (!livePost.isMarketplace) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    try {
+      await _postRef.set(
+        <String, dynamic>{
+          'marketStatus': normalizeCommunityMarketStatus(status),
+          'updatedAtMs': now,
+        },
+        SetOptions(merge: true),
+      );
+      _showThreadMessage('Listing marked as ${normalizeCommunityMarketStatus(status)}.');
+    } catch (_) {
+      _showThreadMessage('Could not update listing status.');
+    }
+  }
+
+  Future<void> _bumpListing() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    try {
+      await _postRef.set(
+        <String, dynamic>{
+          'lastBumpedAtMs': now,
+          'updatedAtMs': now,
+        },
+        SetOptions(merge: true),
+      );
+      _showThreadMessage('Listing bumped.');
+    } catch (_) {
+      _showThreadMessage('Could not bump listing.');
+    }
+  }
+
+  String _formatDate(DateTime dt) {
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year.toString();
+    final hour = dt.hour.toString().padLeft(2, '0');
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year  $hour:$minute';
+  }
+
+  Widget _buildThreadHeaderCard({
+    required CommunityPost livePost,
+    required bool keyboardOpen,
+  }) {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final canManageListing = currentUid != null && currentUid == livePost.authorId && livePost.isMarketplace;
+    final accentColor = communityPostAccentColor(livePost);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        child: keyboardOpen
+            ? Card(
+                key: const ValueKey('compact-thread-header'),
+                color: const Color(0xFF102754),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: accentColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          livePost.postType,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (livePost.isMarketplace) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: communityMarketStatusColor(livePost.normalizedMarketStatus),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            livePost.normalizedMarketStatus,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              livePost.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              livePost.compactMarketplaceSummary ?? 'Replying to ${livePost.authorName}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFFD8E3FB),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatDate(livePost.createdAt).split('  ').first,
+                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : Card(
+                key: const ValueKey('full-thread-header'),
+                color: const Color(0xFF102754),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CommunityMetaChip(
+                            icon: livePost.isDiscussion
+                                ? Icons.forum_outlined
+                                : livePost.isForSale
+                                    ? Icons.sell_outlined
+                                    : livePost.isWanted
+                                        ? Icons.search_rounded
+                                        : Icons.swap_horiz_rounded,
+                            label: livePost.isDiscussion ? 'Discussion' : livePost.postType,
+                            color: accentColor,
+                          ),
+                          if (livePost.isMarketplace) ...[
+                            const SizedBox(width: 8),
+                            CommunityMetaChip(
+                              icon: communityMarketStatusIcon(livePost.normalizedMarketStatus),
+                              label: livePost.normalizedMarketStatus,
+                              color: communityMarketStatusColor(livePost.normalizedMarketStatus),
+                            ),
+                          ],
+                          const Spacer(),
+                          Text(
+                            _formatDate(livePost.createdAt),
+                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        livePost.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        livePost.description,
+                        style: const TextStyle(
+                          color: Color(0xFFD8E3FB),
+                          fontSize: 15,
+                          height: 1.45,
+                        ),
+                      ),
+                      if (livePost.hasImages) ...[
+                        const SizedBox(height: 12),
+                        CommunityImageStrip(
+                          imageBase64List: livePost.imageBase64List,
+                          height: 180,
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          CommunityUserAvatar(
+                            userId: livePost.authorId,
+                            displayName: livePost.authorName,
+                            size: 38,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Posted by',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  livePost.authorName,
+                                  style: const TextStyle(
+                                    color: Color(0xFFD8E3FB),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      if (livePost.isMarketplace)
+                        CommunitySellerTrustPanel(
+                          sellerId: livePost.authorId,
+                          sellerName: livePost.authorName,
+                          onRate: livePost.authorId.trim() == (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid)
+                              ? null
+                              : () => _openSellerRatingSheet(livePost),
+                        ),
+                      if (livePost.isMarketplace) ...[
+                        const SizedBox(height: 10),
+                        CommunityInfoRow(label: 'Status', value: livePost.normalizedMarketStatus),
+                        if (livePost.isForSale)
+                          CommunityInfoRow(
+                            label: 'Asking price',
+                            value: livePost.hasPrice ? livePost.formattedPrice : 'Not added',
+                          ),
+                        if (livePost.cardCondition.trim().isNotEmpty)
+                          CommunityInfoRow(label: 'Condition', value: livePost.cardCondition.trim()),
+                        if (livePost.deliveryMethod.trim().isNotEmpty)
+                          CommunityInfoRow(label: 'Delivery', value: livePost.deliveryMethod.trim()),
+                        if (livePost.locationText.trim().isNotEmpty)
+                          CommunityInfoRow(label: 'Location', value: livePost.locationText.trim()),
+                        if (livePost.isSwap && livePost.wantedTradeFor.trim().isNotEmpty)
+                          CommunityInfoRow(label: 'Wanted in trade', value: livePost.wantedTradeFor.trim()),
+                        if (livePost.isWanted && livePost.wantedTradeFor.trim().isNotEmpty)
+                          CommunityInfoRow(label: 'Looking for', value: livePost.wantedTradeFor.trim()),
+                        const SizedBox(height: 10),
+                        TradeSafetyPanel(post: livePost),
+                      ],
+                      if (livePost.hasImages)
+                        CommunityInfoRow(
+                          label: 'Photos',
+                          value: communityImageCountLabel(livePost.imageCount),
+                        ),
+                      if (livePost.lastBumpedAt != null)
+                        CommunityInfoRow(
+                          label: 'Last bumped',
+                          value: _formatDate(livePost.lastBumpedAt!),
+                        ),
+                      if (currentUid != null &&
+                          livePost.authorId.trim().isNotEmpty &&
+                          livePost.authorId != currentUid) ...[
+                        const SizedBox(height: 14),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => _reportPost(livePost),
+                              icon: const Icon(Icons.flag_outlined),
+                              label: const Text('Report post'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Color(0xFF3F5C96)),
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => _blockCommunityMember(
+                                memberId: livePost.authorId,
+                                memberName: livePost.authorName,
+                              ),
+                              icon: const Icon(Icons.block_outlined),
+                              label: const Text('Block member'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFFCDD2),
+                                side: const BorderSide(color: Color(0xFFB13B59)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (canManageListing) ...[
+                        const SizedBox(height: 14),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: () => _updateMarketStatus(
+                                livePost,
+                                livePost.normalizedMarketStatus == 'Pending' ? 'Available' : 'Pending',
+                              ),
+                              icon: Icon(
+                                livePost.normalizedMarketStatus == 'Pending'
+                                    ? Icons.storefront_outlined
+                                    : Icons.schedule_outlined,
+                              ),
+                              label: Text(
+                                livePost.normalizedMarketStatus == 'Pending'
+                                    ? 'Mark available'
+                                    : 'Mark pending',
+                              ),
+                            ),
+                            FilledButton.tonalIcon(
+                              onPressed: () => _updateMarketStatus(
+                                livePost,
+                                livePost.isForSale ? 'Sold' : 'Traded',
+                              ),
+                              icon: Icon(
+                                livePost.isForSale
+                                    ? Icons.check_circle_outline_rounded
+                                    : Icons.swap_horiz_rounded,
+                              ),
+                              label: Text(livePost.isForSale ? 'Mark sold' : 'Mark traded'),
+                            ),
+                            FilledButton.tonalIcon(
+                              onPressed: _bumpListing,
+                              icon: const Icon(Icons.north_rounded),
+                              label: const Text('Bump'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildReplyCard({
+    required CommunityReply reply,
+    required CommunityPost livePost,
+    required String? currentUid,
+  }) {
+    final canDelete = reply.authorId == currentUid || livePost.authorId == currentUid;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _openReplyMemberSheet(
+                        reply: reply,
+                        livePost: livePost,
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CommunityUserAvatar(
+                              userId: reply.authorId,
+                              displayName: reply.authorName,
+                              size: 34,
+                              initialImageBase64: reply.authorProfileImageBase64,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                reply.authorName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFFF7DE77),
+                                  fontWeight: FontWeight.w800,
+                                  decoration: TextDecoration.underline,
+                                  decorationColor: Color(0xFFF7DE77),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Color(0xFFF7DE77),
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _formatDate(reply.createdAt),
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (canDelete)
+                    PopupMenuButton<String>(
+                      iconColor: Colors.white,
+                      color: const Color(0xFF264A8A),
+                      onSelected: (value) {
+                        if (value == 'delete') {
+                          _deleteReply(reply);
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.delete_outline,
+                                color: Colors.redAccent,
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                'Delete comment',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              if (reply.message.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  reply.message,
+                  style: const TextStyle(
+                    color: Color(0xFFD8E3FB),
+                    fontSize: 15,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+              if (reply.hasImage) ...[
+                const SizedBox(height: 10),
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => CommunityImageViewerPage(
+                          imageBase64List: [reply.imageBase64!],
+                          initialIndex: 0,
+                        ),
+                      ),
+                    );
+                  },
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: StoredImage(
+                      imageRef: reply.imageBase64,
+                      fit: BoxFit.cover,
+                      height: 220,
+                      width: double.infinity,
+                      errorChild: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Text(
+                          'Image could not be displayed.',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF041B4A),
+      appBar: AppBar(
+        title: const Text('Post replies'),
+        backgroundColor: const Color(0xFF041B4A),
+        foregroundColor: Colors.white,
+      ),
+      body: SafeArea(
+        bottom: true,
+        child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: _postRef.snapshots(),
+          builder: (context, postSnapshot) {
+            final livePost = postSnapshot.hasData && postSnapshot.data?.exists == true
+                ? CommunityPost.fromDoc(postSnapshot.data!)
+                : widget.post;
+            final hiddenReplyIds = livePost.hiddenReplyIds.toSet();
+
+            return Column(
+              children: [
+                Expanded(
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: _repliesRef.orderBy('createdAtMs').snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      if (snapshot.hasError) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Text(
+                              'Could not load replies.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        );
+                      }
+
+                      final replies = (snapshot.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                          .map(CommunityReply.fromDoc)
+                          .where((reply) => !hiddenReplyIds.contains(reply.id))
+                          .where((reply) => reply.authorId == currentUid || !_blockedUserIds.contains(reply.authorId))
+                          .toList();
+
+                      if (_pendingScrollToLatestReply && replies.isNotEmpty) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _scrollRepliesToLatest();
+                        });
+                      }
+
+                      final itemCount = replies.isEmpty ? 2 : replies.length + 1;
+
+                      return ListView.builder(
+                        controller: _scrollController,
+                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.only(bottom: 12),
+                        itemCount: itemCount,
+                        itemBuilder: (context, index) {
+                          if (index == 0) {
+                            return _buildThreadHeaderCard(
+                              livePost: livePost,
+                              keyboardOpen: keyboardOpen,
+                            );
+                          }
+
+                          if (replies.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                              child: Card(
+                                color: Color(0xFF102754),
+                                child: Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Text(
+                                    'No replies yet. Start the conversation below.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.white70, fontSize: 15),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          final reply = replies[index - 1];
+                          return _buildReplyCard(
+                            reply: reply,
+                            livePost: livePost,
+                            currentUid: currentUid,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_replyImageBase64 != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Stack(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: StoredImage(
+                                    imageRef: _replyImageBase64,
+                                    height: 96,
+                                    width: 96,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: InkWell(
+                                    onTap: () => setState(() => _replyImageBase64 = null),
+                                    borderRadius: BorderRadius.circular(999),
+                                    child: Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.58),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.close,
+                                        size: 18,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF16366E),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: const Color(0xFF3F5C96)),
+                            ),
+                            child: IconButton(
+                              onPressed: _sending ? null : _pickReplyImage,
+                              icon: const Icon(Icons.add_a_photo_outlined),
+                              color: Colors.white,
+                              tooltip: 'Add photo reply',
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextField(
+                              controller: _replyController,
+                              minLines: 1,
+                              maxLines: 4,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: const InputDecoration(
+                                hintText: 'Write a reply or add a photo...',
+                                hintStyle: TextStyle(color: Color(0xFFAFC0E6)),
+                                filled: true,
+                                fillColor: Color(0xFF16366E),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(Radius.circular(18)),
+                                  borderSide: BorderSide(color: Color(0xFF3F5C96)),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(Radius.circular(18)),
+                                  borderSide: BorderSide(color: Color(0xFF3F5C96)),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(Radius.circular(18)),
+                                  borderSide: BorderSide(color: Color(0xFFF7DE77), width: 1.5),
+                                ),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          FilledButton(
+                            onPressed: _sending ? null : _addReply,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                            ),
+                            child: const Text('Reply'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
