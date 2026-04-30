@@ -6,6 +6,7 @@ import '../models/app_user_profile.dart';
 import '../models/community_private_models.dart';
 import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
+import '../models/wishlist_entry.dart';
 import '../services/community_safety_service.dart';
 import '../services/currency_settings.dart';
 import '../services/pokemon_tcg_service.dart';
@@ -46,7 +47,8 @@ class CommunityPrivateChatPage extends StatefulWidget {
   final String relatedPostTitle;
 
   @override
-  State<CommunityPrivateChatPage> createState() => _CommunityPrivateChatPageState();
+  State<CommunityPrivateChatPage> createState() =>
+      _CommunityPrivateChatPageState();
 }
 
 class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
@@ -54,7 +56,8 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
   final ScrollController _scrollController = ScrollController();
   bool _sending = false;
 
-  String get _currentUid => FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+  String get _currentUid =>
+      FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
 
   CollectionReference<Map<String, dynamic>> get _messagesRef =>
       userCommunityPrivateConversationRef(
@@ -75,24 +78,43 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
     super.dispose();
   }
 
+  CommunityPrivateMessage? _safeMessageFromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    try {
+      return CommunityPrivateMessage.fromDoc(doc);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _ensureConversationExists() async {
-    final currentUid = (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid).trim();
-    if (currentUid.isEmpty) return;
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid)
+            .trim();
+    final otherUserId = widget.otherUserId.trim();
+    final conversationId = widget.conversationId.trim();
+
+    if (currentUid.isEmpty || otherUserId.isEmpty || conversationId.isEmpty) {
+      return;
+    }
 
     final now = DateTime.now().millisecondsSinceEpoch;
     try {
       await syncCommunityPrivateConversation(
-        conversationId: widget.conversationId,
+        conversationId: conversationId,
         currentUid: currentUid,
         currentUserName: widget.currentProfile.displayName,
-        otherUserId: widget.otherUserId,
+        otherUserId: otherUserId,
         otherUserName: widget.otherUserName,
         relatedPostId: widget.relatedPostId,
         relatedPostTitle: widget.relatedPostTitle,
         createdAtMs: now,
         updatedAtMs: now,
       );
-    } catch (_) {}
+    } catch (_) {
+      // The chat screen can still load existing local/user-scoped messages.
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -104,21 +126,36 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
     });
 
     try {
-      final currentUid = (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid).trim();
+      final currentUid =
+          (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid)
+              .trim();
+      final otherUserId = widget.otherUserId.trim();
+      final conversationId = widget.conversationId.trim();
+
       if (currentUid.isEmpty) {
-        throw Exception('User not signed in');
+        throw StateError('Please sign in before sending a message.');
+      }
+      if (otherUserId.isEmpty || conversationId.isEmpty) {
+        throw StateError('This private chat cannot be opened right now.');
+      }
+      if (currentUid == otherUserId) {
+        throw StateError('You cannot message yourself.');
       }
 
-      final isBlocked = await CommunitySafetyService.isBlocked(
-        ownerUid: currentUid,
-        blockedUid: widget.otherUserId,
-      );
+      var isBlocked = false;
+      try {
+        isBlocked = await CommunitySafetyService.isBlocked(
+          ownerUid: currentUid,
+          blockedUid: otherUserId,
+        );
+      } catch (_) {
+        isBlocked = false;
+      }
+
       if (isBlocked) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('You have blocked this member. Unblock them before sending a message.')),
-          );
-        }
+        _showChatMessage(
+          'You have blocked this member. Unblock them before sending a message.',
+        );
         return;
       }
 
@@ -131,31 +168,33 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
         message: message,
         createdAtMs: now,
       );
+
       await syncCommunityPrivateMessage(
-        conversationId: widget.conversationId,
+        conversationId: conversationId,
         currentUid: currentUid,
         currentUserName: widget.currentProfile.displayName,
-        otherUserId: widget.otherUserId,
+        otherUserId: otherUserId,
         otherUserName: widget.otherUserName,
         relatedPostId: widget.relatedPostId,
         relatedPostTitle: widget.relatedPostTitle,
         message: privateMessage,
       );
+
       _messageController.clear();
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent + 120,
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOut,
-          );
-        }
+        if (!_scrollController.hasClients) return;
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent + 120,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+        );
       });
+    } on FirebaseException catch (error) {
+      _showChatMessage(error.message ?? 'Could not send private message');
+    } on StateError catch (error) {
+      _showChatMessage(error.message);
     } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not send private message')),
-      );
+      _showChatMessage('Could not send private message');
     } finally {
       if (mounted) {
         setState(() {
@@ -163,6 +202,11 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
         });
       }
     }
+  }
+
+  void _showChatMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _reportConversation() async {
@@ -178,6 +222,8 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
   }
 
   Future<void> _blockOtherUser() async {
+    final navigator = Navigator.of(context);
+
     final blocked = await confirmBlockCommunityUser(
       context: context,
       currentProfile: widget.currentProfile,
@@ -185,14 +231,18 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
       blockedName: widget.otherUserName,
       source: 'private_message',
     );
+
     if (blocked && mounted) {
-      Navigator.of(context).pop();
+      navigator.pop();
     }
   }
 
   Future<void> _deleteThisConversation() async {
     final currentUid = _currentUid.trim();
     if (currentUid.isEmpty) return;
+
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -233,15 +283,14 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
         conversationId: widget.conversationId,
       );
       if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
+      navigator.pop();
+      messenger.showSnackBar(
         const SnackBar(content: Text('Private chat deleted from your inbox')),
       );
+    } on FirebaseException catch (error) {
+      _showChatMessage(error.message ?? 'Could not delete private chat');
     } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not delete private chat')),
-      );
+      _showChatMessage('Could not delete private chat');
     }
   }
 
@@ -252,7 +301,11 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: Text(widget.otherUserName),
+        title: Text(
+          widget.otherUserName.trim().isEmpty
+              ? 'Private chat'
+              : widget.otherUserName.trim(),
+        ),
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
         actions: [
@@ -293,7 +346,8 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                             width: 42,
                             height: 42,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
+                              color:
+                                  const Color(0xFFF7DE77).withValues(alpha: 0.14),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -315,7 +369,9 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  widget.relatedPostTitle,
+                                  widget.relatedPostTitle.trim().isEmpty
+                                      ? 'Community message'
+                                      : widget.relatedPostTitle.trim(),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 16,
@@ -371,7 +427,7 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: Text(
-                          'Could not load messages.',
+                          'Could not load messages. Please check your connection and try again.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white70),
                         ),
@@ -379,8 +435,10 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                     );
                   }
 
-                  final messages = (snapshot.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
-                      .map(CommunityPrivateMessage.fromDoc)
+                  final messages = (snapshot.data?.docs ??
+                          const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                      .map(_safeMessageFromDoc)
+                      .whereType<CommunityPrivateMessage>()
                       .toList();
 
                   if (messages.isEmpty) {
@@ -405,20 +463,25 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                       final message = messages[index];
                       final isMine = message.authorId == currentUid;
                       return Align(
-                        alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+                        alignment:
+                            isMine ? Alignment.centerRight : Alignment.centerLeft,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 320),
                           child: Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: isMine ? const Color(0xFF204D97) : const Color(0xFF102754),
+                              color: isMine
+                                  ? const Color(0xFF204D97)
+                                  : const Color(0xFF102754),
                               borderRadius: BorderRadius.only(
                                 topLeft: const Radius.circular(18),
                                 topRight: const Radius.circular(18),
                                 bottomLeft: Radius.circular(isMine ? 18 : 8),
                                 bottomRight: Radius.circular(isMine ? 8 : 18),
                               ),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.07),
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -435,7 +498,9 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                                       ),
                                     ),
                                     Text(
-                                      formatCommunityRelativeTime(message.createdAt),
+                                      formatCommunityRelativeTime(
+                                        message.createdAt,
+                                      ),
                                       style: const TextStyle(
                                         color: Colors.white54,
                                         fontSize: 11,
@@ -469,6 +534,7 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      enabled: !_sending,
                       minLines: 1,
                       maxLines: 4,
                       style: const TextStyle(color: Colors.white),
@@ -487,9 +553,13 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.all(Radius.circular(18)),
-                          borderSide: BorderSide(color: Color(0xFFF7DE77), width: 1.5),
+                          borderSide: BorderSide(
+                            color: Color(0xFFF7DE77),
+                            width: 1.5,
+                          ),
                         ),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
                     ),
                   ),
@@ -499,7 +569,10 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFF7DE77),
                       foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 16,
+                      ),
                     ),
                     child: _sending
                         ? const SizedBox(
@@ -542,16 +615,22 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
   @override
   void initState() {
     super.initState();
+    _loadFriendData();
+  }
+
+  void _loadFriendData() {
     _friendProfileFuture = UserProfileService.fetchProfile(widget.friendUid);
     _statsFuture = loadProfileStatsForOwner(widget.friendUid);
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _friendProfileFuture = UserProfileService.fetchProfile(widget.friendUid);
-      _statsFuture = loadProfileStatsForOwner(widget.friendUid);
-    });
-    await Future.wait<dynamic>([_friendProfileFuture, _statsFuture]);
+    setState(_loadFriendData);
+
+    try {
+      await Future.wait<dynamic>([_friendProfileFuture, _statsFuture]);
+    } catch (_) {
+      // The FutureBuilders below display the individual error cards.
+    }
   }
 
   Future<void> _openWishlist(AppUserProfile profile) async {
@@ -599,15 +678,47 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
   Future<void> _messageFriend(AppUserProfile profile) async {
     if (!widget.currentProfile.isAdult) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Community messages are only available to adult accounts.')),
+        const SnackBar(
+          content: Text('Community messages are only available to adult accounts.'),
+        ),
+      );
+      return;
+    }
+
+    final currentUid = widget.currentProfile.uid.trim();
+    final friendUid = profile.uid.trim();
+    if (currentUid.isEmpty || friendUid.isEmpty || currentUid == friendUid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This member cannot be messaged right now.')),
+      );
+      return;
+    }
+
+    var isBlocked = false;
+    try {
+      isBlocked = await CommunitySafetyService.isBlocked(
+        ownerUid: currentUid,
+        blockedUid: friendUid,
+      );
+    } catch (_) {
+      isBlocked = false;
+    }
+
+    if (!mounted) return;
+
+    if (isBlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You have blocked this member. Unblock them before sending a message.'),
+        ),
       );
       return;
     }
 
     final conversationId = communityConversationIdForPost(
       postId: 'friend_profile',
-      userAId: widget.currentProfile.uid,
-      userBId: profile.uid,
+      userAId: currentUid,
+      userBId: friendUid,
     );
 
     await Navigator.of(context).push(
@@ -624,12 +735,28 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     );
   }
 
+  Future<void> _openWishlistCard(WishlistEntry entry) async {
+    try {
+      final card = await PokemonTcgService.fetchCardById(entry.cardId);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => CardDetailsPage(card: card)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open this card right now.')),
+      );
+    }
+  }
+
   AppUserProfile _fallbackProfile() {
     final now = DateTime.now().millisecondsSinceEpoch;
     return AppUserProfile(
       uid: widget.friendUid,
       email: '',
-      username: widget.friendName.trim().isEmpty ? 'Trainer' : widget.friendName.trim(),
+      username:
+          widget.friendName.trim().isEmpty ? 'Trainer' : widget.friendName.trim(),
       createdAtMs: now,
       updatedAtMs: now,
     );
@@ -637,10 +764,13 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final fallbackName =
+        widget.friendName.trim().isEmpty ? 'Friend' : widget.friendName.trim();
+
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: Text('${widget.friendName.trim().isEmpty ? 'Friend' : widget.friendName.trim()} profile'),
+        title: Text('$fallbackName profile'),
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
       ),
@@ -649,7 +779,8 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
           future: _friendProfileFuture,
           builder: (context, profileSnapshot) {
             final friendProfile = profileSnapshot.data ?? _fallbackProfile();
-            final imageProvider = profileImageProviderFromRef(friendProfile.profileImageBase64);
+            final imageProvider =
+                profileImageProviderFromRef(friendProfile.profileImageBase64);
 
             return RefreshIndicator(
               onRefresh: _refresh,
@@ -664,11 +795,26 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                     onOpenTradeMatches: () => _openTradeMatches(friendProfile),
                     onMessage: () => _messageFriend(friendProfile),
                   ),
+                  if (profileSnapshot.hasError)
+                    Card(
+                      color: const Color(0xFF102754),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: const Padding(
+                        padding: EdgeInsets.all(18),
+                        child: Text(
+                          'Could not load the latest profile details. Showing a basic profile instead.',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 14),
                   FutureBuilder<ProfileStats>(
                     future: _statsFuture,
                     builder: (context, statsSnapshot) {
-                      if (statsSnapshot.connectionState == ConnectionState.waiting) {
+                      if (statsSnapshot.connectionState ==
+                          ConnectionState.waiting) {
                         return const Padding(
                           padding: EdgeInsets.only(top: 40),
                           child: Center(child: CircularProgressIndicator()),
@@ -678,7 +824,9 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                       if (statsSnapshot.hasError) {
                         return Card(
                           color: const Color(0xFF102754),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
                           child: const Padding(
                             padding: EdgeInsets.all(18),
                             child: Text(
@@ -703,13 +851,7 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                           FriendWishlistPreviewCard(
                             profile: friendProfile,
                             onOpenWishlist: () => _openWishlist(friendProfile),
-                            onTapEntry: (entry) async {
-                              final card = await PokemonTcgService.fetchCardById(entry.cardId);
-                              if (!context.mounted) return;
-                              Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => CardDetailsPage(card: card)),
-                              );
-                            },
+                            onTapEntry: _openWishlistCard,
                           ),
                           const SizedBox(height: 12),
                           FriendPokedexPreviewCard(
@@ -736,7 +878,9 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                               Expanded(
                                 child: ProfileStatCard(
                                   title: 'Total Value',
-                                  value: CurrencySettings.formatSelectedAmount(stats.totalEstimatedPrice),
+                                  value: CurrencySettings.formatSelectedAmount(
+                                    stats.totalEstimatedPrice,
+                                  ),
                                   icon: Icons.payment_outlined,
                                 ),
                               ),
@@ -761,3 +905,4 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     );
   }
 }
+

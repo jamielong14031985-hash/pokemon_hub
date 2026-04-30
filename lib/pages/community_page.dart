@@ -47,23 +47,34 @@ class _CommunityPageState extends State<CommunityPage> {
   bool _savedVisitMarker = false;
   late final int _visitStartedAtMs;
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> get _postsStream => FirebaseFirestore.instance
-      .collection('community_posts')
-      .orderBy('createdAtMs', descending: true)
-      .snapshots();
+  Stream<QuerySnapshot<Map<String, dynamic>>> get _postsStream =>
+      FirebaseFirestore.instance
+          .collection('community_posts')
+          .orderBy('createdAtMs', descending: true)
+          .snapshots();
 
   @override
   void initState() {
     super.initState();
     _visitStartedAtMs = DateTime.now().millisecondsSinceEpoch;
     _loadLastSeen();
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
-    _blockedUsersSub = CommunitySafetyService.blockedUserIdsStream(currentUid).listen((blockedUserIds) {
-      if (!mounted) return;
-      setState(() {
-        _blockedUserIds = blockedUserIds;
-      });
-    });
+
+    final currentUid =
+        FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
+    _blockedUsersSub = CommunitySafetyService.blockedUserIdsStream(currentUid).listen(
+      (blockedUserIds) {
+        if (!mounted) return;
+        setState(() {
+          _blockedUserIds = blockedUserIds;
+        });
+      },
+      onError: (_) {
+        if (!mounted) return;
+        setState(() {
+          _blockedUserIds = <String>{};
+        });
+      },
+    );
   }
 
   @override
@@ -78,20 +89,53 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Future<void> _loadLastSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getInt(_lastSeenPrefsKey());
-    if (!mounted) return;
-    setState(() {
-      _lastSeenAtMs = saved;
-      _loadedLastSeen = true;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getInt(_lastSeenPrefsKey());
+      if (!mounted) return;
+      setState(() {
+        _lastSeenAtMs = saved;
+        _loadedLastSeen = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _lastSeenAtMs = null;
+        _loadedLastSeen = true;
+      });
+    }
   }
 
   Future<void> _markVisitSeenIfNeeded() async {
     if (_savedVisitMarker) return;
     _savedVisitMarker = true;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_lastSeenPrefsKey(), _visitStartedAtMs);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_lastSeenPrefsKey(), _visitStartedAtMs);
+    } catch (_) {
+      // The community feed should still work if local preferences are unavailable.
+    }
+  }
+
+  CommunityPost? _safePostFromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    try {
+      return CommunityPost.fromDoc(doc);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  CommunityReply? _safeReplyFromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    try {
+      return CommunityReply.fromDoc(doc);
+    } catch (_) {
+      return null;
+    }
   }
 
   void _showMessage(String message) {
@@ -131,7 +175,8 @@ class _CommunityPageState extends State<CommunityPage> {
       _filter != 'All' || _marketStatusFilter != 'All';
 
   String get _marketplaceFilterSummary {
-    final listingType = _filter == 'All' ? 'Sale, swap and wanted listings' : '$_filter listings';
+    final listingType =
+        _filter == 'All' ? 'Sale, swap and wanted listings' : '$_filter listings';
     final listingStatus = _marketStatusFilter == 'All'
         ? 'all statuses'
         : '${_marketStatusFilter.toLowerCase()} status';
@@ -155,7 +200,7 @@ class _CommunityPageState extends State<CommunityPage> {
             return SafeArea(
               top: false,
               child: LayoutBuilder(
-                builder: (context, constraints) {
+                builder: (context, _) {
                   final maxSheetHeight = MediaQuery.of(context).size.height * 0.88;
                   return ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: maxSheetHeight),
@@ -222,25 +267,33 @@ class _CommunityPageState extends State<CommunityPage> {
                                         label: 'All',
                                         selected: selectedType == 'All',
                                         minWidth: 82,
-                                        onTap: () => setSheetState(() => selectedType = 'All'),
+                                        onTap: () => setSheetState(
+                                          () => selectedType = 'All',
+                                        ),
                                       ),
                                       CommunityFilterChip(
                                         label: 'Swap',
                                         selected: selectedType == 'Swap',
                                         minWidth: 94,
-                                        onTap: () => setSheetState(() => selectedType = 'Swap'),
+                                        onTap: () => setSheetState(
+                                          () => selectedType = 'Swap',
+                                        ),
                                       ),
                                       CommunityFilterChip(
                                         label: 'For Sale',
                                         selected: selectedType == 'For Sale',
                                         minWidth: 118,
-                                        onTap: () => setSheetState(() => selectedType = 'For Sale'),
+                                        onTap: () => setSheetState(
+                                          () => selectedType = 'For Sale',
+                                        ),
                                       ),
                                       CommunityFilterChip(
                                         label: 'Wanted',
                                         selected: selectedType == 'Wanted',
                                         minWidth: 112,
-                                        onTap: () => setSheetState(() => selectedType = 'Wanted'),
+                                        onTap: () => setSheetState(
+                                          () => selectedType = 'Wanted',
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -262,7 +315,9 @@ class _CommunityPageState extends State<CommunityPage> {
                                         label: status,
                                         selected: selectedStatus == status,
                                         minWidth: status == 'Available' ? 118 : 96,
-                                        onTap: () => setSheetState(() => selectedStatus = status),
+                                        onTap: () => setSheetState(
+                                          () => selectedStatus = status,
+                                        ),
                                       );
                                     }).toList(),
                                   ),
@@ -284,7 +339,9 @@ class _CommunityPageState extends State<CommunityPage> {
                                   },
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.white,
-                                    side: const BorderSide(color: Color(0xFF3F5C96)),
+                                    side: const BorderSide(
+                                      color: Color(0xFF3F5C96),
+                                    ),
                                     minimumSize: const Size.fromHeight(50),
                                   ),
                                   child: const Text('Reset'),
@@ -293,7 +350,8 @@ class _CommunityPageState extends State<CommunityPage> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: FilledButton(
-                                  onPressed: () => Navigator.of(context).pop(true),
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(true),
                                   style: FilledButton.styleFrom(
                                     minimumSize: const Size.fromHeight(50),
                                   ),
@@ -351,21 +409,33 @@ class _CommunityPageState extends State<CommunityPage> {
 
     if (shouldDelete != true) return;
 
-    final postRef = FirebaseFirestore.instance.collection('community_posts').doc(post.id);
-    final replies = await postRef.collection('replies').get();
-    final replyImageRefs = replies.docs
-        .map(CommunityReply.fromDoc)
-        .map((reply) => reply.imageBase64)
-        .whereType<String>()
-        .toList();
-    final batch = FirebaseFirestore.instance.batch();
-    for (final doc in replies.docs) {
-      batch.delete(doc.reference);
-    }
-    batch.delete(postRef);
-    await batch.commit();
-    for (final imageRef in <String>[...post.imageBase64List, ...replyImageRefs]) {
-      unawaited(FirebaseImageStorageService.deleteByDownloadUrl(imageRef));
+    try {
+      final postRef =
+          FirebaseFirestore.instance.collection('community_posts').doc(post.id);
+      final replies = await postRef.collection('replies').get();
+      final replyImageRefs = replies.docs
+          .map(_safeReplyFromDoc)
+          .whereType<CommunityReply>()
+          .map((reply) => reply.imageBase64)
+          .whereType<String>()
+          .toList();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in replies.docs) {
+        batch.delete(doc.reference);
+      }
+      batch.delete(postRef);
+      await batch.commit();
+
+      for (final imageRef in <String>[...post.imageBase64List, ...replyImageRefs]) {
+        unawaited(FirebaseImageStorageService.deleteByDownloadUrl(imageRef));
+      }
+
+      _showMessage('Post deleted.');
+    } on FirebaseException catch (error) {
+      _showMessage(error.message ?? 'Could not delete post.');
+    } catch (_) {
+      _showMessage('Could not delete post.');
     }
   }
 
@@ -380,7 +450,11 @@ class _CommunityPageState extends State<CommunityPage> {
         },
         SetOptions(merge: true),
       );
-      _showMessage('${post.title} marked as ${normalizeCommunityMarketStatus(status)}.');
+      _showMessage(
+        '${post.title} marked as ${normalizeCommunityMarketStatus(status)}.',
+      );
+    } on FirebaseException catch (error) {
+      _showMessage(error.message ?? 'Could not update listing status.');
     } catch (_) {
       _showMessage('Could not update listing status.');
     }
@@ -398,6 +472,8 @@ class _CommunityPageState extends State<CommunityPage> {
         SetOptions(merge: true),
       );
       _showMessage('Listing bumped to the top of your latest activity view.');
+    } on FirebaseException catch (error) {
+      _showMessage(error.message ?? 'Could not bump listing.');
     } catch (_) {
       _showMessage('Could not bump listing.');
     }
@@ -444,7 +520,10 @@ class _CommunityPageState extends State<CommunityPage> {
   List<CommunityPost> _visiblePosts(List<CommunityPost> posts) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
     final unblockedPosts = posts
-        .where((post) => post.authorId == currentUid || !_blockedUserIds.contains(post.authorId))
+        .where(
+          (post) =>
+              post.authorId == currentUid || !_blockedUserIds.contains(post.authorId),
+        )
         .toList();
 
     final sectionPosts = _section == 'Discussions'
@@ -497,12 +576,20 @@ class _CommunityPageState extends State<CommunityPage> {
       return;
     }
 
-    final isBlocked = await CommunitySafetyService.isBlocked(
-      ownerUid: currentUser.uid,
-      blockedUid: otherUserId,
-    );
+    var isBlocked = false;
+    try {
+      isBlocked = await CommunitySafetyService.isBlocked(
+        ownerUid: currentUser.uid,
+        blockedUid: otherUserId,
+      );
+    } catch (_) {
+      isBlocked = false;
+    }
+
     if (isBlocked) {
-      _showMessage('You have blocked this member. Unblock them before sending a message.');
+      _showMessage(
+        'You have blocked this member. Unblock them before sending a message.',
+      );
       return;
     }
 
@@ -525,7 +612,9 @@ class _CommunityPageState extends State<CommunityPage> {
         createdAtMs: now,
         updatedAtMs: now,
       );
-    } catch (_) {}
+    } catch (_) {
+      // The chat screen can still open and retry when the first message is sent.
+    }
 
     if (!mounted) return;
     await Navigator.of(context).push(
@@ -756,7 +845,9 @@ class _CommunityPageState extends State<CommunityPage> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFF7DE77).withValues(alpha: 0.24)),
+                    border: Border.all(
+                      color: const Color(0xFFF7DE77).withValues(alpha: 0.24),
+                    ),
                   ),
                   child: const Icon(
                     Icons.forum_rounded,
@@ -777,11 +868,14 @@ class _CommunityPageState extends State<CommunityPage> {
                 ),
                 if (hasNewPosts)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF7DE77).withValues(alpha: 0.18),
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: const Color(0xFFF7DE77).withValues(alpha: 0.28)),
+                      border: Border.all(
+                        color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
+                      ),
                     ),
                     child: const Text(
                       'NEW',
@@ -804,10 +898,15 @@ class _CommunityPageState extends State<CommunityPage> {
                       onPressed: _openPrivateInbox,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.white,
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.14),
+                        ),
                         backgroundColor: Colors.white.withValues(alpha: 0.05),
                         padding: const EdgeInsets.symmetric(vertical: 0),
-                        textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                        textStyle: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       icon: const Icon(Icons.mail_outline_rounded, size: 16),
                       label: const Text('Inbox'),
@@ -822,12 +921,18 @@ class _CommunityPageState extends State<CommunityPage> {
                       onPressed: _openFriendRequestsPage,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.white,
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.14),
+                        ),
                         backgroundColor: Colors.white.withValues(alpha: 0.05),
                         padding: const EdgeInsets.symmetric(vertical: 0),
-                        textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                        textStyle: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                      icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
+                      icon:
+                          const Icon(Icons.person_add_alt_1_outlined, size: 16),
                       label: const Text('Requests'),
                     ),
                   ),
@@ -838,13 +943,17 @@ class _CommunityPageState extends State<CommunityPage> {
                     height: 38,
                     child: FilledButton.icon(
                       onPressed: () => _openCreatePostSheet(
-                        initialPostType: _section == 'Discussions' ? 'Thread' : null,
+                        initialPostType:
+                            _section == 'Discussions' ? 'Thread' : null,
                       ),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFFF7DE77),
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 0),
-                        textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+                        textStyle: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                       icon: Icon(
                         _section == 'Discussions'
@@ -852,7 +961,8 @@ class _CommunityPageState extends State<CommunityPage> {
                             : Icons.add_comment_outlined,
                         size: 16,
                       ),
-                      label: Text(_section == 'Discussions' ? 'Start thread' : 'Post'),
+                      label:
+                          Text(_section == 'Discussions' ? 'Start thread' : 'Post'),
                     ),
                   ),
                 ),
@@ -868,13 +978,20 @@ class _CommunityPageState extends State<CommunityPage> {
                 onPressed: _openBlockedUsersPage,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  side: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.14),
+                  ),
                   backgroundColor: Colors.white.withValues(alpha: 0.05),
                   padding: const EdgeInsets.symmetric(vertical: 0),
-                  textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                  textStyle: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 icon: const Icon(Icons.block_outlined, size: 16),
-                label: Text('Blocked users${_blockedUserIds.isEmpty ? '' : ' (${_blockedUserIds.length})'}'),
+                label: Text(
+                  'Blocked users${_blockedUserIds.isEmpty ? '' : ' (${_blockedUserIds.length})'}',
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -908,13 +1025,13 @@ class _CommunityPageState extends State<CommunityPage> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(22),
-                  gradient: LinearGradient(
+                  gradient: const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      const Color(0xFF183A78),
-                      const Color(0xFF102754),
-                      const Color(0xFF0B214F),
+                      Color(0xFF183A78),
+                      Color(0xFF102754),
+                      Color(0xFF0B214F),
                     ],
                   ),
                   border: Border.all(
@@ -940,9 +1057,11 @@ class _CommunityPageState extends State<CommunityPage> {
                           height: 46,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
+                            color: const Color(0xFFF7DE77)
+                                .withValues(alpha: 0.14),
                             border: Border.all(
-                              color: const Color(0xFFF7DE77).withValues(alpha: 0.35),
+                              color: const Color(0xFFF7DE77)
+                                  .withValues(alpha: 0.35),
                             ),
                           ),
                           child: Icon(
@@ -979,7 +1098,10 @@ class _CommunityPageState extends State<CommunityPage> {
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
                           decoration: BoxDecoration(
                             color: _hasActiveMarketplaceFilters
                                 ? const Color(0xFFF7DE77)
@@ -1018,7 +1140,9 @@ class _CommunityPageState extends State<CommunityPage> {
                           if (_marketStatusFilter != 'All')
                             CommunityActiveFilterPill(
                               label: _marketStatusFilter,
-                              onRemove: () => setState(() => _marketStatusFilter = 'All'),
+                              onRemove: () => setState(
+                                () => _marketStatusFilter = 'All',
+                              ),
                             ),
                         ],
                       ),
@@ -1065,7 +1189,8 @@ class _CommunityPageState extends State<CommunityPage> {
                               }),
                               style: TextButton.styleFrom(
                                 foregroundColor: const Color(0xFFFFF2B3),
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
                               ),
                               icon: const Icon(Icons.close_rounded, size: 18),
                               label: const Text(
@@ -1084,11 +1209,14 @@ class _CommunityPageState extends State<CommunityPage> {
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
                 ),
                 child: const Text(
                   'Discussion threads stay separate from sale and swap listings so it is easier to chat, ask questions, and meet new collectors.',
@@ -1106,6 +1234,57 @@ class _CommunityPageState extends State<CommunityPage> {
     );
   }
 
+  Widget _buildEmptyStateCard() {
+    final emptyTitle = _section == 'Discussions'
+        ? 'No discussion threads yet'
+        : _marketStatusFilter == 'All'
+            ? 'No listings match this view yet'
+            : 'No ${_marketStatusFilter.toLowerCase()} listings yet';
+    final emptyMessage = _section == 'Discussions'
+        ? 'Start a thread to chat about cards, collecting, trades, and making friends.'
+        : 'Create a professional swap or sale listing with status, condition, and delivery details.';
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102754),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            _section == 'Discussions'
+                ? Icons.forum_outlined
+                : Icons.storefront_outlined,
+            color: const Color(0xFFF7DE77),
+            size: 36,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            emptyTitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            emptyMessage,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
@@ -1116,7 +1295,8 @@ class _CommunityPageState extends State<CommunityPage> {
         child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           stream: _postsStream,
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting || !_loadedLastSeen) {
+            if (snapshot.connectionState == ConnectionState.waiting ||
+                !_loadedLastSeen) {
               return const Center(child: CircularProgressIndicator());
             }
 
@@ -1125,7 +1305,7 @@ class _CommunityPageState extends State<CommunityPage> {
                 child: Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
-                    'Could not load community posts.',
+                    'Could not load community posts. Please check your connection and try again.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.white70, fontSize: 16),
                   ),
@@ -1137,9 +1317,12 @@ class _CommunityPageState extends State<CommunityPage> {
               _markVisitSeenIfNeeded();
             });
 
-            final allPosts = (snapshot.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
-                .map(CommunityPost.fromDoc)
+            final allPosts = (snapshot.data?.docs ??
+                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                .map(_safePostFromDoc)
+                .whereType<CommunityPost>()
                 .toList();
+
             final posts = _visiblePosts(allPosts);
             final hasNewPosts = _lastSeenAtMs != null &&
                 allPosts.any((post) => post.createdAtMs > (_lastSeenAtMs ?? 0));
@@ -1154,66 +1337,26 @@ class _CommunityPageState extends State<CommunityPage> {
                 }
 
                 if (posts.isEmpty) {
-                  final emptyTitle = _section == 'Discussions'
-                      ? 'No discussion threads yet'
-                      : _marketStatusFilter == 'All'
-                          ? 'No listings match this view yet'
-                          : 'No ${_marketStatusFilter.toLowerCase()} listings yet';
-                  final emptyMessage = _section == 'Discussions'
-                      ? 'Start a thread to chat about cards, collecting, trades, and making friends.'
-                      : 'Create a professional swap or sale listing with status, condition, and delivery details.';
-                  return Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF102754),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          _section == 'Discussions'
-                              ? Icons.forum_outlined
-                              : Icons.storefront_outlined,
-                          color: const Color(0xFFF7DE77),
-                          size: 36,
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          emptyTitle,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          emptyMessage,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
+                  return _buildEmptyStateCard();
                 }
 
                 final post = posts[index - 1];
-                final isNew = _lastSeenAtMs != null && post.createdAtMs > (_lastSeenAtMs ?? 0);
+                final isNew =
+                    _lastSeenAtMs != null && post.createdAtMs > (_lastSeenAtMs ?? 0);
+
                 return CommunityPostCard(
                   post: post,
                   currentProfile: widget.profile,
                   canEdit: post.authorId == currentUid,
-                  canMessage: post.authorId.isNotEmpty && post.authorId != currentUid,
+                  canMessage:
+                      post.authorId.isNotEmpty && post.authorId != currentUid,
                   isNew: isNew,
                   onEdit: () => _openEditPostSheet(post),
                   onDelete: () => _deletePost(post),
                   onMessage: () => _openPrivateMessageForPost(post),
-                  onReport: post.authorId == currentUid ? null : () => _reportPost(post),
+                  onReport: post.authorId == currentUid
+                      ? null
+                      : () => _reportPost(post),
                   onBlock: post.authorId == currentUid
                       ? null
                       : () => _blockCommunityMember(
@@ -1226,9 +1369,10 @@ class _CommunityPageState extends State<CommunityPage> {
                   onBump: post.authorId == currentUid && post.isMarketplace
                       ? () => _bumpPost(post)
                       : null,
-                  onAuthorTap: post.authorId.trim().isEmpty || post.authorId == currentUid
-                      ? null
-                      : () => _openCommunityMemberSheet(post),
+                  onAuthorTap:
+                      post.authorId.trim().isEmpty || post.authorId == currentUid
+                          ? null
+                          : () => _openCommunityMemberSheet(post),
                   onOpen: () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(

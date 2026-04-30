@@ -7,15 +7,68 @@ import 'private_chat_screen.dart';
 class MessagesInboxScreen extends StatelessWidget {
   const MessagesInboxScreen({super.key});
 
-  int _timestampMillis(dynamic value) {
-    if (value is Timestamp) return value.millisecondsSinceEpoch;
-    return 0;
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _chatsForUserStream(
+    String uid,
+  ) async* {
+    final safeUid = uid.trim();
+    if (safeUid.isEmpty) {
+      yield const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+      return;
+    }
+
+    try {
+      await for (final snapshot in FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: safeUid)
+          .snapshots()) {
+        final docs = snapshot.docs.toList()
+          ..sort((a, b) {
+            final aTime = _timestampMillisFromData(a.data());
+            final bTime = _timestampMillisFromData(b.data());
+            return bTime.compareTo(aTime);
+          });
+
+        yield docs;
+      }
+    } catch (_) {
+      yield const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    }
   }
 
-  String _formatTimestamp(dynamic value) {
-    if (value is! Timestamp) return '';
+  int _timestampMillisFromData(Map<String, dynamic> data) {
+    final updatedAtMs = _readInt(data['updatedAtMs']);
+    if (updatedAtMs > 0) return updatedAtMs;
+    return _timestampMillis(data['updatedAt']);
+  }
 
-    final date = value.toDate();
+  int _timestampMillis(dynamic value) {
+    if (value is Timestamp) return value.millisecondsSinceEpoch;
+    if (value is num) return value.toInt();
+    return int.tryParse((value ?? '').toString().trim()) ?? 0;
+  }
+
+  int _readInt(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse((value ?? '').toString().trim()) ?? 0;
+  }
+
+  String _formatTimestampFromData(Map<String, dynamic> data) {
+    final updatedAt = data['updatedAt'];
+    if (updatedAt is Timestamp) {
+      return _formatDateTime(updatedAt.toDate());
+    }
+
+    final updatedAtMs = _readInt(data['updatedAtMs']);
+    if (updatedAtMs > 0) {
+      return _formatDateTime(
+        DateTime.fromMillisecondsSinceEpoch(updatedAtMs),
+      );
+    }
+
+    return '';
+  }
+
+  String _formatDateTime(DateTime date) {
     final now = DateTime.now();
 
     final isToday =
@@ -40,6 +93,62 @@ class MessagesInboxScreen extends StatelessWidget {
     return text.isEmpty ? fallback : text;
   }
 
+  Map<String, dynamic> _safeMap(dynamic value) {
+    if (value is Map) {
+      return value.map(
+        (key, mapValue) => MapEntry(key.toString(), mapValue),
+      );
+    }
+
+    return const <String, dynamic>{};
+  }
+
+  List<String> _safeParticipants(dynamic value) {
+    if (value is! List) return const <String>[];
+
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+
+  String _firstAvatarLetter(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '?';
+    return trimmed.characters.first.toUpperCase();
+  }
+
+  Widget _buildAvatar({
+    required String name,
+    required String photoUrl,
+  }) {
+    final safePhotoUrl = photoUrl.trim();
+
+    if (safePhotoUrl.isEmpty) {
+      return CircleAvatar(
+        child: Text(_firstAvatarLetter(name)),
+      );
+    }
+
+    return CircleAvatar(
+      backgroundImage: NetworkImage(safePhotoUrl),
+      onBackgroundImageError: (_, __) {},
+      child: const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildErrorOrEmptyInbox() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(18),
+        child: Text(
+          'No private messages yet.',
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -53,23 +162,19 @@ class MessagesInboxScreen extends StatelessWidget {
       );
     }
 
-    final chatsRef = FirebaseFirestore.instance.collection('chats');
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Messages'),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: chatsRef
-            .where('participants', arrayContains: currentUser.uid)
-            .snapshots(),
+      body: StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+        stream: _chatsForUserStream(currentUser.uid),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(
+            return const Center(
               child: Padding(
-                padding: const EdgeInsets.all(18),
+                padding: EdgeInsets.all(18),
                 child: Text(
-                  'Could not load messages.\n\n${snapshot.error}',
+                  'Could not load messages right now.\nPlease check your connection and try again.',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -80,102 +185,86 @@ class MessagesInboxScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final docs = snapshot.data?.docs.toList() ?? [];
-
-          docs.sort((a, b) {
-            final aTime = _timestampMillis(a.data()['updatedAt']);
-            final bTime = _timestampMillis(b.data()['updatedAt']);
-            return bTime.compareTo(aTime);
-          });
+          final docs =
+              snapshot.data ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
           if (docs.isEmpty) {
-            return const Center(
-              child: Text('No private messages yet.'),
-            );
+            return _buildErrorOrEmptyInbox();
           }
 
           return ListView.separated(
             itemCount: docs.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
-              final data = docs[index].data();
+              try {
+                final data = docs[index].data();
 
-              final participants =
-                  (data['participants'] as List<dynamic>? ?? [])
-                      .map((item) => item.toString())
-                      .toList();
+                final participants = _safeParticipants(data['participants']);
+                final otherUserId = participants.firstWhere(
+                  (id) => id != currentUser.uid,
+                  orElse: () => '',
+                );
 
-              final otherUserId = participants.firstWhere(
-                (id) => id != currentUser.uid,
-                orElse: () => '',
-              );
+                if (otherUserId.isEmpty) {
+                  return const SizedBox.shrink();
+                }
 
-              if (otherUserId.isEmpty) {
+                final participantNames = _safeMap(data['participantNames']);
+                final participantPhotoUrls = _safeMap(data['participantPhotoUrls']);
+
+                final otherUserName = _safeString(
+                  participantNames[otherUserId],
+                  fallback: 'User',
+                );
+
+                final otherUserPhotoUrl = _safeString(
+                  participantPhotoUrls[otherUserId],
+                );
+
+                final lastMessage = _safeString(
+                  data['lastMessage'],
+                  fallback: 'No messages yet',
+                );
+
+                final updatedAt = _formatTimestampFromData(data);
+
+                return ListTile(
+                  leading: _buildAvatar(
+                    name: otherUserName,
+                    photoUrl: otherUserPhotoUrl,
+                  ),
+                  title: Text(
+                    otherUserName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    lastMessage,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: updatedAt.isEmpty
+                      ? null
+                      : Text(
+                          updatedAt,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PrivateChatScreen(
+                          otherUserId: otherUserId,
+                          otherUserName: otherUserName,
+                          otherUserPhotoUrl: otherUserPhotoUrl,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              } catch (_) {
                 return const SizedBox.shrink();
               }
-
-              final participantNames =
-                  data['participantNames'] as Map<String, dynamic>? ?? {};
-              final participantPhotoUrls =
-                  data['participantPhotoUrls'] as Map<String, dynamic>? ?? {};
-
-              final otherUserName = _safeString(
-                participantNames[otherUserId],
-                fallback: 'User',
-              );
-
-              final otherUserPhotoUrl =
-                  _safeString(participantPhotoUrls[otherUserId]);
-
-              final lastMessage = _safeString(
-                data['lastMessage'],
-                fallback: 'No messages yet',
-              );
-
-              final updatedAt = _formatTimestamp(data['updatedAt']);
-
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundImage: otherUserPhotoUrl.isNotEmpty
-                      ? NetworkImage(otherUserPhotoUrl)
-                      : null,
-                  child: otherUserPhotoUrl.isEmpty
-                      ? Text(
-                          otherUserName.isNotEmpty
-                              ? otherUserName[0].toUpperCase()
-                              : '?',
-                        )
-                      : null,
-                ),
-                title: Text(
-                  otherUserName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  lastMessage,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: updatedAt.isEmpty
-                    ? null
-                    : Text(
-                        updatedAt,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PrivateChatScreen(
-                        otherUserId: otherUserId,
-                        otherUserName: otherUserName,
-                        otherUserPhotoUrl: otherUserPhotoUrl,
-                      ),
-                    ),
-                  );
-                },
-              );
             },
           );
         },

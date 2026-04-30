@@ -34,7 +34,8 @@ class CommunityPostThreadPage extends StatefulWidget {
   final AppUserProfile currentProfile;
 
   @override
-  State<CommunityPostThreadPage> createState() => _CommunityPostThreadPageState();
+  State<CommunityPostThreadPage> createState() =>
+      _CommunityPostThreadPageState();
 }
 
 class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
@@ -49,18 +50,33 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
   DocumentReference<Map<String, dynamic>> get _postRef =>
       FirebaseFirestore.instance.collection('community_posts').doc(widget.post.id);
 
-  CollectionReference<Map<String, dynamic>> get _repliesRef => _postRef.collection('replies');
+  CollectionReference<Map<String, dynamic>> get _repliesRef =>
+      _postRef.collection('replies');
+
+  String get _currentUid =>
+      (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid).trim();
 
   @override
   void initState() {
     super.initState();
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
-    _blockedUsersSub = CommunitySafetyService.blockedUserIdsStream(currentUid).listen((blockedUserIds) {
-      if (!mounted) return;
-      setState(() {
-        _blockedUserIds = blockedUserIds;
-      });
-    });
+
+    final currentUid = _currentUid;
+    if (currentUid.isEmpty) return;
+
+    _blockedUsersSub = CommunitySafetyService.blockedUserIdsStream(currentUid).listen(
+      (blockedUserIds) {
+        if (!mounted) return;
+        setState(() {
+          _blockedUserIds = blockedUserIds;
+        });
+      },
+      onError: (_) {
+        if (!mounted) return;
+        setState(() {
+          _blockedUserIds = <String>{};
+        });
+      },
+    );
   }
 
   @override
@@ -69,6 +85,52 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     _replyController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Stream<CommunityPost> _postStream() async* {
+    yield widget.post;
+
+    try {
+      await for (final snapshot in _postRef.snapshots()) {
+        if (!snapshot.exists) {
+          yield widget.post;
+          continue;
+        }
+
+        try {
+          yield CommunityPost.fromDoc(snapshot);
+        } catch (_) {
+          yield widget.post;
+        }
+      }
+    } catch (_) {
+      yield widget.post;
+    }
+  }
+
+  Stream<List<CommunityReply>> _repliesStream() async* {
+    try {
+      await for (final snapshot in _repliesRef.orderBy('createdAtMs').snapshots()) {
+        final replies = snapshot.docs
+            .map(_safeReplyFromDoc)
+            .whereType<CommunityReply>()
+            .toList();
+
+        yield replies;
+      }
+    } catch (_) {
+      yield const <CommunityReply>[];
+    }
+  }
+
+  CommunityReply? _safeReplyFromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    try {
+      return CommunityReply.fromDoc(doc);
+    } catch (_) {
+      return null;
+    }
   }
 
   void _requestScrollToLatestReply() {
@@ -100,7 +162,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     }
 
     try {
-      final localImagePath = await LocalProfileImageStore.loadForUser(widget.currentProfile.uid);
+      final localImagePath =
+          await LocalProfileImageStore.loadForUser(widget.currentProfile.uid);
       if (localImagePath == null || localImagePath.trim().isEmpty) {
         return null;
       }
@@ -139,7 +202,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                 onTap: () => Navigator.of(sheetContext).pop(ImageSource.camera),
               ),
               ListTile(
-                leading: const Icon(Icons.photo_library_outlined, color: Colors.white),
+                leading:
+                    const Icon(Icons.photo_library_outlined, color: Colors.white),
                 title: const Text(
                   'Choose from gallery',
                   style: TextStyle(color: Colors.white),
@@ -161,18 +225,21 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
         _replyImageBase64 = encoded;
       });
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not add photo right now.')),
-        );
-      }
+      _showThreadMessage('Could not add photo right now.');
     }
   }
 
   Future<void> _addReply() async {
+    final authorId = _currentUid;
+    if (authorId.isEmpty) {
+      _showThreadMessage('Please sign in to send replies.');
+      return;
+    }
+
     final message = _replyController.text.trim();
     final imageBase64 = _replyImageBase64?.trim();
-    if ((message.isEmpty && (imageBase64 == null || imageBase64.isEmpty)) || _sending) {
+    if ((message.isEmpty && (imageBase64 == null || imageBase64.isEmpty)) ||
+        _sending) {
       return;
     }
 
@@ -182,11 +249,13 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
 
     try {
       final replyDoc = _repliesRef.doc();
-      final authorProfileImageBase64 = await _currentProfileImageBase64ForCommunity();
+      final authorProfileImageBase64 =
+          await _currentProfileImageBase64ForCommunity();
+
       await replyDoc.set(
         CommunityReply(
           id: replyDoc.id,
-          authorId: FirebaseAuth.instance.currentUser!.uid,
+          authorId: authorId,
           authorName: widget.currentProfile.displayName,
           message: message,
           createdAtMs: DateTime.now().millisecondsSinceEpoch,
@@ -194,6 +263,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
           authorProfileImageBase64: authorProfileImageBase64,
         ).toJson(),
       );
+
       _replyController.clear();
       if (mounted) {
         setState(() {
@@ -201,12 +271,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
         });
       }
       _requestScrollToLatestReply();
+    } on FirebaseException catch (error) {
+      _showThreadMessage(error.message ?? 'Could not send reply.');
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not send reply')),
-        );
-      }
+      _showThreadMessage('Could not send reply.');
     } finally {
       if (mounted) {
         setState(() {
@@ -217,8 +285,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
   }
 
   Future<void> _deleteReply(CommunityReply reply) async {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid == null) {
+    final currentUid = _currentUid;
+    if (currentUid.isEmpty) {
       _showThreadMessage('You need to be signed in to delete comments.');
       return;
     }
@@ -250,9 +318,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     required CommunityReply reply,
     required CommunityPost livePost,
   }) async {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    final currentUid = _currentUid;
     final replyAuthorId = reply.authorId.trim();
-    final replyAuthorName = reply.authorName.trim().isEmpty ? 'Trainer' : reply.authorName.trim();
+    final replyAuthorName =
+        reply.authorName.trim().isEmpty ? 'Trainer' : reply.authorName.trim();
     final canDelete = currentUid == reply.authorId || currentUid == livePost.authorId;
     final canAddFriend = replyAuthorId.isNotEmpty && replyAuthorId != currentUid;
 
@@ -413,7 +482,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
 
   Future<void> _openSellerRatingSheet(CommunityPost livePost) async {
     final sellerId = livePost.authorId.trim();
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    final currentUid = _currentUid;
     if (sellerId.isEmpty) {
       _showThreadMessage('This member cannot be rated right now.');
       return;
@@ -442,7 +511,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     required CommunityPost livePost,
   }) async {
     final trimmedMemberId = memberId.trim();
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid;
+    final currentUid = _currentUid;
     if (trimmedMemberId.isEmpty) {
       _showThreadMessage('This member cannot be rated right now.');
       return;
@@ -526,7 +595,11 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
         },
         SetOptions(merge: true),
       );
-      _showThreadMessage('Listing marked as ${normalizeCommunityMarketStatus(status)}.');
+      _showThreadMessage(
+        'Listing marked as ${normalizeCommunityMarketStatus(status)}.',
+      );
+    } on FirebaseException catch (error) {
+      _showThreadMessage(error.message ?? 'Could not update listing status.');
     } catch (_) {
       _showThreadMessage('Could not update listing status.');
     }
@@ -543,6 +616,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
         SetOptions(merge: true),
       );
       _showThreadMessage('Listing bumped.');
+    } on FirebaseException catch (error) {
+      _showThreadMessage(error.message ?? 'Could not bump listing.');
     } catch (_) {
       _showThreadMessage('Could not bump listing.');
     }
@@ -561,8 +636,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     required CommunityPost livePost,
     required bool keyboardOpen,
   }) {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    final canManageListing = currentUid != null && currentUid == livePost.authorId && livePost.isMarketplace;
+    final currentUid = _currentUid.isEmpty ? null : _currentUid;
+    final canManageListing = currentUid != null &&
+        currentUid == livePost.authorId &&
+        livePost.isMarketplace;
     final accentColor = communityPostAccentColor(livePost);
 
     return Padding(
@@ -581,7 +658,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: accentColor,
                           borderRadius: BorderRadius.circular(999),
@@ -597,9 +677,14 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                       if (livePost.isMarketplace) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
-                            color: communityMarketStatusColor(livePost.normalizedMarketStatus),
+                            color: communityMarketStatusColor(
+                              livePost.normalizedMarketStatus,
+                            ),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
@@ -629,7 +714,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              livePost.compactMarketplaceSummary ?? 'Replying to ${livePost.authorName}',
+                              livePost.compactMarketplaceSummary ??
+                                  'Replying to ${livePost.authorName}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -644,7 +730,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                       const SizedBox(width: 8),
                       Text(
                         _formatDate(livePost.createdAt).split('  ').first,
-                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
@@ -671,21 +760,30 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                                     : livePost.isWanted
                                         ? Icons.search_rounded
                                         : Icons.swap_horiz_rounded,
-                            label: livePost.isDiscussion ? 'Discussion' : livePost.postType,
+                            label: livePost.isDiscussion
+                                ? 'Discussion'
+                                : livePost.postType,
                             color: accentColor,
                           ),
                           if (livePost.isMarketplace) ...[
                             const SizedBox(width: 8),
                             CommunityMetaChip(
-                              icon: communityMarketStatusIcon(livePost.normalizedMarketStatus),
+                              icon: communityMarketStatusIcon(
+                                livePost.normalizedMarketStatus,
+                              ),
                               label: livePost.normalizedMarketStatus,
-                              color: communityMarketStatusColor(livePost.normalizedMarketStatus),
+                              color: communityMarketStatusColor(
+                                livePost.normalizedMarketStatus,
+                              ),
                             ),
                           ],
                           const Spacer(),
                           Text(
                             _formatDate(livePost.createdAt),
-                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -754,28 +852,52 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                         CommunitySellerTrustPanel(
                           sellerId: livePost.authorId,
                           sellerName: livePost.authorName,
-                          onRate: livePost.authorId.trim() == (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid)
+                          onRate: livePost.authorId.trim() ==
+                                  (FirebaseAuth.instance.currentUser?.uid ??
+                                      widget.currentProfile.uid)
                               ? null
                               : () => _openSellerRatingSheet(livePost),
                         ),
                       if (livePost.isMarketplace) ...[
                         const SizedBox(height: 10),
-                        CommunityInfoRow(label: 'Status', value: livePost.normalizedMarketStatus),
+                        CommunityInfoRow(
+                          label: 'Status',
+                          value: livePost.normalizedMarketStatus,
+                        ),
                         if (livePost.isForSale)
                           CommunityInfoRow(
                             label: 'Asking price',
-                            value: livePost.hasPrice ? livePost.formattedPrice : 'Not added',
+                            value: livePost.hasPrice
+                                ? livePost.formattedPrice
+                                : 'Not added',
                           ),
                         if (livePost.cardCondition.trim().isNotEmpty)
-                          CommunityInfoRow(label: 'Condition', value: livePost.cardCondition.trim()),
+                          CommunityInfoRow(
+                            label: 'Condition',
+                            value: livePost.cardCondition.trim(),
+                          ),
                         if (livePost.deliveryMethod.trim().isNotEmpty)
-                          CommunityInfoRow(label: 'Delivery', value: livePost.deliveryMethod.trim()),
+                          CommunityInfoRow(
+                            label: 'Delivery',
+                            value: livePost.deliveryMethod.trim(),
+                          ),
                         if (livePost.locationText.trim().isNotEmpty)
-                          CommunityInfoRow(label: 'Location', value: livePost.locationText.trim()),
-                        if (livePost.isSwap && livePost.wantedTradeFor.trim().isNotEmpty)
-                          CommunityInfoRow(label: 'Wanted in trade', value: livePost.wantedTradeFor.trim()),
-                        if (livePost.isWanted && livePost.wantedTradeFor.trim().isNotEmpty)
-                          CommunityInfoRow(label: 'Looking for', value: livePost.wantedTradeFor.trim()),
+                          CommunityInfoRow(
+                            label: 'Location',
+                            value: livePost.locationText.trim(),
+                          ),
+                        if (livePost.isSwap &&
+                            livePost.wantedTradeFor.trim().isNotEmpty)
+                          CommunityInfoRow(
+                            label: 'Wanted in trade',
+                            value: livePost.wantedTradeFor.trim(),
+                          ),
+                        if (livePost.isWanted &&
+                            livePost.wantedTradeFor.trim().isNotEmpty)
+                          CommunityInfoRow(
+                            label: 'Looking for',
+                            value: livePost.wantedTradeFor.trim(),
+                          ),
                         const SizedBox(height: 10),
                         TradeSafetyPanel(post: livePost),
                       ],
@@ -830,7 +952,9 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                             FilledButton.tonalIcon(
                               onPressed: () => _updateMarketStatus(
                                 livePost,
-                                livePost.normalizedMarketStatus == 'Pending' ? 'Available' : 'Pending',
+                                livePost.normalizedMarketStatus == 'Pending'
+                                    ? 'Available'
+                                    : 'Pending',
                               ),
                               icon: Icon(
                                 livePost.normalizedMarketStatus == 'Pending'
@@ -853,7 +977,9 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                                     ? Icons.check_circle_outline_rounded
                                     : Icons.swap_horiz_rounded,
                               ),
-                              label: Text(livePost.isForSale ? 'Mark sold' : 'Mark traded'),
+                              label: Text(
+                                livePost.isForSale ? 'Mark sold' : 'Mark traded',
+                              ),
                             ),
                             FilledButton.tonalIcon(
                               onPressed: _bumpListing,
@@ -1029,9 +1155,39 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     );
   }
 
+  Widget _buildRepliesEmptyCard() {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Card(
+        color: Color(0xFF102754),
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No replies yet. Start the conversation below.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 15),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRepliesLoadError() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'Could not load replies right now.\nPlease check your connection and try again.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final currentUid = _currentUid.isEmpty ? null : _currentUid;
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return Scaffold(
@@ -1043,41 +1199,35 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
       ),
       body: SafeArea(
         bottom: true,
-        child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: _postRef.snapshots(),
+        child: StreamBuilder<CommunityPost>(
+          stream: _postStream(),
+          initialData: widget.post,
           builder: (context, postSnapshot) {
-            final livePost = postSnapshot.hasData && postSnapshot.data?.exists == true
-                ? CommunityPost.fromDoc(postSnapshot.data!)
-                : widget.post;
+            final livePost = postSnapshot.data ?? widget.post;
             final hiddenReplyIds = livePost.hiddenReplyIds.toSet();
 
             return Column(
               children: [
                 Expanded(
-                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _repliesRef.orderBy('createdAtMs').snapshots(),
+                  child: StreamBuilder<List<CommunityReply>>(
+                    stream: _repliesStream(),
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                      if (snapshot.hasError) {
+                        return _buildRepliesLoadError();
+                      }
+
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          snapshot.data == null) {
                         return const Center(child: CircularProgressIndicator());
                       }
 
-                      if (snapshot.hasError) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(24),
-                            child: Text(
-                              'Could not load replies.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ),
-                        );
-                      }
-
-                      final replies = (snapshot.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
-                          .map(CommunityReply.fromDoc)
+                      final replies = (snapshot.data ?? const <CommunityReply>[])
                           .where((reply) => !hiddenReplyIds.contains(reply.id))
-                          .where((reply) => reply.authorId == currentUid || !_blockedUserIds.contains(reply.authorId))
+                          .where(
+                            (reply) =>
+                                reply.authorId == currentUid ||
+                                !_blockedUserIds.contains(reply.authorId),
+                          )
                           .toList();
 
                       if (_pendingScrollToLatestReply && replies.isNotEmpty) {
@@ -1090,7 +1240,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
 
                       return ListView.builder(
                         controller: _scrollController,
-                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
                         padding: const EdgeInsets.only(bottom: 12),
                         itemCount: itemCount,
                         itemBuilder: (context, index) {
@@ -1102,20 +1253,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                           }
 
                           if (replies.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                              child: Card(
-                                color: Color(0xFF102754),
-                                child: Padding(
-                                  padding: EdgeInsets.all(24),
-                                  child: Text(
-                                    'No replies yet. Start the conversation below.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(color: Colors.white70, fontSize: 15),
-                                  ),
-                                ),
-                              ),
-                            );
+                            return _buildRepliesEmptyCard();
                           }
 
                           final reply = replies[index - 1];
@@ -1154,13 +1292,17 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                                   top: 4,
                                   right: 4,
                                   child: InkWell(
-                                    onTap: () => setState(() => _replyImageBase64 = null),
+                                    onTap: () => setState(
+                                      () => _replyImageBase64 = null,
+                                    ),
                                     borderRadius: BorderRadius.circular(999),
                                     child: Container(
                                       width: 28,
                                       height: 28,
                                       decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.58),
+                                        color: Colors.black.withValues(
+                                          alpha: 0.58,
+                                        ),
                                         shape: BoxShape.circle,
                                       ),
                                       child: const Icon(
@@ -1182,7 +1324,9 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                             decoration: BoxDecoration(
                               color: const Color(0xFF16366E),
                               borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: const Color(0xFF3F5C96)),
+                              border: Border.all(
+                                color: const Color(0xFF3F5C96),
+                              ),
                             ),
                             child: IconButton(
                               onPressed: _sending ? null : _pickReplyImage,
@@ -1204,18 +1348,31 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                                 filled: true,
                                 fillColor: Color(0xFF16366E),
                                 border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.all(Radius.circular(18)),
-                                  borderSide: BorderSide(color: Color(0xFF3F5C96)),
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(18)),
+                                  borderSide: BorderSide(
+                                    color: Color(0xFF3F5C96),
+                                  ),
                                 ),
                                 enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.all(Radius.circular(18)),
-                                  borderSide: BorderSide(color: Color(0xFF3F5C96)),
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(18)),
+                                  borderSide: BorderSide(
+                                    color: Color(0xFF3F5C96),
+                                  ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.all(Radius.circular(18)),
-                                  borderSide: BorderSide(color: Color(0xFFF7DE77), width: 1.5),
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(18)),
+                                  borderSide: BorderSide(
+                                    color: Color(0xFFF7DE77),
+                                    width: 1.5,
+                                  ),
                                 ),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
                               ),
                             ),
                           ),
@@ -1223,7 +1380,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                           FilledButton(
                             onPressed: _sending ? null : _addReply,
                             style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 16,
+                              ),
                             ),
                             child: const Text('Reply'),
                           ),

@@ -24,7 +24,8 @@ class CreateCommunityPostSheet extends StatefulWidget {
   final String? initialPostType;
 
   @override
-  State<CreateCommunityPostSheet> createState() => _CreateCommunityPostSheetState();
+  State<CreateCommunityPostSheet> createState() =>
+      _CreateCommunityPostSheetState();
 }
 
 class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
@@ -32,7 +33,8 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
-  final TextEditingController _wantedTradeForController = TextEditingController();
+  final TextEditingController _wantedTradeForController =
+      TextEditingController();
 
   String _postType = 'Swap';
   String _marketStatus = 'Available';
@@ -50,6 +52,13 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
   bool get _isSwap => _postType == 'Swap';
   bool get _isWanted => _postType == 'Wanted';
 
+  static const List<String> _postTypeOptions = <String>[
+    'Swap',
+    'For Sale',
+    'Wanted',
+    'Thread',
+  ];
+
   List<String> get _marketStatusOptions {
     if (_isForSale) return const <String>['Available', 'Pending', 'Sold'];
     if (_isSwap) return const <String>['Available', 'Pending', 'Traded'];
@@ -63,24 +72,46 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
   @override
   void initState() {
     super.initState();
+
+    _askingCurrency = _safeCurrencyCode(CurrencySettings.selectedCode);
+    _cardCondition = _safeCardCondition(_cardCondition);
+    _deliveryMethod = _safeDeliveryMethod(_deliveryMethod);
+
     final existingPost = widget.existingPost;
     if (existingPost != null) {
-      _postType = existingPost.postType;
+      _postType = _safePostType(existingPost.postType);
       _titleController.text = existingPost.title;
       _descriptionController.text = existingPost.description;
-      _priceController.text = existingPost.hasPrice ? existingPost.askingPrice!.toStringAsFixed(2) : '';
+      _priceController.text =
+          existingPost.hasPrice ? existingPost.askingPrice!.toStringAsFixed(2) : '';
       _locationController.text = existingPost.locationText;
       _wantedTradeForController.text = existingPost.wantedTradeFor;
-      _marketStatus = existingPost.isMarketplace ? existingPost.normalizedMarketStatus : 'Available';
+      _marketStatus =
+          existingPost.isMarketplace ? existingPost.normalizedMarketStatus : 'Available';
       if (!_marketStatusOptions.contains(_marketStatus)) {
         _marketStatus = 'Available';
       }
-      _askingCurrency = existingPost.askingCurrencyCode;
-      _cardCondition = existingPost.cardCondition.trim().isEmpty ? 'Near Mint' : existingPost.cardCondition.trim();
-      _deliveryMethod = existingPost.deliveryMethod.trim().isEmpty ? 'Post' : existingPost.deliveryMethod.trim();
-      _imageBase64List = List<String>.from(existingPost.imageBase64List);
-    } else if (widget.initialPostType != null && widget.initialPostType!.trim().isNotEmpty) {
-      _postType = widget.initialPostType!.trim();
+      _askingCurrency = _safeCurrencyCode(existingPost.askingCurrencyCode);
+      _cardCondition = _safeCardCondition(
+        existingPost.cardCondition.trim().isEmpty
+            ? 'Near Mint'
+            : existingPost.cardCondition.trim(),
+      );
+      _deliveryMethod = _safeDeliveryMethod(
+        existingPost.deliveryMethod.trim().isEmpty
+            ? 'Post'
+            : existingPost.deliveryMethod.trim(),
+      );
+      _imageBase64List = List<String>.from(existingPost.imageBase64List)
+          .where((imageRef) => imageRef.trim().isNotEmpty)
+          .take(CommunityImageCodec.maxImagesPerPost)
+          .toList();
+    } else if (widget.initialPostType != null &&
+        widget.initialPostType!.trim().isNotEmpty) {
+      _postType = _safePostType(widget.initialPostType!.trim());
+      if (!_marketStatusOptions.contains(_marketStatus)) {
+        _marketStatus = 'Available';
+      }
     }
   }
 
@@ -92,6 +123,48 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
     _locationController.dispose();
     _wantedTradeForController.dispose();
     super.dispose();
+  }
+
+  String _safePostType(String value) {
+    final trimmed = value.trim();
+    if (_postTypeOptions.contains(trimmed)) return trimmed;
+    if (trimmed.toLowerCase() == 'discussion' ||
+        trimmed.toLowerCase() == 'discussion thread') {
+      return 'Thread';
+    }
+    return 'Swap';
+  }
+
+  String _safeCurrencyCode(String value) {
+    final trimmed = value.trim().toUpperCase();
+    if (CurrencySettings.supportedCurrencies.containsKey(trimmed)) {
+      return trimmed;
+    }
+
+    final selected = CurrencySettings.selectedCode.trim().toUpperCase();
+    if (CurrencySettings.supportedCurrencies.containsKey(selected)) {
+      return selected;
+    }
+
+    if (CurrencySettings.supportedCurrencies.isNotEmpty) {
+      return CurrencySettings.supportedCurrencies.keys.first;
+    }
+
+    return 'GBP';
+  }
+
+  String _safeCardCondition(String value) {
+    final trimmed = value.trim();
+    if (communityCardConditions.contains(trimmed)) return trimmed;
+    return communityCardConditions.isNotEmpty
+        ? communityCardConditions.first
+        : 'Near Mint';
+  }
+
+  String _safeDeliveryMethod(String value) {
+    final trimmed = value.trim();
+    if (communityDeliveryMethods.contains(trimmed)) return trimmed;
+    return communityDeliveryMethods.isNotEmpty ? communityDeliveryMethods.first : 'Post';
   }
 
   OutlineInputBorder get _fieldBorder => const OutlineInputBorder(
@@ -182,7 +255,8 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
     });
 
     try {
-      final encoded = await CommunityImageCodec.pickAndEncodeSingle(ImageSource.camera);
+      final encoded =
+          await CommunityImageCodec.pickAndEncodeSingle(ImageSource.camera);
       if (encoded == null || !mounted) return;
       setState(() {
         _imageBase64List = <String>[..._imageBase64List, encoded];
@@ -255,6 +329,12 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
   }
 
   Future<void> _submit() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (!_isEditing && currentUser == null) {
+      _showComposerMessage('Please sign in before creating a post.');
+      return;
+    }
+
     final title = _titleController.text.trim();
     final description = _descriptionController.text.trim();
     const contact = '';
@@ -280,6 +360,19 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
 
     try {
       final now = DateTime.now().millisecondsSinceEpoch;
+      final safeMarketStatus = _isMarketplacePost &&
+              _marketStatusOptions.contains(_marketStatus)
+          ? _marketStatus
+          : 'Available';
+      final safeCurrency = _safeCurrencyCode(_askingCurrency);
+      final safeCondition = _safeCardCondition(_cardCondition);
+      final safeDelivery = _safeDeliveryMethod(_deliveryMethod);
+      final safeImages = _imageBase64List
+          .map((imageRef) => imageRef.trim())
+          .where((imageRef) => imageRef.isNotEmpty)
+          .take(CommunityImageCodec.maxImagesPerPost)
+          .toList();
+
       if (_isEditing) {
         final existingPost = widget.existingPost!;
         final updatedPost = CommunityPost(
@@ -292,27 +385,31 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
           contact: contact,
           createdAtMs: existingPost.createdAtMs,
           updatedAtMs: now,
-          marketStatus: _isMarketplacePost ? _marketStatus : 'Available',
+          marketStatus: _isMarketplacePost ? safeMarketStatus : 'Available',
           askingPrice: _isForSale ? askingPrice : null,
-          askingCurrency: _isMarketplacePost ? _askingCurrency : CurrencySettings.selectedCode,
-          cardCondition: _isMarketplacePost ? _cardCondition : '',
-          deliveryMethod: _isMarketplacePost ? _deliveryMethod : '',
+          askingCurrency:
+              _isMarketplacePost ? safeCurrency : CurrencySettings.selectedCode,
+          cardCondition: _isMarketplacePost ? safeCondition : '',
+          deliveryMethod: _isMarketplacePost ? safeDelivery : '',
           locationText: _isMarketplacePost ? _locationController.text.trim() : '',
-          wantedTradeFor: (_isSwap || _isWanted) ? _wantedTradeForController.text.trim() : '',
+          wantedTradeFor: (_isSwap || _isWanted)
+              ? _wantedTradeForController.text.trim()
+              : '',
           lastBumpedAtMs: existingPost.lastBumpedAtMs,
-          imageBase64List: _imageBase64List,
+          imageBase64List: safeImages,
           hiddenReplyIds: existingPost.hiddenReplyIds,
         );
 
         await FirebaseFirestore.instance
             .collection('community_posts')
             .doc(existingPost.id)
-            .set(updatedPost.toJson());
+            .set(updatedPost.toJson(), SetOptions(merge: true));
       } else {
-        final postDoc = FirebaseFirestore.instance.collection('community_posts').doc();
+        final postDoc =
+            FirebaseFirestore.instance.collection('community_posts').doc();
         final post = CommunityPost(
           id: postDoc.id,
-          authorId: FirebaseAuth.instance.currentUser!.uid,
+          authorId: currentUser!.uid,
           authorName: widget.profile.displayName,
           postType: _postType,
           title: title,
@@ -320,27 +417,29 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
           contact: contact,
           createdAtMs: now,
           updatedAtMs: now,
-          marketStatus: _isMarketplacePost ? _marketStatus : 'Available',
+          marketStatus: _isMarketplacePost ? safeMarketStatus : 'Available',
           askingPrice: _isForSale ? askingPrice : null,
-          askingCurrency: _isMarketplacePost ? _askingCurrency : CurrencySettings.selectedCode,
-          cardCondition: _isMarketplacePost ? _cardCondition : '',
-          deliveryMethod: _isMarketplacePost ? _deliveryMethod : '',
+          askingCurrency:
+              _isMarketplacePost ? safeCurrency : CurrencySettings.selectedCode,
+          cardCondition: _isMarketplacePost ? safeCondition : '',
+          deliveryMethod: _isMarketplacePost ? safeDelivery : '',
           locationText: _isMarketplacePost ? _locationController.text.trim() : '',
-          wantedTradeFor: (_isSwap || _isWanted) ? _wantedTradeForController.text.trim() : '',
-          imageBase64List: _imageBase64List,
+          wantedTradeFor: (_isSwap || _isWanted)
+              ? _wantedTradeForController.text.trim()
+              : '',
+          imageBase64List: safeImages,
         );
         await postDoc.set(post.toJson());
       }
 
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } on FirebaseException catch (error) {
+      _showComposerMessage(
+        error.message ?? (_isEditing ? 'Could not update post' : 'Could not create post'),
+      );
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_isEditing ? 'Could not update post' : 'Could not create post')),
-        );
-      }
+      _showComposerMessage(_isEditing ? 'Could not update post' : 'Could not create post');
     } finally {
       if (mounted) {
         setState(() {
@@ -453,30 +552,49 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                             dropdownColor: const Color(0xFF143163),
                             decoration: _inputDecoration('Choose a post type'),
                             items: const [
-                              DropdownMenuItem(value: 'Swap', child: Text('Swap')),
-                              DropdownMenuItem(value: 'For Sale', child: Text('For Sale')),
-                              DropdownMenuItem(value: 'Wanted', child: Text('Wanted')),
-                              DropdownMenuItem(value: 'Thread', child: Text('Discussion Thread')),
+                              DropdownMenuItem(
+                                value: 'Swap',
+                                child: Text('Swap'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'For Sale',
+                                child: Text('For Sale'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'Wanted',
+                                child: Text('Wanted'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'Thread',
+                                child: Text('Discussion Thread'),
+                              ),
                             ],
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _postType = value;
-                                  if (_postType == 'Thread') {
-                                    _marketStatus = 'Available';
-                                  } else if (!_marketStatusOptions.contains(_marketStatus)) {
-                                    _marketStatus = 'Available';
-                                  }
-                                });
-                              }
-                            },
+                            onChanged: _saving
+                                ? null
+                                : (value) {
+                                    if (value != null) {
+                                      setState(() {
+                                        _postType = _safePostType(value);
+                                        if (_postType == 'Thread') {
+                                          _marketStatus = 'Available';
+                                        } else if (!_marketStatusOptions
+                                            .contains(_marketStatus)) {
+                                          _marketStatus = 'Available';
+                                        }
+                                      });
+                                    }
+                                  },
                           ),
                           const SizedBox(height: 14),
                           _fieldLabel('Title'),
                           const SizedBox(height: 8),
                           TextField(
                             controller: _titleController,
-                            style: const TextStyle(color: Colors.white, fontSize: 17),
+                            enabled: !_saving,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                            ),
                             decoration: _inputDecoration(titleHint),
                           ),
                           const SizedBox(height: 14),
@@ -484,8 +602,13 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                           const SizedBox(height: 8),
                           TextField(
                             controller: _descriptionController,
+                            enabled: !_saving,
                             maxLines: 5,
-                            style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.35),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              height: 1.35,
+                            ),
                             decoration: _inputDecoration(descriptionHint),
                           ),
                         ],
@@ -498,22 +621,34 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                             _fieldLabel('Listing status'),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<String>(
-                              initialValue: _marketStatus,
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                              initialValue: _marketStatusOptions.contains(_marketStatus)
+                                  ? _marketStatus
+                                  : 'Available',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                               iconEnabledColor: const Color(0xFFE4ECFF),
                               dropdownColor: const Color(0xFF143163),
                               decoration: _inputDecoration('Status'),
-                              items: communityMarketStatuses
-                                  .where((status) => status != 'All')
-                                  .map((status) => DropdownMenuItem(value: status, child: Text(status)))
+                              items: _marketStatusOptions
+                                  .map(
+                                    (status) => DropdownMenuItem(
+                                      value: status,
+                                      child: Text(status),
+                                    ),
+                                  )
                                   .toList(),
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() {
-                                    _marketStatus = value;
-                                  });
-                                }
-                              },
+                              onChanged: _saving
+                                  ? null
+                                  : (value) {
+                                      if (value != null) {
+                                        setState(() {
+                                          _marketStatus = value;
+                                        });
+                                      }
+                                    },
                             ),
                             if (_isForSale) ...[
                               const SizedBox(height: 14),
@@ -525,20 +660,34 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                     flex: 2,
                                     child: TextField(
                                       controller: _priceController,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white, fontSize: 17),
+                                      enabled: !_saving,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 17,
+                                      ),
                                       decoration: _inputDecoration('25.00'),
                                     ),
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: DropdownButtonFormField<String>(
-                                      initialValue: _askingCurrency,
-                                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                                      initialValue:
+                                          _safeCurrencyCode(_askingCurrency),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                       iconEnabledColor: const Color(0xFFE4ECFF),
                                       dropdownColor: const Color(0xFF143163),
-                                      decoration: _inputDecoration('Currency'),
-                                      items: CurrencySettings.supportedCurrencies.values
+                                      decoration:
+                                          _inputDecoration('Currency'),
+                                      items: CurrencySettings
+                                          .supportedCurrencies.values
                                           .map(
                                             (currency) => DropdownMenuItem(
                                               value: currency.code,
@@ -546,13 +695,16 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                             ),
                                           )
                                           .toList(),
-                                      onChanged: (value) {
-                                        if (value != null) {
-                                          setState(() {
-                                            _askingCurrency = value;
-                                          });
-                                        }
-                                      },
+                                      onChanged: _saving
+                                          ? null
+                                          : (value) {
+                                              if (value != null) {
+                                                setState(() {
+                                                  _askingCurrency =
+                                                      _safeCurrencyCode(value);
+                                                });
+                                              }
+                                            },
                                     ),
                                   ),
                                 ],
@@ -562,58 +714,95 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                             _fieldLabel('Card condition'),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<String>(
-                              initialValue: _cardCondition,
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                              initialValue: _safeCardCondition(_cardCondition),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                               iconEnabledColor: const Color(0xFFE4ECFF),
                               dropdownColor: const Color(0xFF143163),
                               decoration: _inputDecoration('Condition'),
                               items: communityCardConditions
-                                  .map((condition) => DropdownMenuItem(value: condition, child: Text(condition)))
+                                  .map(
+                                    (condition) => DropdownMenuItem(
+                                      value: condition,
+                                      child: Text(condition),
+                                    ),
+                                  )
                                   .toList(),
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() {
-                                    _cardCondition = value;
-                                  });
-                                }
-                              },
+                              onChanged: _saving
+                                  ? null
+                                  : (value) {
+                                      if (value != null) {
+                                        setState(() {
+                                          _cardCondition =
+                                              _safeCardCondition(value);
+                                        });
+                                      }
+                                    },
                             ),
                             const SizedBox(height: 14),
                             _fieldLabel('Delivery method'),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<String>(
-                              initialValue: _deliveryMethod,
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                              initialValue: _safeDeliveryMethod(_deliveryMethod),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                               iconEnabledColor: const Color(0xFFE4ECFF),
                               dropdownColor: const Color(0xFF143163),
                               decoration: _inputDecoration('Delivery method'),
                               items: communityDeliveryMethods
-                                  .map((delivery) => DropdownMenuItem(value: delivery, child: Text(delivery)))
+                                  .map(
+                                    (delivery) => DropdownMenuItem(
+                                      value: delivery,
+                                      child: Text(delivery),
+                                    ),
+                                  )
                                   .toList(),
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() {
-                                    _deliveryMethod = value;
-                                  });
-                                }
-                              },
+                              onChanged: _saving
+                                  ? null
+                                  : (value) {
+                                      if (value != null) {
+                                        setState(() {
+                                          _deliveryMethod =
+                                              _safeDeliveryMethod(value);
+                                        });
+                                      }
+                                    },
                             ),
                             const SizedBox(height: 14),
                             _fieldLabel('Location'),
                             const SizedBox(height: 8),
                             TextField(
                               controller: _locationController,
-                              style: const TextStyle(color: Colors.white, fontSize: 17),
-                              decoration: _inputDecoration('Manchester, collection point, or general area'),
+                              enabled: !_saving,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                              ),
+                              decoration: _inputDecoration(
+                                'Manchester, collection point, or general area',
+                              ),
                             ),
                             if (_isSwap || _isWanted) ...[
                               const SizedBox(height: 14),
-                              _fieldLabel(_isWanted ? 'Looking for' : 'Wanted in trade'),
+                              _fieldLabel(
+                                _isWanted ? 'Looking for' : 'Wanted in trade',
+                              ),
                               const SizedBox(height: 8),
                               TextField(
                                 controller: _wantedTradeForController,
+                                enabled: !_saving,
                                 maxLines: 3,
-                                style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.35),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  height: 1.35,
+                                ),
                                 decoration: _inputDecoration(
                                   _isWanted
                                       ? 'Specific cards, sets, condition, and whether you can buy or swap'
@@ -649,7 +838,10 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                               const Spacer(),
                               Text(
                                 _processingImages ? 'Processing...' : 'Ready',
-                                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                ),
                               ),
                             ],
                           ),
@@ -660,7 +852,8 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                               child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 itemCount: _imageBase64List.length,
-                                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(width: 10),
                                 itemBuilder: (context, index) {
                                   return Stack(
                                     children: [
@@ -669,7 +862,10 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                         decoration: BoxDecoration(
                                           color: const Color(0xFF16366E),
                                           borderRadius: BorderRadius.circular(18),
-                                          border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                                          border: Border.all(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.10),
+                                          ),
                                         ),
                                         clipBehavior: Clip.antiAlias,
                                         child: StoredImage(
@@ -683,13 +879,16 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                         right: 6,
                                         top: 6,
                                         child: InkWell(
-                                          onTap: () => _removePhotoAt(index),
+                                          onTap: _saving || _processingImages
+                                              ? null
+                                              : () => _removePhotoAt(index),
                                           borderRadius: BorderRadius.circular(999),
                                           child: Container(
                                             width: 28,
                                             height: 28,
                                             decoration: BoxDecoration(
-                                              color: Colors.black.withValues(alpha: 0.62),
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.62),
                                               shape: BoxShape.circle,
                                             ),
                                             child: const Icon(
@@ -712,7 +911,9 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                               decoration: BoxDecoration(
                                 color: const Color(0xFF16366E),
                                 borderRadius: BorderRadius.circular(18),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.10),
+                                ),
                               ),
                               child: Text(
                                 photoHelp,
@@ -728,17 +929,23 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                             children: [
                               Expanded(
                                 child: OutlinedButton.icon(
-                                  onPressed: _processingImages ? null : _addPhotoFromCamera,
+                                  onPressed: (_processingImages || _saving)
+                                      ? null
+                                      : _addPhotoFromCamera,
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.white,
-                                    side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    side: BorderSide(
+                                      color: Colors.white.withValues(alpha: 0.18),
+                                    ),
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 14),
                                   ),
                                   icon: _processingImages
                                       ? const SizedBox(
                                           width: 16,
                                           height: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child:
+                                              CircularProgressIndicator(strokeWidth: 2),
                                         )
                                       : const Icon(Icons.camera_alt_outlined),
                                   label: const Text('Camera'),
@@ -747,15 +954,19 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton.icon(
-                                  onPressed: _processingImages ? null : _addPhotosFromGallery,
+                                  onPressed: (_processingImages || _saving)
+                                      ? null
+                                      : _addPhotosFromGallery,
                                   style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 14),
                                   ),
                                   icon: _processingImages
                                       ? const SizedBox(
                                           width: 16,
                                           height: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child:
+                                              CircularProgressIndicator(strokeWidth: 2),
                                         )
                                       : const Icon(Icons.photo_library_outlined),
                                   label: const Text('Gallery'),
@@ -768,7 +979,10 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                             _isDiscussionPost
                                 ? 'Photos are optional for discussion threads and are stored directly in Firestore, so you do not need Firebase Storage.'
                                 : 'Photos are compressed and stored directly in Firestore, so your marketplace listing works without Firebase Storage.',
-                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),

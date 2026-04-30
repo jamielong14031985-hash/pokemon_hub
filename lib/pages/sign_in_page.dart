@@ -20,7 +20,8 @@ class _SignInPageState extends State<SignInPage> {
 
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
 
   bool _isSignUp = false;
   bool _submitting = false;
@@ -39,8 +40,12 @@ class _SignInPageState extends State<SignInPage> {
   }
 
   Future<void> _pickDateOfBirth() async {
+    if (_submitting) return;
+
     final now = DateTime.now();
-    final initialDate = _selectedDateOfBirth ?? DateTime(now.year - 18, now.month, now.day);
+    final initialDate =
+        _selectedDateOfBirth ?? DateTime(now.year - 18, now.month, now.day);
+
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate.isAfter(now) ? now : initialDate,
@@ -50,9 +55,11 @@ class _SignInPageState extends State<SignInPage> {
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0B3A82)),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF0B3A82),
+            ),
           ),
-          child: child!,
+          child: child ?? const SizedBox.shrink(),
         );
       },
     );
@@ -63,6 +70,58 @@ class _SignInPageState extends State<SignInPage> {
     });
   }
 
+  bool _looksLikeEmail(String email) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+  }
+
+  String _friendlyAuthError(FirebaseAuthException error) {
+    switch (error.code) {
+      case 'invalid-email':
+        return 'Enter a valid email address.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Email or password is incorrect.';
+      case 'email-already-in-use':
+        return 'An account already exists with this email address.';
+      case 'weak-password':
+        return 'Please choose a stronger password.';
+      case 'network-request-failed':
+        return 'Network error. Check your connection and try again.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait a moment and try again.';
+      case 'operation-not-allowed':
+        return 'Email sign in is not enabled for this app yet.';
+      default:
+        return error.message ?? 'Authentication failed';
+    }
+  }
+
+  Future<void> _saveNewUserProfile({
+    required User user,
+    required String email,
+    required int now,
+  }) async {
+    final dateOfBirth = _selectedDateOfBirth;
+    if (dateOfBirth == null) {
+      throw StateError('Missing date of birth.');
+    }
+
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      'uid': user.uid,
+      'email': user.email ?? email,
+      'username': '',
+      'createdAtMs': now,
+      'updatedAtMs': now,
+      'acceptedTermsVersion': _termsVersion,
+      'acceptedTermsAtMs': now,
+      'dateOfBirthMs': dateOfBirth.millisecondsSinceEpoch,
+      'emailVerified': user.emailVerified,
+    }, SetOptions(merge: true));
+  }
+
   Future<void> _submit() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -70,6 +129,16 @@ class _SignInPageState extends State<SignInPage> {
 
     if (email.isEmpty || password.isEmpty) {
       _showMessage('Enter your email and password');
+      return;
+    }
+
+    if (!_looksLikeEmail(email)) {
+      _showMessage('Enter a valid email address');
+      return;
+    }
+
+    if (_isSignUp && password.length < 6) {
+      _showMessage('Password must be at least 6 characters');
       return;
     }
 
@@ -94,27 +163,23 @@ class _SignInPageState extends State<SignInPage> {
 
     try {
       if (_isSignUp) {
-        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        final credential =
+            await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
         final user = credential.user;
-        if (user != null) {
-          final now = DateTime.now().millisecondsSinceEpoch;
-          await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-            'uid': user.uid,
-            'email': user.email ?? email,
-            'username': '',
-            'createdAtMs': now,
-            'updatedAtMs': now,
-            'acceptedTermsVersion': _termsVersion,
-            'acceptedTermsAtMs': now,
-            'dateOfBirthMs': _selectedDateOfBirth!.millisecondsSinceEpoch,
-            'emailVerified': user.emailVerified,
-          }, SetOptions(merge: true));
-          try {
-            await user.sendEmailVerification();
-          } catch (_) {}
+        if (user == null) {
+          throw StateError('Could not create account. Please try again.');
+        }
+
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await _saveNewUserProfile(user: user, email: email, now: now);
+
+        try {
+          await user.sendEmailVerification();
+        } catch (_) {
+          // Account creation should still complete if the verification email fails.
         }
       } else {
         await FirebaseAuth.instance.signInWithEmailAndPassword(
@@ -122,8 +187,12 @@ class _SignInPageState extends State<SignInPage> {
           password: password,
         );
       }
-    } on FirebaseAuthException catch (e) {
-      _showMessage(e.message ?? 'Authentication failed');
+    } on FirebaseAuthException catch (error) {
+      _showMessage(_friendlyAuthError(error));
+    } on FirebaseException catch (error) {
+      _showMessage(error.message ?? 'Could not save your profile details.');
+    } on StateError catch (error) {
+      _showMessage(error.message);
     } catch (_) {
       _showMessage('Authentication failed');
     } finally {
@@ -142,6 +211,11 @@ class _SignInPageState extends State<SignInPage> {
       return;
     }
 
+    if (!_looksLikeEmail(email)) {
+      _showMessage('Enter a valid email address');
+      return;
+    }
+
     setState(() {
       _sendingPasswordReset = true;
     });
@@ -149,8 +223,8 @@ class _SignInPageState extends State<SignInPage> {
     try {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
       _showMessage('Password reset email sent. Check your inbox and spam folder.');
-    } on FirebaseAuthException catch (e) {
-      _showMessage(e.message ?? 'Could not send password reset email.');
+    } on FirebaseAuthException catch (error) {
+      _showMessage(_friendlyAuthError(error));
     } catch (_) {
       _showMessage('Could not send password reset email.');
     } finally {
@@ -256,8 +330,23 @@ class _SignInPageState extends State<SignInPage> {
     );
   }
 
+  void _switchAuthMode(bool signUp) {
+    if (_submitting || _sendingPasswordReset) return;
+    if (_isSignUp == signUp) return;
+
+    setState(() {
+      _isSignUp = signUp;
+      _confirmPasswordController.clear();
+      _obscureConfirmPassword = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final dateOfBirth = _selectedDateOfBirth;
+    final selectedAge =
+        dateOfBirth == null ? null : calculateAgeYears(dateOfBirth);
+
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       body: SafeArea(
@@ -310,7 +399,7 @@ class _SignInPageState extends State<SignInPage> {
                             child: AuthModeChip(
                               label: 'Sign In',
                               selected: !_isSignUp,
-                              onTap: () => setState(() => _isSignUp = false),
+                              onTap: () => _switchAuthMode(false),
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -318,7 +407,7 @@ class _SignInPageState extends State<SignInPage> {
                             child: AuthModeChip(
                               label: 'Sign Up',
                               selected: _isSignUp,
-                              onTap: () => setState(() => _isSignUp = true),
+                              onTap: () => _switchAuthMode(true),
                             ),
                           ),
                         ],
@@ -326,20 +415,40 @@ class _SignInPageState extends State<SignInPage> {
                       const SizedBox(height: 18),
                       TextField(
                         controller: _emailController,
+                        enabled: !_submitting,
                         keyboardType: TextInputType.emailAddress,
+                        autofillHints: const [AutofillHints.email],
+                        textInputAction: TextInputAction.next,
                         style: const TextStyle(color: Colors.white),
                         decoration: _authInputDecoration('Email address'),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _passwordController,
+                        enabled: !_submitting,
                         obscureText: _obscurePassword,
+                        autofillHints: _isSignUp
+                            ? const [AutofillHints.newPassword]
+                            : const [AutofillHints.password],
+                        textInputAction:
+                            _isSignUp ? TextInputAction.next : TextInputAction.done,
+                        onSubmitted: (_) {
+                          if (!_isSignUp && !_submitting) {
+                            _submit();
+                          }
+                        },
                         style: const TextStyle(color: Colors.white),
                         decoration: _authInputDecoration('Password').copyWith(
                           suffixIcon: IconButton(
-                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            onPressed: _submitting
+                                ? null
+                                : () => setState(
+                                      () => _obscurePassword = !_obscurePassword,
+                                    ),
                             icon: Icon(
-                              _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                              _obscurePassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
                               color: Colors.white70,
                             ),
                           ),
@@ -349,13 +458,29 @@ class _SignInPageState extends State<SignInPage> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: _confirmPasswordController,
+                          enabled: !_submitting,
                           obscureText: _obscureConfirmPassword,
+                          autofillHints: const [AutofillHints.newPassword],
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) {
+                            if (!_submitting) {
+                              _submit();
+                            }
+                          },
                           style: const TextStyle(color: Colors.white),
-                          decoration: _authInputDecoration('Confirm password').copyWith(
+                          decoration: _authInputDecoration('Confirm password')
+                              .copyWith(
                             suffixIcon: IconButton(
-                              onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                              onPressed: _submitting
+                                  ? null
+                                  : () => setState(
+                                        () => _obscureConfirmPassword =
+                                            !_obscureConfirmPassword,
+                                      ),
                               icon: Icon(
-                                _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                                _obscureConfirmPassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
                                 color: Colors.white70,
                               ),
                             ),
@@ -363,7 +488,7 @@ class _SignInPageState extends State<SignInPage> {
                         ),
                         const SizedBox(height: 12),
                         InkWell(
-                          onTap: _pickDateOfBirth,
+                          onTap: _submitting ? null : _pickDateOfBirth,
                           borderRadius: BorderRadius.circular(18),
                           child: InputDecorator(
                             decoration: _authInputDecoration('Date of birth'),
@@ -371,30 +496,34 @@ class _SignInPageState extends State<SignInPage> {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    _selectedDateOfBirth == null
+                                    dateOfBirth == null
                                         ? 'Select your date of birth'
-                                        : formatDateOfBirth(_selectedDateOfBirth!),
+                                        : formatDateOfBirth(dateOfBirth),
                                     style: TextStyle(
-                                      color: _selectedDateOfBirth == null
+                                      color: dateOfBirth == null
                                           ? Colors.white54
                                           : Colors.white,
                                       fontSize: 16,
                                     ),
                                   ),
                                 ),
-                                const Icon(Icons.calendar_today_outlined, color: Colors.white70, size: 20),
+                                const Icon(
+                                  Icons.calendar_today_outlined,
+                                  color: Colors.white70,
+                                  size: 20,
+                                ),
                               ],
                             ),
                           ),
                         ),
-                        if (_selectedDateOfBirth != null) ...[
+                        if (dateOfBirth != null && selectedAge != null) ...[
                           const SizedBox(height: 8),
                           Text(
-                            calculateAgeYears(_selectedDateOfBirth!) >= _kCommunityMinimumAge
+                            selectedAge >= _kCommunityMinimumAge
                                 ? 'You can access the Community page once your profile is complete.'
                                 : 'Users under $_kCommunityMinimumAge cannot access the Community page.',
                             style: TextStyle(
-                              color: calculateAgeYears(_selectedDateOfBirth!) >= _kCommunityMinimumAge
+                              color: selectedAge >= _kCommunityMinimumAge
                                   ? const Color(0xFFC8D4F0)
                                   : const Color(0xFFF7DE77),
                               fontSize: 12,
@@ -418,13 +547,23 @@ class _SignInPageState extends State<SignInPage> {
                                 children: [
                                   Checkbox(
                                     value: _acceptedTerms,
-                                    activeColor: const Color(0xFFF7DE77),
+                                    fillColor:
+                                        WidgetStateProperty.resolveWith<Color?>(
+                                      (states) {
+                                        if (states.contains(WidgetState.selected)) {
+                                          return const Color(0xFFF7DE77);
+                                        }
+                                        return null;
+                                      },
+                                    ),
                                     checkColor: Colors.black,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _acceptedTerms = value ?? false;
-                                      });
-                                    },
+                                    onChanged: _submitting
+                                        ? null
+                                        : (value) {
+                                            setState(() {
+                                              _acceptedTerms = value ?? false;
+                                            });
+                                          },
                                   ),
                                   Expanded(
                                     child: Padding(
@@ -437,7 +576,10 @@ class _SignInPageState extends State<SignInPage> {
                                             height: 1.4,
                                           ),
                                           children: [
-                                            TextSpan(text: 'I have read and agree to the '),
+                                            TextSpan(
+                                              text:
+                                                  'I have read and agree to the ',
+                                            ),
                                             TextSpan(
                                               text: 'Terms & Conditions',
                                               style: TextStyle(
@@ -456,7 +598,8 @@ class _SignInPageState extends State<SignInPage> {
                               Align(
                                 alignment: Alignment.centerLeft,
                                 child: TextButton.icon(
-                                  onPressed: _openTermsAndConditions,
+                                  onPressed:
+                                      _submitting ? null : _openTermsAndConditions,
                                   icon: const Icon(Icons.description_outlined),
                                   label: const Text('Read Terms & Conditions'),
                                 ),
@@ -482,7 +625,9 @@ class _SignInPageState extends State<SignInPage> {
                       if (!_isSignUp) ...[
                         const SizedBox(height: 8),
                         TextButton.icon(
-                          onPressed: (_submitting || _sendingPasswordReset) ? null : _sendPasswordReset,
+                          onPressed: (_submitting || _sendingPasswordReset)
+                              ? null
+                              : _sendPasswordReset,
                           icon: _sendingPasswordReset
                               ? const SizedBox(
                                   width: 16,
@@ -490,7 +635,11 @@ class _SignInPageState extends State<SignInPage> {
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Icon(Icons.lock_reset_outlined),
-                          label: Text(_sendingPasswordReset ? 'Sending reset email...' : 'Forgot password?'),
+                          label: Text(
+                            _sendingPasswordReset
+                                ? 'Sending reset email...'
+                                : 'Forgot password?',
+                          ),
                         ),
                       ],
                     ],
@@ -549,7 +698,6 @@ These terms may be updated from time to time. Continued use of PocketChase after
 If you have questions, concerns, or need to report misuse, use the contact method provided by the app owner.
 
 These terms are a practical in-app starter set and may need review to match your local laws, privacy wording, and how you run the app.''';
-
 
 InputDecoration _authInputDecoration(String label) {
   return InputDecoration(
