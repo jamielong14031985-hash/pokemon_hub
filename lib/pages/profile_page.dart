@@ -151,7 +151,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-
   Future<void> _updateCurrency(String? value) async {
     if (value == null || value == _selectedCurrencyCode) return;
 
@@ -225,13 +224,11 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-
   Future<void> _openCardDetails(TcgCard card) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => CardDetailsPage(card: card)),
     );
   }
-
 
   Future<void> _deleteAccount() async {
     final password = await _showDeleteAccountConfirmationDialog();
@@ -349,6 +346,31 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  ImageProvider? _profileImageProvider() {
+    final imageFile = _profileImagePath != null ? File(_profileImagePath!) : null;
+    final existingImageFile = imageFile != null && imageFile.existsSync() ? imageFile : null;
+    final sharedImageRef = widget.profile.profileImageBase64?.trim() ?? '';
+
+    if (existingImageFile != null) {
+      return FileImage(existingImageFile);
+    }
+
+    if (sharedImageRef.isEmpty) {
+      return null;
+    }
+
+    if (FirebaseImageStorageService.isRemoteRef(sharedImageRef)) {
+      return NetworkImage(sharedImageRef);
+    }
+
+    final sharedImageBytes = CommunityImageCodec.decode(sharedImageRef);
+    if (sharedImageBytes != null) {
+      return MemoryImage(sharedImageBytes);
+    }
+
+    return null;
+  }
+
   @override
   void dispose() {
     collectionRefreshNotifier.removeListener(_handleCollectionRefresh);
@@ -356,24 +378,429 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
+  Widget _buildProfileSettingsCard(ImageProvider? profileImageProvider) {
+    return RepaintBoundary(
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              GestureDetector(
+                onTap: _pickImage,
+                child: Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.white12,
+                      backgroundImage: profileImageProvider,
+                      child: profileImageProvider == null
+                          ? const Icon(
+                              Icons.person,
+                              color: Colors.white,
+                              size: 50,
+                            )
+                          : null,
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF7DE77),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: const Color(0xFF041B4A), width: 2),
+                        ),
+                        child: const Icon(Icons.edit, color: Colors.black, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'This picture will show beside your community posts and comments.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Trainer Name',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: const Color(0xFF0E2A5E),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                readOnly: true,
+                style: const TextStyle(color: Colors.white70),
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  hintText: widget.profile.email,
+                  hintStyle: const TextStyle(color: Colors.white70),
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: const Color(0xFF0E2A5E),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedCurrencyCode,
+                dropdownColor: const Color(0xFF102754),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Display Currency',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: const Color(0xFF0E2A5E),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                items: CurrencySettings.supportedCurrencies.values
+                    .map(
+                      (currency) => DropdownMenuItem<String>(
+                        value: currency.code,
+                        child: Text(
+                          '${currency.code} • ${currency.label}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _savingCurrency ? null : _updateCurrency,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Card prices update across the app when you change this setting.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              if (_savingCurrency) ...[
+                const SizedBox(height: 10),
+                const LinearProgressIndicator(),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('Choose Picture'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _savingName ? null : _saveName,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(_savingName ? 'Saving...' : 'Save Name'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFriendsCard() {
+    return RepaintBoundary(
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Friends & shared Pokédex',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Open your friends list, review requests, and browse their synced Pokédex collections.',
+                style: TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => FriendRequestsPage(currentProfile: widget.profile),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      label: const Text('Requests'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _openFriends,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2C7A5B),
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.collections_bookmark_outlined),
+                      label: const Text('Friends'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _openWishlistMatchCentre,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFF7DE77),
+                    foregroundColor: Colors.black,
+                  ),
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                  label: const Text('Wishlist Match Centre'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWishlistCard() {
+    return RepaintBoundary(
+      child: StreamBuilder<List<WishlistEntry>>(
+        stream: WishlistService.wishlistStream(widget.profile.uid),
+        builder: (context, snapshot) {
+          final wishlistCount = (snapshot.data ?? const <WishlistEntry>[]).length;
+          return Card(
+            color: const Color(0xFF102754),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Wishlist',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    wishlistCount == 1
+                        ? '1 card saved for later.'
+                        : '$wishlistCount cards saved for later.',
+                    style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _openWishlist,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFB13B59),
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.favorite_outline_rounded),
+                      label: const Text('Open Wishlist'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildAccountSecurityCard() {
+    return Card(
+      color: const Color(0xFF102754),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Account & security',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.verified_user_outlined, color: Color(0xFF54D39A), size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    FirebaseAuth.instance.currentUser?.emailVerified == true
+                        ? 'Email verified: ${widget.profile.email}'
+                        : 'Email not verified yet: ${widget.profile.email}',
+                    style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Deleting your account removes your synced PocketChase data and cannot be undone.',
+              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _deletingAccount ? null : _deleteAccount,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFFFB3C7),
+                  side: const BorderSide(color: Color(0xFFB13B59)),
+                ),
+                icon: _deletingAccount
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.delete_forever_outlined),
+                label: Text(_deletingAccount ? 'Deleting account...' : 'Delete Account'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsSection(ImageProvider? profileImageProvider) {
+    return FutureBuilder<ProfileStats>(
+      future: _statsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.only(top: 40),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Card(
+            color: const Color(0xFF102754),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Could not load profile stats: ${snapshot.error}',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          );
+        }
+
+        final stats = snapshot.data ?? const ProfileStats(
+          totalCards: 0,
+          uniqueCards: 0,
+          totalEstimatedPrice: 0,
+          mostExpensiveCard: null,
+          mostExpensiveCardCopies: 0,
+          favouriteSetName: null,
+          favouriteSetCopies: 0,
+          rarityCopies: <String, int>{},
+          rarityValues: <String, double>{},
+          topValueCards: <TcgCard>[],
+        );
+
+        return Column(
+          children: [
+            ProfileShowcaseCard(
+              profileName: widget.profile.displayName,
+              imageProvider: profileImageProvider,
+              stats: stats,
+              onOpenCard: _openCardDetails,
+            ),
+            const SizedBox(height: 12),
+            RarityValueDashboard(
+              stats: stats,
+              onOpenCard: _openCardDetails,
+            ),
+            const SizedBox(height: 12),
+            AchievementBadges(stats: stats),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ProfileStatCard(
+                    title: 'Total Cards',
+                    value: '${stats.totalCards}',
+                    icon: Icons.style_outlined,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ProfileStatCard(
+                    title: 'Total Value',
+                    value: CurrencySettings.formatSelectedAmount(stats.totalEstimatedPrice),
+                    icon: Icons.payment_outlined,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            MostExpensiveCardWidget(
+              card: stats.mostExpensiveCard,
+              copies: stats.mostExpensiveCardCopies,
+              onOpenCard: _openCardDetails,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final imageFile = _profileImagePath != null ? File(_profileImagePath!) : null;
-    final existingImageFile = imageFile != null && imageFile.existsSync() ? imageFile : null;
-    final sharedImageRef = widget.profile.profileImageBase64?.trim() ?? '';
-    ImageProvider? profileImageProvider;
-    if (existingImageFile != null) {
-      profileImageProvider = FileImage(existingImageFile);
-    } else if (sharedImageRef.isNotEmpty) {
-      if (FirebaseImageStorageService.isRemoteRef(sharedImageRef)) {
-        profileImageProvider = NetworkImage(sharedImageRef);
-      } else {
-        final sharedImageBytes = CommunityImageCodec.decode(sharedImageRef);
-        if (sharedImageBytes != null) {
-          profileImageProvider = MemoryImage(sharedImageBytes);
-        }
-      }
-    }
+    final profileImageProvider = _profileImageProvider();
     final bottomSafePadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
@@ -394,412 +821,30 @@ class _ProfilePageState extends State<ProfilePage> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _refreshStats,
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(16, 12, 16, 28 + bottomSafePadding),
-                children: [
-                  Card(
-                    color: const Color(0xFF102754),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.fromLTRB(16, 12, 16, 28 + bottomSafePadding),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          GestureDetector(
-                            onTap: _pickImage,
-                            child: Stack(
-                              children: [
-                                CircleAvatar(
-                                  radius: 50,
-                                  backgroundColor: Colors.white12,
-                                  backgroundImage: profileImageProvider,
-                                  child: profileImageProvider == null
-                                      ? const Icon(
-                                          Icons.person,
-                                          color: Colors.white,
-                                          size: 50,
-                                        )
-                                      : null,
-                                ),
-                                Positioned(
-                                  right: 0,
-                                  bottom: 0,
-                                  child: Container(
-                                    width: 34,
-                                    height: 34,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF7DE77),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: const Color(0xFF041B4A), width: 2),
-                                    ),
-                                    child: const Icon(Icons.edit, color: Colors.black, size: 18),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'This picture will show beside your community posts and comments.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white54, fontSize: 12),
-                          ),
+                          _buildProfileSettingsCard(profileImageProvider),
                           const SizedBox(height: 16),
-                          TextField(
-                            controller: _nameController,
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              labelText: 'Trainer Name',
-                              labelStyle: const TextStyle(color: Colors.white70),
-                              filled: true,
-                              fillColor: const Color(0xFF0E2A5E),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            readOnly: true,
-                            style: const TextStyle(color: Colors.white70),
-                            decoration: InputDecoration(
-                              labelText: 'Email',
-                              hintText: widget.profile.email,
-                              hintStyle: const TextStyle(color: Colors.white70),
-                              labelStyle: const TextStyle(color: Colors.white70),
-                              filled: true,
-                              fillColor: const Color(0xFF0E2A5E),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          DropdownButtonFormField<String>(
-                            initialValue: _selectedCurrencyCode,
-                            dropdownColor: const Color(0xFF102754),
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              labelText: 'Display Currency',
-                              labelStyle: const TextStyle(color: Colors.white70),
-                              filled: true,
-                              fillColor: const Color(0xFF0E2A5E),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            items: CurrencySettings.supportedCurrencies.values
-                                .map(
-                                  (currency) => DropdownMenuItem<String>(
-                                    value: currency.code,
-                                    child: Text(
-                                      '${currency.code} • ${currency.label}',
-                                      style: const TextStyle(color: Colors.white),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: _savingCurrency ? null : _updateCurrency,
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Card prices update across the app when you change this setting.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white54, fontSize: 12),
-                          ),
-                          if (_savingCurrency) ...[
-                            const SizedBox(height: 10),
-                            const LinearProgressIndicator(),
-                          ],
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: _pickImage,
-                                  icon: const Icon(Icons.photo_library_outlined),
-                                  label: const Text('Choose Picture'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: FilledButton.icon(
-                                  onPressed: _savingName ? null : _saveName,
-                                  icon: const Icon(Icons.save_outlined),
-                                  label: Text(_savingName ? 'Saving...' : 'Save Name'),
-                                ),
-                              ),
-                            ],
-                          ),
+                          _buildFriendsCard(),
+                          const SizedBox(height: 16),
+                          _buildWishlistCard(),
+                          const SizedBox(height: 16),
+                          _buildAccountSecurityCard(),
+                          const SizedBox(height: 16),
+                          _buildStatsSection(profileImageProvider),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Card(
-                    color: const Color(0xFF102754),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Friends & shared Pokédex',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Open your friends list, review requests, and browse their synced Pokédex collections.',
-                            style: TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => FriendRequestsPage(currentProfile: widget.profile),
-                                      ),
-                                    );
-                                  },
-                                  icon: const Icon(Icons.person_add_alt_1_outlined),
-                                  label: const Text('Requests'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: FilledButton.icon(
-                                  onPressed: _openFriends,
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF2C7A5B),
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  icon: const Icon(Icons.collections_bookmark_outlined),
-                                  label: const Text('Friends'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _openWishlistMatchCentre,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFFF7DE77),
-                                foregroundColor: Colors.black,
-                              ),
-                              icon: const Icon(Icons.auto_awesome_outlined),
-                              label: const Text('Wishlist Match Centre'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  StreamBuilder<List<WishlistEntry>>(
-                    stream: WishlistService.wishlistStream(widget.profile.uid),
-                    builder: (context, snapshot) {
-                      final wishlistCount = (snapshot.data ?? const <WishlistEntry>[]).length;
-                      return Card(
-                        color: const Color(0xFF102754),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Wishlist',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                wishlistCount == 1
-                                    ? '1 card saved for later.'
-                                    : '$wishlistCount cards saved for later.',
-                                style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.icon(
-                                  onPressed: _openWishlist,
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFFB13B59),
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  icon: const Icon(Icons.favorite_outline_rounded),
-                                  label: const Text('Open Wishlist'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  Card(
-                    color: const Color(0xFF102754),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Account & security',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Icon(Icons.verified_user_outlined, color: Color(0xFF54D39A), size: 20),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  FirebaseAuth.instance.currentUser?.emailVerified == true
-                                      ? 'Email verified: ${widget.profile.email}'
-                                      : 'Email not verified yet: ${widget.profile.email}',
-                                  style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Deleting your account removes your synced PocketChase data and cannot be undone.',
-                            style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: _deletingAccount ? null : _deleteAccount,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFFFB3C7),
-                                side: const BorderSide(color: Color(0xFFB13B59)),
-                              ),
-                              icon: _deletingAccount
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.delete_forever_outlined),
-                              label: Text(_deletingAccount ? 'Deleting account...' : 'Delete Account'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  FutureBuilder<ProfileStats>(
-                    future: _statsFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Padding(
-                          padding: EdgeInsets.only(top: 40),
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-
-                      if (snapshot.hasError) {
-                        return Card(
-                          color: const Color(0xFF102754),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              'Could not load profile stats: ${snapshot.error}',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                        );
-                      }
-
-                      final stats = snapshot.data ?? const ProfileStats(
-                        totalCards: 0,
-                        uniqueCards: 0,
-                        totalEstimatedPrice: 0,
-                        mostExpensiveCard: null,
-                        mostExpensiveCardCopies: 0,
-                        favouriteSetName: null,
-                        favouriteSetCopies: 0,
-                        rarityCopies: <String, int>{},
-                        rarityValues: <String, double>{},
-                        topValueCards: <TcgCard>[],
-                      );
-
-                      return Column(
-                        children: [
-                          ProfileShowcaseCard(
-                            profileName: widget.profile.displayName,
-                            imageProvider: profileImageProvider,
-                            stats: stats,
-                            onOpenCard: _openCardDetails,
-                          ),
-                          const SizedBox(height: 12),
-                          RarityValueDashboard(
-                            stats: stats,
-                            onOpenCard: _openCardDetails,
-                          ),
-                          const SizedBox(height: 12),
-                          AchievementBadges(stats: stats),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ProfileStatCard(
-                                  title: 'Total Cards',
-                                  value: '${stats.totalCards}',
-                                  icon: Icons.style_outlined,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ProfileStatCard(
-                                  title: 'Total Value',
-                                  value: CurrencySettings.formatSelectedAmount(stats.totalEstimatedPrice),
-                                  icon: Icons.payment_outlined,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          MostExpensiveCardWidget(
-                            card: stats.mostExpensiveCard,
-                            copies: stats.mostExpensiveCardCopies,
-                            onOpenCard: _openCardDetails,
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ],
+                  );
+                },
               ),
             ),
     );
