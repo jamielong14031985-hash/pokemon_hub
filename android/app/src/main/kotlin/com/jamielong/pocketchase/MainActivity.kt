@@ -1,4 +1,4 @@
-package com.example.pokemon_hub
+package com.jamielong.pocketchase
 
 import io.flutter.embedding.android.FlutterActivity
 
