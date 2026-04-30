@@ -73,7 +73,11 @@ class _AchievementBadgesState extends State<AchievementBadges> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(value ? 'Achievement badges are visible again.' : 'Achievement badges are hidden.'),
+        content: Text(
+          value
+              ? 'Achievement badges are visible again.'
+              : 'Achievement badges are hidden.',
+        ),
       ),
     );
   }
@@ -107,7 +111,9 @@ class _AchievementBadgesState extends State<AchievementBadges> {
       );
     }
 
-    final completedTierIndex = tiers.lastIndexWhere((tier) => progress >= tier.target);
+    final safeProgress = progress < 0 ? 0 : progress;
+    final completedTierIndex =
+        tiers.lastIndexWhere((tier) => safeProgress >= tier.target);
     final completedTierCount = math.max(0, completedTierIndex + 1);
     final hasStarted = completedTierCount > 0;
     final isComplete = completedTierCount >= tiers.length;
@@ -125,10 +131,10 @@ class _AchievementBadgesState extends State<AchievementBadges> {
       category: category,
       description: description,
       icon: icon,
-      accent: nextTier.color,
+      accent: isComplete ? tiers.last.color : nextTier.color,
       unlocked: hasStarted,
       complete: isComplete,
-      progress: isComplete ? nextTier.target : progress,
+      progress: isComplete ? nextTier.target : safeProgress,
       target: nextTier.target,
       statusLabel: isComplete ? 'Complete' : '$completedTierCount/${tiers.length} tiers',
       progressPrefix: progressPrefix,
@@ -148,34 +154,44 @@ class _AchievementBadgesState extends State<AchievementBadges> {
     return '$prefix$formatted$suffix';
   }
 
+  bool _isSpecialRarityLabel(String rarity) {
+    final value = rarity.toLowerCase();
+    return value.contains('special illustration') ||
+        value.contains('illustration') ||
+        value.contains('secret') ||
+        value.contains('hyper') ||
+        value.contains('rainbow') ||
+        value.contains('gold') ||
+        value.contains('ultra') ||
+        value.contains('ace spec') ||
+        value.contains('amazing') ||
+        value.contains('radiant') ||
+        value.contains('shiny') ||
+        value.contains('trainer gallery') ||
+        value.contains('gallery') ||
+        value.contains('rare holo');
+  }
+
   List<AchievementBadgeData> _buildBadges() {
-    final uniqueRarities = widget.stats.rarityCopies.keys.where((rarity) => rarity.trim().isNotEmpty).length;
-    bool isSpecialRarityLabel(String rarity) {
-      final value = rarity.toLowerCase();
-      return value.contains('special illustration') ||
-          value.contains('illustration') ||
-          value.contains('secret') ||
-          value.contains('hyper') ||
-          value.contains('rainbow') ||
-          value.contains('gold') ||
-          value.contains('ultra') ||
-          value.contains('ace spec') ||
-          value.contains('amazing') ||
-          value.contains('radiant') ||
-          value.contains('shiny') ||
-          value.contains('trainer gallery') ||
-          value.contains('gallery') ||
-          value.contains('rare holo');
-    }
+    final uniqueRarities = widget.stats.rarityCopies.keys
+        .where((rarity) => rarity.trim().isNotEmpty)
+        .length;
 
     final specialPullCopies = widget.stats.rarityCopies.entries
-        .where((entry) => isSpecialRarityLabel(entry.key))
+        .where((entry) => _isSpecialRarityLabel(entry.key))
         .fold<int>(0, (runningTotal, entry) => runningTotal + entry.value);
+
+    final duplicateCopies = math.max(
+      0,
+      widget.stats.totalCards - widget.stats.uniqueCards,
+    );
+
     final topCardValue = CurrencySettings.convertAmountSync(
           widget.stats.mostExpensiveCard?.marketPrice,
           fromCurrency: widget.stats.mostExpensiveCard?.rawPriceCurrency ?? 'USD',
         ) ??
         0;
+
     final totalValue = widget.stats.totalEstimatedPrice;
     final currencySymbol = CurrencySettings.selectedCurrency.symbol;
 
@@ -215,6 +231,22 @@ class _AchievementBadgesState extends State<AchievementBadges> {
           AchievementTier(title: 'Set Historian', target: 1000, color: Color(0xFFFF8EC3)),
           AchievementTier(title: 'Card Encyclopaedia', target: 2500, color: Color(0xFFFFB36B)),
           AchievementTier(title: 'Living Archive', target: 5000, color: Color(0xFF64F4D4)),
+        ],
+      ),
+      _rollingMilestoneBadge(
+        title: 'Duplicate Power',
+        category: 'Copies',
+        baseDescription: 'Build stacks of duplicates for swaps, binders, and trade bait.',
+        icon: Icons.copy_all_outlined,
+        accent: const Color(0xFFFFB36B),
+        progress: duplicateCopies,
+        tiers: const <AchievementTier>[
+          AchievementTier(title: 'Spare Copy', target: 5, color: Color(0xFFFFB36B)),
+          AchievementTier(title: 'Trade Stack', target: 25, color: Color(0xFF82D8FF)),
+          AchievementTier(title: 'Duplicate Drawer', target: 75, color: Color(0xFFB8A3FF)),
+          AchievementTier(title: 'Swap Stockpile', target: 150, color: Color(0xFF75E6A9)),
+          AchievementTier(title: 'Bulk Box', target: 300, color: Color(0xFFFF8EC3)),
+          AchievementTier(title: 'Trade Empire', target: 750, color: Color(0xFFF7DE77)),
         ],
       ),
       _rollingMilestoneBadge(
@@ -267,6 +299,22 @@ class _AchievementBadgesState extends State<AchievementBadges> {
         ],
       ),
       _rollingMilestoneBadge(
+        title: 'Set Marathon',
+        category: 'Sets',
+        baseDescription: 'A long-term challenge for collectors who keep building one favourite set.',
+        icon: Icons.route_outlined,
+        accent: const Color(0xFF64F4D4),
+        progress: widget.stats.favouriteSetCopies,
+        tiers: const <AchievementTier>[
+          AchievementTier(title: 'Half Binder', target: 60, color: Color(0xFF64F4D4)),
+          AchievementTier(title: 'Deep Binder', target: 120, color: Color(0xFF75E6A9)),
+          AchievementTier(title: 'Near Master', target: 220, color: Color(0xFFF7DE77)),
+          AchievementTier(title: 'Master Run', target: 360, color: Color(0xFFFF8EC3)),
+          AchievementTier(title: 'Perfect Pursuit', target: 720, color: Color(0xFFE7A6FF)),
+          AchievementTier(title: 'Completion Legend', target: 1200, color: Color(0xFFFF7A7A)),
+        ],
+      ),
+      _rollingMilestoneBadge(
         title: 'Top Card Chase',
         category: 'Value',
         baseDescription: 'This badge rolls forward based on your highest-value card.',
@@ -303,6 +351,23 @@ class _AchievementBadgesState extends State<AchievementBadges> {
         ],
       ),
       _rollingMilestoneBadge(
+        title: 'Value Marathon',
+        category: 'Value',
+        baseDescription: 'A very long value challenge for serious collection growth.',
+        icon: Icons.diamond_outlined,
+        accent: const Color(0xFFE7A6FF),
+        progress: totalValue,
+        progressPrefix: currencySymbol,
+        tiers: const <AchievementTier>[
+          AchievementTier(title: 'Collector Spark', target: 250, color: Color(0xFF82D8FF)),
+          AchievementTier(title: 'Binder Treasure', target: 1000, color: Color(0xFFF7DE77)),
+          AchievementTier(title: 'Premium Collection', target: 5000, color: Color(0xFFFF8EC3)),
+          AchievementTier(title: 'Elite Portfolio', target: 15000, color: Color(0xFFB8A3FF)),
+          AchievementTier(title: 'Mythic Portfolio', target: 50000, color: Color(0xFF64F4D4)),
+          AchievementTier(title: 'Legendary Portfolio', target: 100000, color: Color(0xFFFF7A7A)),
+        ],
+      ),
+      _rollingMilestoneBadge(
         title: 'Top Shelf',
         category: 'Showcase',
         baseDescription: 'Build a showcase of priced cards.',
@@ -314,6 +379,21 @@ class _AchievementBadgesState extends State<AchievementBadges> {
           AchievementTier(title: 'Premium Shelf', target: 10, color: Color(0xFFB8A3FF)),
           AchievementTier(title: 'Display Case', target: 25, color: Color(0xFFF7DE77)),
           AchievementTier(title: 'Showroom', target: 50, color: Color(0xFF82D8FF)),
+        ],
+      ),
+      _rollingMilestoneBadge(
+        title: 'Showcase Builder',
+        category: 'Showcase',
+        baseDescription: 'Grow a stronger top-card display with more cards that have prices.',
+        icon: Icons.view_carousel_outlined,
+        accent: const Color(0xFFB8A3FF),
+        progress: widget.stats.topValueCards.length,
+        tiers: const <AchievementTier>[
+          AchievementTier(title: 'First Display', target: 3, color: Color(0xFFB8A3FF)),
+          AchievementTier(title: 'Mini Showcase', target: 8, color: Color(0xFF82D8FF)),
+          AchievementTier(title: 'Collector Showcase', target: 15, color: Color(0xFFF7DE77)),
+          AchievementTier(title: 'Premium Showcase', target: 30, color: Color(0xFFFF8EC3)),
+          AchievementTier(title: 'Gallery Showcase', target: 60, color: Color(0xFF75E6A9)),
         ],
       ),
     ];
@@ -329,6 +409,7 @@ class _AchievementBadgesState extends State<AchievementBadges> {
       ...inProgressBadges,
       ...completedBadges,
     ];
+
     final completedCount = completedBadges.length;
     final startedCount = badges.where((badge) => badge.unlocked).length;
     final badgesVisible = !widget.visibilityToggleEnabled || _showAchievementBadges;
@@ -365,205 +446,27 @@ class _AchievementBadgesState extends State<AchievementBadges> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFFF7DE77), Color(0xFFFFB36B)],
-                    ),
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFF7DE77).withValues(alpha: 0.22),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    badgesVisible ? Icons.emoji_events_rounded : Icons.visibility_off_outlined,
-                    color: const Color(0xFF08204F),
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Achievement badges',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        badgesVisible
-                            ? '$completedCount/${badges.length} complete • $startedCount started.'
-                            : '$completedCount/${badges.length} complete • badges hidden.',
-                        style: const TextStyle(
-                          color: Color(0xFFC8D4F0),
-                          fontSize: 12,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            _AchievementHeader(
+              badgesVisible: badgesVisible,
+              completedCount: completedCount,
+              totalCount: badges.length,
+              startedCount: startedCount,
             ),
             if (widget.visibilityToggleEnabled) ...[
               const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.065),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: badgesVisible
-                      ? const Color(0xFFF7DE77).withValues(alpha: 0.30)
-                      : Colors.white.withValues(alpha: 0.10),
-                ),
+              _VisibilityToggleCard(
+                badgesVisible: badgesVisible,
+                onChanged: _setAchievementBadgeVisibility,
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    badgesVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                    color: badgesVisible ? const Color(0xFFF7DE77) : const Color(0xFFC8D4F0),
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      badgesVisible
-                          ? 'Slide off to hide all achievements'
-                          : 'Slide on to see all achievements',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  Switch.adaptive(
-                    value: badgesVisible,
-                    activeThumbColor: const Color(0xFFF7DE77),
-                    onChanged: _setAchievementBadgeVisibility,
-                  ),
-                ],
-              ),
-            ),
             ],
             if (!badgesVisible) ...[
               const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.055),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Achievements are hidden',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Use the switch above whenever you want to show the full badge wall again.',
-                      style: TextStyle(
-                        color: Color(0xFFC8D4F0),
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _HiddenAchievementsCard(hiddenCount: hiddenCount),
             ] else ...[
               const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.065),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            nextBadge == null ? 'Badge wall complete' : 'Next badge: ${nextBadge.title}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: const Color(0xFFF7DE77).withValues(alpha: 0.30)),
-                          ),
-                          child: Text(
-                            '${(badgeProgress * 100).round()}%',
-                            style: const TextStyle(
-                              color: Color(0xFFF7DE77),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        value: badgeProgress,
-                        minHeight: 8,
-                        backgroundColor: Colors.black.withValues(alpha: 0.18),
-                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFF7DE77)),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      nextBadge == null
-                          ? 'You have unlocked every badge available right now.'
-                          : '${nextBadge.remainingLabel} • ${nextBadge.description}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFC8D4F0),
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
+              _NextAchievementCard(
+                badgeProgress: badgeProgress,
+                nextBadge: nextBadge,
               ),
               const SizedBox(height: 14),
               Wrap(
@@ -586,8 +489,8 @@ class _AchievementBadgesState extends State<AchievementBadges> {
                     color: const Color(0xFF82D8FF),
                   ),
                   AchievementSummaryPill(
-                    icon: Icons.visibility_off_outlined,
-                    label: badgesVisible ? 'all visible' : '$hiddenCount hidden',
+                    icon: Icons.visibility_outlined,
+                    label: 'all visible',
                     color: const Color(0xFFB8A3FF),
                   ),
                 ],
@@ -600,6 +503,7 @@ class _AchievementBadgesState extends State<AchievementBadges> {
                       : constraints.maxWidth >= 640
                           ? 2
                           : 1;
+
                   return GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -608,7 +512,7 @@ class _AchievementBadgesState extends State<AchievementBadges> {
                       crossAxisCount: columns,
                       crossAxisSpacing: 10,
                       mainAxisSpacing: 10,
-                      childAspectRatio: columns == 1 ? 0.94 : 0.68,
+                      childAspectRatio: columns == 1 ? 0.92 : 0.66,
                     ),
                     itemBuilder: (context, index) {
                       final badge = displayBadges[index];
@@ -625,3 +529,284 @@ class _AchievementBadgesState extends State<AchievementBadges> {
   }
 }
 
+class _AchievementHeader extends StatelessWidget {
+  const _AchievementHeader({
+    required this.badgesVisible,
+    required this.completedCount,
+    required this.totalCount,
+    required this.startedCount,
+  });
+
+  final bool badgesVisible;
+  final int completedCount;
+  final int totalCount;
+  final int startedCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFF7DE77), Color(0xFFFFB36B)],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFF7DE77).withValues(alpha: 0.22),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Icon(
+            badgesVisible
+                ? Icons.emoji_events_rounded
+                : Icons.visibility_off_outlined,
+            color: const Color(0xFF08204F),
+            size: 29,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Achievement badges',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                badgesVisible
+                    ? '$completedCount/$totalCount complete • $startedCount started'
+                    : '$completedCount/$totalCount complete • badges hidden',
+                style: const TextStyle(
+                  color: Color(0xFFC8D4F0),
+                  fontSize: 12,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VisibilityToggleCard extends StatelessWidget {
+  const _VisibilityToggleCard({
+    required this.badgesVisible,
+    required this.onChanged,
+  });
+
+  final bool badgesVisible;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = badgesVisible ? const Color(0xFFF7DE77) : const Color(0xFFC8D4F0);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.065),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: badgesVisible
+              ? const Color(0xFFF7DE77).withValues(alpha: 0.30)
+              : Colors.white.withValues(alpha: 0.10),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            badgesVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            color: accent,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              badgesVisible
+                  ? 'Slide off to hide all achievements'
+                  : 'Slide on to see all achievements',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Switch.adaptive(
+            value: badgesVisible,
+            thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {
+              if (states.contains(WidgetState.selected)) {
+                return const Color(0xFFF7DE77);
+              }
+              return const Color(0xFFC8D4F0);
+            }),
+            trackColor: WidgetStateProperty.resolveWith<Color?>((states) {
+              if (states.contains(WidgetState.selected)) {
+                return const Color(0xFFF7DE77).withValues(alpha: 0.34);
+              }
+              return Colors.white.withValues(alpha: 0.14);
+            }),
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HiddenAchievementsCard extends StatelessWidget {
+  const _HiddenAchievementsCard({required this.hiddenCount});
+
+  final int hiddenCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.055),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Achievements are hidden',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$hiddenCount badges are hidden from your profile view. Use the switch above whenever you want to show the full badge wall again.',
+            style: const TextStyle(
+              color: Color(0xFFC8D4F0),
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NextAchievementCard extends StatelessWidget {
+  const _NextAchievementCard({
+    required this.badgeProgress,
+    required this.nextBadge,
+  });
+
+  final double badgeProgress;
+  final AchievementBadgeData? nextBadge;
+
+  @override
+  Widget build(BuildContext context) {
+    final badge = nextBadge;
+    final accent = badge?.accent ?? const Color(0xFFF7DE77);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.065),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (badge != null) ...[
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: accent.withValues(alpha: 0.28)),
+                  ),
+                  child: Icon(badge.icon, color: accent, size: 19),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  badge == null ? 'Badge wall complete' : 'Next badge: ${badge.title}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: const Color(0xFFF7DE77).withValues(alpha: 0.30),
+                  ),
+                ),
+                child: Text(
+                  '${(badgeProgress * 100).round()}%',
+                  style: const TextStyle(
+                    color: Color(0xFFF7DE77),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: badgeProgress,
+              minHeight: 8,
+              backgroundColor: Colors.black.withValues(alpha: 0.18),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFF7DE77)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            badge == null
+                ? 'You have unlocked every badge available right now.'
+                : '${badge.remainingLabel} • ${badge.description}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFFC8D4F0),
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
