@@ -4,25 +4,24 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../pokemon_hub_vision_client.dart';
 import '../models/card_ownership.dart';
 import '../models/card_scan_analysis.dart';
 import '../models/quick_scan_variant.dart';
 import '../models/tcg_card.dart';
+import '../pokemon_hub_vision_client.dart';
 import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/pokemon_tcg_service.dart';
 import '../services/wishlist_service.dart';
 import '../utils/price_format_helpers.dart';
-import '../widgets/custom_binder_sheets.dart';
 import '../widgets/custom_app_logo.dart';
+import '../widgets/custom_binder_sheets.dart';
 import '../widgets/scan_result_match_card.dart';
 import 'card_details_page.dart';
 
@@ -35,17 +34,9 @@ class CardScannerPage extends StatefulWidget {
   State<CardScannerPage> createState() => _CardScannerPageState();
 }
 
-class _CardScannerPageState extends State<CardScannerPage>
-    with WidgetsBindingObserver {
-  static const double _cardAspectRatio = 63 / 88;
-
+class _CardScannerPageState extends State<CardScannerPage> {
   final ImagePicker _imagePicker = ImagePicker();
 
-  CameraController? _cameraController;
-  bool _initializingCamera = true;
-  bool _cameraReady = false;
-  bool _flashEnabled = false;
-  final bool _autoCaptureEnabled = false;
   XFile? _capturedImage;
   CardScanAnalysis? _analysis;
   bool _scanning = false;
@@ -54,10 +45,6 @@ class _CardScannerPageState extends State<CardScannerPage>
   bool _scanSaveBusy = false;
   bool _showExtractedTextDetails = false;
   QuickScanVariant _quickScanVariant = QuickScanVariant.normal;
-  Offset? _focusPoint;
-  Timer? _focusRingTimer;
-  Timer? _autoCaptureTimer;
-  int? _autoCountdown;
 
   static const _visionClient = PokemonHubVisionClient(
     endpoint: 'https://us-central1-cardmon-7dc24.cloudfunctions.net/identifyPokemonCardExact',
@@ -200,9 +187,7 @@ class _CardScannerPageState extends State<CardScannerPage>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isInWishlist ? 'Removed from wishlist' : 'Added to wishlist',
-          ),
+          content: Text(isInWishlist ? 'Removed from wishlist' : 'Added to wishlist'),
         ),
       );
     } on FirebaseException catch (error) {
@@ -234,9 +219,7 @@ class _CardScannerPageState extends State<CardScannerPage>
       if (card == null) return;
       final id = card.id.trim();
       if (id.isEmpty) return;
-      if (seenIds.add(id)) {
-        orderedResolved.add(card);
-      }
+      if (seenIds.add(id)) orderedResolved.add(card);
     }
 
     addResolved(vision.bestMatch);
@@ -256,9 +239,7 @@ class _CardScannerPageState extends State<CardScannerPage>
     if (vision.exactConfirmed && vision.bestMatch != null) {
       matches = <TcgCard>[await resolveCard(vision.bestMatch!)];
     } else if (orderedResolved.isNotEmpty) {
-      matches = await Future.wait<TcgCard>(
-        orderedResolved.take(4).map(resolveCard),
-      );
+      matches = await Future.wait<TcgCard>(orderedResolved.take(4).map(resolveCard));
     }
 
     final candidateNames = <String>{
@@ -283,14 +264,13 @@ class _CardScannerPageState extends State<CardScannerPage>
         'Pokémon: ${vision.extraction.pokemonName}',
       if ((vision.extraction.collectorNumber ?? '').trim().isNotEmpty)
         'Number: ${vision.extraction.collectorNumber}'
-        '${(vision.extraction.printedTotal ?? '').trim().isNotEmpty ? '/${vision.extraction.printedTotal}' : ''}',
+            '${(vision.extraction.printedTotal ?? '').trim().isNotEmpty ? '/${vision.extraction.printedTotal}' : ''}',
       if ((vision.extraction.setCode ?? '').trim().isNotEmpty)
         'Set code: ${vision.extraction.setCode}',
       if ((vision.extraction.setName ?? '').trim().isNotEmpty)
         'Set: ${vision.extraction.setName}',
       if (vision.extraction.hp != null) 'HP: ${vision.extraction.hp}',
-      if (vision.extraction.supertype != null &&
-          vision.extraction.supertype!.trim().isNotEmpty)
+      if ((vision.extraction.supertype ?? '').trim().isNotEmpty)
         'Supertype: ${vision.extraction.supertype}',
       if (vision.extraction.subtypes.isNotEmpty)
         'Subtypes: ${vision.extraction.subtypes.join(', ')}',
@@ -349,22 +329,16 @@ class _CardScannerPageState extends State<CardScannerPage>
       final shouldResize = longestSide > 1600;
       final shouldCompress = sourceBytes.lengthInBytes > 700 * 1024;
 
-      if (!shouldResize && !shouldCompress) {
-        return null;
-      }
+      if (!shouldResize && !shouldCompress) return null;
 
       if (shouldResize) {
-        if (oriented.width >= oriented.height) {
-          oriented = img.copyResize(oriented, width: 1600);
-        } else {
-          oriented = img.copyResize(oriented, height: 1600);
-        }
+        oriented = oriented.width >= oriented.height
+            ? img.copyResize(oriented, width: 1600)
+            : img.copyResize(oriented, height: 1600);
       }
 
       final outputBytes = img.encodeJpg(oriented, quality: 86);
-      if (!shouldResize && outputBytes.length >= sourceBytes.lengthInBytes) {
-        return null;
-      }
+      if (!shouldResize && outputBytes.length >= sourceBytes.lengthInBytes) return null;
 
       final tempDir = await getTemporaryDirectory();
       final outputPath =
@@ -387,167 +361,13 @@ class _CardScannerPageState extends State<CardScannerPage>
       if (preparedPath != null) {
         try {
           final file = File(preparedPath);
-          if (await file.exists()) {
-            await file.delete();
-          }
+          if (await file.exists()) await file.delete();
         } catch (_) {}
       }
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _cameraReady = false;
-    _initializingCamera = false;
-  }
-
-  @override
-  void dispose() {
-    _focusRingTimer?.cancel();
-    _autoCaptureTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _disposeCamera() async {
-    final controller = _cameraController;
-    _cameraController = null;
-    _cameraReady = false;
-    if (controller != null) {
-      await controller.dispose();
-    }
-  }
-
-  void _cancelAutoCaptureCountdown() {
-    _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = null;
-    if (mounted && _autoCountdown != null) {
-      setState(() {
-        _autoCountdown = null;
-      });
-    }
-  }
-
-  Future<void> _initializeCamera() async {
-    if (!mounted) return;
-
-    _cancelAutoCaptureCountdown();
-    _focusRingTimer?.cancel();
-
-    setState(() {
-      _initializingCamera = true;
-      _errorMessage = null;
-      _focusPoint = null;
-    });
-
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        throw Exception('No camera found on this device.');
-      }
-
-      final preferredCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
-      );
-
-      await _disposeCamera();
-
-      final controller = CameraController(
-        preferredCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-      );
-
-      _cameraController = controller;
-      await controller.initialize();
-      await controller.setFlashMode(FlashMode.off);
-
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-
-      setState(() {
-        _cameraReady = true;
-        _initializingCamera = false;
-        _flashEnabled = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _cameraReady = false;
-        _initializingCamera = false;
-        _errorMessage = 'Could not start live camera preview: $error';
-      });
-    }
-  }
-
-  Future<void> _toggleFlash() async {
-    final controller = _cameraController;
-    if (controller == null || !controller.value.isInitialized || _scanning) {
-      return;
-    }
-
-    try {
-      final newFlashState = !_flashEnabled;
-      await controller.setFlashMode(
-        newFlashState ? FlashMode.torch : FlashMode.off,
-      );
-      if (!mounted) return;
-      setState(() {
-        _flashEnabled = newFlashState;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = 'Could not change flash: $error';
-      });
-    }
-  }
-
-  Future<void> _setFocusPoint(
-    TapUpDetails details,
-    BoxConstraints constraints,
-  ) async {
-    final controller = _cameraController;
-    if (controller == null || !controller.value.isInitialized || _scanning) {
-      return;
-    }
-
-    final local = details.localPosition;
-    final normalized = Offset(
-      (local.dx / constraints.maxWidth).clamp(0.0, 1.0),
-      (local.dy / constraints.maxHeight).clamp(0.0, 1.0),
-    );
-
-    try {
-      await controller.setFocusPoint(normalized);
-      await controller.setExposurePoint(normalized);
-    } catch (_) {}
-
-    _focusRingTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _focusPoint = normalized;
-      _errorMessage = null;
-    });
-    _focusRingTimer = Timer(const Duration(milliseconds: 900), () {
-      if (!mounted) return;
-      setState(() {
-        _focusPoint = null;
-      });
-    });
-
-  }
-
-  void _startAutoCaptureCountdown() {
-    // Manual-only capture mode.
-  }
-
   Future<void> _captureAndScanFromLivePreview() async {
-    _cancelAutoCaptureCountdown();
     try {
       final picked = await _imagePicker.pickImage(
         source: ImageSource.camera,
@@ -567,7 +387,6 @@ class _CardScannerPageState extends State<CardScannerPage>
   }
 
   Future<void> _scanFromGallery() async {
-    _cancelAutoCaptureCountdown();
     try {
       final picked = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -623,7 +442,6 @@ class _CardScannerPageState extends State<CardScannerPage>
   }
 
   void _resetScanner() {
-    _cancelAutoCaptureCountdown();
     setState(() {
       _capturedImage = null;
       _analysis = null;
@@ -632,397 +450,200 @@ class _CardScannerPageState extends State<CardScannerPage>
       _scanSaveBusy = false;
       _showExtractedTextDetails = false;
       _quickScanVariant = QuickScanVariant.normal;
-      _focusPoint = null;
     });
   }
 
   Widget _buildScannerHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF102754),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 108,
-            height: 108,
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    Colors.white.withValues(alpha: 0.09),
-                    Colors.white.withValues(alpha: 0.025),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-              alignment: Alignment.center,
+    return RepaintBoundary(
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF102754),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 108,
+              height: 108,
               child: Container(
-                width: 82,
-                height: 82,
-                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.03),
-                  border: Border.all(
-                    color: const Color(0xFFF7DE77).withValues(alpha: 0.55),
-                    width: 2.2,
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.09),
+                      Colors.white.withValues(alpha: 0.025),
+                      Colors.transparent,
+                    ],
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFF7DE77).withValues(alpha: 0.24),
-                      blurRadius: 18,
-                      spreadRadius: 2,
-                    ),
-                    BoxShadow(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
                 ),
-                child: ClipOval(
-                  child: Image.asset(
-                    kCustomAppLogoAsset,
-                    fit: BoxFit.cover,
-                    filterQuality: FilterQuality.high,
-                    errorBuilder: (_, __, ___) {
-                      return const Center(
-                        child: Icon(
-                          Icons.style,
-                          color: Color(0xFFF7DE77),
-                          size: 40,
-                        ),
-                      );
-                    },
+                alignment: Alignment.center,
+                child: Container(
+                  width: 82,
+                  height: 82,
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.03),
+                    border: Border.all(
+                      color: const Color(0xFFF7DE77).withValues(alpha: 0.55),
+                      width: 2.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFF7DE77).withValues(alpha: 0.24),
+                        blurRadius: 18,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      kCustomAppLogoAsset,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      errorBuilder: (_, __, ___) {
+                        return const Center(
+                          child: Icon(
+                            Icons.style,
+                            color: Color(0xFFF7DE77),
+                            size: 40,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Scan cards fast',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
+            const SizedBox(height: 10),
+            const Text(
+              'Scan cards fast',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Take one clear photo or choose a saved card image from your gallery.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 12,
+            const SizedBox(height: 4),
+            const Text(
+              'Take one clear photo or choose a saved card image from your gallery.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPreviewViewport(double frameWidth, double frameHeight) {
-    final controller = _cameraController;
-    if (_cameraReady && controller != null) {
-      final previewSize = controller.value.previewSize;
-      final previewWidth = previewSize?.height ?? frameWidth;
-      final previewHeight = previewSize?.width ?? frameHeight;
-
-      return ColoredBox(
-        color: Colors.black,
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: previewWidth,
-            height: previewHeight,
-            child: CameraPreview(controller),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF143163), Color(0xFF0E224D)],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+          ],
         ),
       ),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.all(24),
-      child: _initializingCamera
-          ? const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 34,
-                  height: 34,
-                  child: CircularProgressIndicator(strokeWidth: 3),
-                ),
-                SizedBox(height: 14),
-                Text(
-                  'Starting live preview...',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            )
-          : const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.camera_alt_outlined,
-                  color: Colors.white70,
-                  size: 56,
-                ),
-                SizedBox(height: 12),
-                Text(
-                  'Camera preview unavailable',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildLiveFrame() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxFrameWidth = constraints.maxWidth * 0.92;
-        final maxFrameHeight = constraints.maxHeight * 0.92;
-
-        double frameWidth = maxFrameWidth;
-        double frameHeight = frameWidth / _cardAspectRatio;
-        if (frameHeight > maxFrameHeight) {
-          frameHeight = maxFrameHeight;
-          frameWidth = frameHeight * _cardAspectRatio;
-        }
-
-        return Center(
-          child: GestureDetector(
-            onTapUp: (_cameraReady && !_scanning)
-                ? (details) => _setFocusPoint(
-                      details,
-                      BoxConstraints.tightFor(
-                        width: frameWidth,
-                        height: frameHeight,
-                      ),
-                    )
-                : null,
-            child: Container(
-              width: frameWidth,
-              height: frameHeight,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: const Color(0xFFF7DE77),
-                  width: 2.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFF7DE77).withValues(alpha: 0.22),
-                    blurRadius: 18,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _buildPreviewViewport(frameWidth, frameHeight),
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.16),
-                          width: 1,
-                        ),
-                        borderRadius: BorderRadius.circular(22),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.52),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _scanning ? Icons.radar : Icons.center_focus_strong,
-                            size: 16,
-                            color: const Color(0xFFF7DE77),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _scanning ? 'Scanning now' : 'Tap card to focus',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_focusPoint != null)
-                    Positioned(
-                      left: (_focusPoint!.dx * frameWidth) - 26,
-                      top: (_focusPoint!.dy * frameHeight) - 26,
-                      child: IgnorePointer(
-                        child: AnimatedOpacity(
-                          opacity: _focusPoint == null ? 0 : 1,
-                          duration: const Duration(milliseconds: 180),
-                          child: Container(
-                            width: 52,
-                            height: 52,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFF7DE77),
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (_scanning)
-                    Positioned.fill(
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.38),
-                        alignment: Alignment.center,
-                        child: const SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: CircularProgressIndicator(strokeWidth: 3),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
   Widget _buildPreviewCard() {
     final previewFile = _capturedImage != null ? File(_capturedImage!.path) : null;
 
-    return Card(
-      color: const Color(0xFF102754),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: AspectRatio(
-        aspectRatio: 0.82,
-        child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF122D63), Color(0xFF0A1E47)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+    return RepaintBoundary(
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: AspectRatio(
+          aspectRatio: 0.82,
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF122D63), Color(0xFF0A1E47)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
             ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Photo-only mode',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Take one steady photo of the full card, or choose a clear saved image. This is more reliable than live scanning.',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Photo-only mode',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
                     ),
-                    child: previewFile == null
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Icon(
-                                Icons.photo_camera_back_outlined,
-                                size: 54,
-                                color: Color(0xFFF7DE77),
-                              ),
-                              SizedBox(height: 12),
-                              Text(
-                                'No photo selected yet',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Take one steady photo of the full card, or choose a clear saved image. This is more reliable than live scanning.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                      ),
+                      child: previewFile == null
+                          ? Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(
+                                  Icons.photo_camera_back_outlined,
+                                  size: 54,
+                                  color: Color(0xFFF7DE77),
                                 ),
-                              ),
-                              SizedBox(height: 6),
-                              Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 22),
-                                child: Text(
-                                  'Use Take Photo or Gallery below to scan a card.',
-                                  textAlign: TextAlign.center,
+                                SizedBox(height: 12),
+                                Text(
+                                  'No photo selected yet',
                                   style: TextStyle(
-                                    color: Colors.white70,
-                                    height: 1.35,
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
+                                SizedBox(height: 6),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 22),
+                                  child: Text(
+                                    'Use Take Photo or Gallery below to scan a card.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: Image.file(
+                                previewFile,
+                                fit: BoxFit.cover,
+                                gaplessPlayback: true,
+                                filterQuality: FilterQuality.low,
                               ),
-                            ],
-                          )
-                        : ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: Image.file(previewFile, fit: BoxFit.cover),
-                          ),
+                            ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1123,116 +744,56 @@ class _CardScannerPageState extends State<CardScannerPage>
     );
   }
 
-  Widget _buildTipCard() {
-    Widget tipPill(IconData icon, String label) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: const Color(0xFFF7DE77)),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Card(
-      color: const Color(0xFF102754),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Best scan tips',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                tipPill(Icons.crop_portrait, 'Keep the full card in frame'),
-                tipPill(Icons.photo_camera_outlined, 'Take one steady photo'),
-                tipPill(Icons.wb_sunny_outlined, 'Avoid glare and shadows'),
-                tipPill(Icons.photo_library_outlined, 'Gallery often works best'),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildLastCaptureCard() {
-    if (_capturedImage == null) {
-      return const SizedBox.shrink();
-    }
+    if (_capturedImage == null) return const SizedBox.shrink();
 
-    return Card(
-      color: const Color(0xFF102754),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Row(
-        children: [
-          Image.file(
-            File(_capturedImage!.path),
-            width: 96,
-            height: 132,
-            fit: BoxFit.cover,
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Last capture',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
+    return RepaintBoundary(
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          children: [
+            Image.file(
+              File(_capturedImage!.path),
+              width: 96,
+              height: 132,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.low,
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Last capture',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _scanning
-                        ? 'Scanning this image now...'
-                        : 'You can scan live again, tap the frame to refocus, or choose a different photo from your gallery.',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      height: 1.35,
+                    const SizedBox(height: 6),
+                    Text(
+                      _scanning
+                          ? 'Scanning this image now...'
+                          : 'You can scan again or choose a different photo from your gallery.',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        height: 1.35,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1396,9 +957,7 @@ class _CardScannerPageState extends State<CardScannerPage>
         backgroundColor: const Color(0xFF16366E),
         selectedColor: const Color(0xFFF7DE77),
         side: BorderSide(
-          color: selected
-              ? const Color(0xFFF7DE77)
-              : Colors.white.withValues(alpha: 0.10),
+          color: selected ? const Color(0xFFF7DE77) : Colors.white.withValues(alpha: 0.10),
         ),
         labelStyle: TextStyle(
           color: selected ? Colors.black : Colors.white,
@@ -1434,9 +993,9 @@ class _CardScannerPageState extends State<CardScannerPage>
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
+                const Text(
                   'Choose the finish, then save it straight to your collection or wishlist.',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Color(0xFFD8E3FB),
                     height: 1.35,
                     fontWeight: FontWeight.w600,
@@ -1471,29 +1030,24 @@ class _CardScannerPageState extends State<CardScannerPage>
                   ],
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _scanSaveBusy
-                            ? null
-                            : () => _saveConfirmedMatchToPokedex(card),
-                        icon: _scanSaveBusy
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.collections_bookmark_outlined),
-                        label: const Text('Add to Set Pokédex'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFF7DE77),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                      ),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _scanSaveBusy ? null : () => _saveConfirmedMatchToPokedex(card),
+                    icon: _scanSaveBusy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.collections_bookmark_outlined),
+                    label: const Text('Add to Set Pokédex'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFF7DE77),
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 10),
                 SizedBox(
@@ -1513,14 +1067,10 @@ class _CardScannerPageState extends State<CardScannerPage>
                             ? null
                             : () => _toggleScanResultWishlist(card, isInWishlist),
                         icon: Icon(
-                          isInWishlist
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_outline_rounded,
+                          isInWishlist ? Icons.favorite_rounded : Icons.favorite_outline_rounded,
                         ),
                         label: Text(
-                          isInWishlist
-                              ? 'Remove from Wishlist'
-                              : 'Add to Wishlist',
+                          isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist',
                         ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
@@ -1604,9 +1154,9 @@ class _CardScannerPageState extends State<CardScannerPage>
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Review the ranked matches below. The best visual match is shown first, but you can open details or choose the correct card before saving.',
-              style: const TextStyle(
+              style: TextStyle(
                 color: Color(0xFFD8E3FB),
                 height: 1.35,
                 fontWeight: FontWeight.w600,
@@ -1761,6 +1311,30 @@ class _CardScannerPageState extends State<CardScannerPage>
     );
   }
 
+  Widget _buildScrollableContent(List<Widget> children) {
+    return SafeArea(
+      top: !widget.showAppBar,
+      bottom: true,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: math.max(0, constraints.maxHeight - 32),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: children,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final autoBestMatch = _analysis?.bestMatch;
@@ -1771,7 +1345,7 @@ class _CardScannerPageState extends State<CardScannerPage>
         !_scanning && _errorMessage == null && primaryMatch == null && matches.isNotEmpty;
     final extractedText = _analysis?.extractedText.trim() ?? '';
 
-    final List<Widget> children = <Widget>[
+    final children = <Widget>[
       _buildScannerHeader(),
       const SizedBox(height: 14),
       _buildPreviewCard(),
@@ -1805,9 +1379,7 @@ class _CardScannerPageState extends State<CardScannerPage>
         const SizedBox(height: 14),
         _buildScanSummaryCard(
           card: primaryMatch,
-          eyebrow: _analysis?.exactConfirmed == true
-              ? 'Exact card confirmed'
-              : 'Card selected',
+          eyebrow: _analysis?.exactConfirmed == true ? 'Exact card confirmed' : 'Card selected',
           message: _analysis?.exactConfirmed == true
               ? 'The scanner found a strong enough match to confirm this exact print automatically.'
               : 'You selected this card from the likely matches below.',
@@ -1823,26 +1395,28 @@ class _CardScannerPageState extends State<CardScannerPage>
           ),
         ),
         const SizedBox(height: 8),
-        ScanResultMatchCard(
-          card: primaryMatch,
-          highlight: true,
-          rank: 1,
-          confidenceLabel: _analysis?.exactConfirmed == true ? 'Exact scanner match' : 'Selected by you',
-          actionLabel: 'View details',
-          onActionTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => CardDetailsPage(card: primaryMatch),
-              ),
-            );
-          },
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => CardDetailsPage(card: primaryMatch),
-              ),
-            );
-          },
+        RepaintBoundary(
+          child: ScanResultMatchCard(
+            card: primaryMatch,
+            highlight: true,
+            rank: 1,
+            confidenceLabel: _analysis?.exactConfirmed == true ? 'Exact scanner match' : 'Selected by you',
+            actionLabel: 'View details',
+            onActionTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CardDetailsPage(card: primaryMatch),
+                ),
+              );
+            },
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CardDetailsPage(card: primaryMatch),
+                ),
+              );
+            },
+          ),
         ),
         const SizedBox(height: 12),
         _buildQuickSaveFlowCard(primaryMatch),
@@ -1864,25 +1438,28 @@ class _CardScannerPageState extends State<CardScannerPage>
         ),
         const SizedBox(height: 8),
       ]);
+
       final rankedMatches = matches.take(4).toList();
       for (var index = 0; index < rankedMatches.length; index++) {
         final card = rankedMatches[index];
         children.add(
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: ScanResultMatchCard(
-              card: card,
-              rank: index + 1,
-              confidenceLabel: index == 0 ? 'Best visual match' : 'Possible match',
-              actionLabel: 'This is my card',
-              onActionTap: () => _confirmMatch(card),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => CardDetailsPage(card: card),
-                  ),
-                );
-              },
+            child: RepaintBoundary(
+              child: ScanResultMatchCard(
+                card: card,
+                rank: index + 1,
+                confidenceLabel: index == 0 ? 'Best visual match' : 'Possible match',
+                actionLabel: 'This is my card',
+                onActionTap: () => _confirmMatch(card),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CardDetailsPage(card: card),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         );
@@ -1906,24 +1483,27 @@ class _CardScannerPageState extends State<CardScannerPage>
         ),
         const SizedBox(height: 8),
       ]);
+
       var alternativeRank = primaryMatch == null ? 5 : 2;
       for (final card in alternativeMatches) {
         children.add(
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: ScanResultMatchCard(
-              card: card,
-              rank: alternativeRank++,
-              confidenceLabel: primaryMatch == null ? 'Possible match' : 'Alternative match',
-              actionLabel: 'This is my card',
-              onActionTap: () => _confirmMatch(card),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => CardDetailsPage(card: card),
-                  ),
-                );
-              },
+            child: RepaintBoundary(
+              child: ScanResultMatchCard(
+                card: card,
+                rank: alternativeRank++,
+                confidenceLabel: primaryMatch == null ? 'Possible match' : 'Alternative match',
+                actionLabel: 'This is my card',
+                onActionTap: () => _confirmMatch(card),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CardDetailsPage(card: card),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         );
@@ -1937,14 +1517,7 @@ class _CardScannerPageState extends State<CardScannerPage>
       ]);
     }
 
-    final content = SafeArea(
-      top: !widget.showAppBar,
-      bottom: true,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: children,
-      ),
-    );
+    final content = _buildScrollableContent(children);
 
     if (!widget.showAppBar) {
       return content;
