@@ -188,11 +188,30 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<ProfileStats> _loadStats() async {
-    return loadProfileStatsForOwner(
-      widget.profile.uid,
-      preferCurrentUserLocalCache: true,
+  ProfileStats _emptyProfileStats() {
+    return const ProfileStats(
+      totalCards: 0,
+      uniqueCards: 0,
+      totalEstimatedPrice: 0,
+      mostExpensiveCard: null,
+      mostExpensiveCardCopies: 0,
+      favouriteSetName: null,
+      favouriteSetCopies: 0,
+      rarityCopies: <String, int>{},
+      rarityValues: <String, double>{},
+      topValueCards: <TcgCard>[],
     );
+  }
+
+  Future<ProfileStats> _loadStats() async {
+    try {
+      return await loadProfileStatsForOwner(
+        widget.profile.uid,
+        preferCurrentUserLocalCache: true,
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {
+      return _emptyProfileStats();
+    }
   }
 
   Future<void> _refreshStats() async {
@@ -882,9 +901,33 @@ class _ProfilePageState extends State<ProfilePage> {
       future: _statsFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.only(top: 40),
-            child: Center(child: CircularProgressIndicator()),
+          return Card(
+            color: const Color(0xFF102754),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(18),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      'Loading collection stats...',
+                      style: TextStyle(
+                        color: Color(0xFFD8E3FB),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           );
         }
 
@@ -901,18 +944,7 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         }
 
-        final stats = snapshot.data ?? const ProfileStats(
-          totalCards: 0,
-          uniqueCards: 0,
-          totalEstimatedPrice: 0,
-          mostExpensiveCard: null,
-          mostExpensiveCardCopies: 0,
-          favouriteSetName: null,
-          favouriteSetCopies: 0,
-          rarityCopies: <String, int>{},
-          rarityValues: <String, double>{},
-          topValueCards: <TcgCard>[],
-        );
+        final stats = snapshot.data ?? _emptyProfileStats();
 
         return Column(
           children: [

@@ -192,31 +192,6 @@ class _SearchHeroLogo extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(
-            right: 26,
-            bottom: 32,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7DE77),
-                shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF102754), width: 4),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.24),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.search_rounded,
-                color: Color(0xFF071B43),
-                size: 26,
-              ),
-            ),
-          ),
         ],
       ),
     );

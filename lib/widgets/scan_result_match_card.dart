@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/tcg_card.dart';
@@ -8,6 +10,7 @@ class ScanResultMatchCard extends StatelessWidget {
     super.key,
     required this.card,
     required this.onTap,
+    this.capturedImagePath,
     this.highlight = false,
     this.rank,
     this.confidenceLabel,
@@ -17,11 +20,54 @@ class ScanResultMatchCard extends StatelessWidget {
 
   final TcgCard card;
   final VoidCallback onTap;
+  final String? capturedImagePath;
   final bool highlight;
   final int? rank;
   final String? confidenceLabel;
   final String? actionLabel;
   final VoidCallback? onActionTap;
+
+  bool get _isLocalPromoFallbackCard {
+    return card.id.toLowerCase().startsWith('mep-');
+  }
+
+  Widget _missingImagePlaceholder() {
+    return const ColoredBox(
+      color: Colors.black12,
+      child: Center(
+        child: Icon(
+          Icons.image_not_supported,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCardImage() {
+    final localImagePath = capturedImagePath?.trim() ?? '';
+    if (localImagePath.isNotEmpty) {
+      final localFile = File(localImagePath);
+      if (localFile.existsSync()) {
+        return Image.file(
+          localFile,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => _missingImagePlaceholder(),
+        );
+      }
+    }
+
+    final remoteImageUrl = card.imageUrl?.trim() ?? '';
+    if (remoteImageUrl.isNotEmpty) {
+      return Image.network(
+        remoteImageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _missingImagePlaceholder(),
+      );
+    }
+
+    return _missingImagePlaceholder();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,19 +89,17 @@ class ScanResultMatchCard extends StatelessWidget {
                 SizedBox(
                   width: 96,
                   height: 132,
-                  child: card.imageUrl == null
-                      ? const ColoredBox(
-                          color: Colors.black12,
-                          child: Icon(Icons.image_not_supported, color: Colors.white),
-                        )
-                      : Image.network(card.imageUrl!, fit: BoxFit.cover),
+                  child: _buildCardImage(),
                 ),
                 if (rank != null)
                   Positioned(
                     top: 8,
                     left: 8,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: highlight
                             ? const Color(0xFFF7DE77)
@@ -88,15 +132,20 @@ class ScanResultMatchCard extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (confidenceLabel != null && confidenceLabel!.trim().isNotEmpty) ...[
+                    if (confidenceLabel != null &&
+                        confidenceLabel!.trim().isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
-                            color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
+                            color:
+                                const Color(0xFFF7DE77).withValues(alpha: 0.28),
                           ),
                         ),
                         child: Text(
@@ -132,9 +181,14 @@ class ScanResultMatchCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'Tap for full details',
-                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    Text(
+                      _isLocalPromoFallbackCard
+                          ? 'Selected promo scan'
+                          : 'Tap for full details',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
                     ),
                     if (onActionTap != null && actionLabel != null) ...[
                       const SizedBox(height: 10),
