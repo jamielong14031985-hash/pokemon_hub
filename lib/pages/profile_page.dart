@@ -13,6 +13,7 @@ import '../services/collection_refresh_notifier.dart';
 import '../services/community_image_services.dart';
 import '../services/currency_settings.dart';
 import '../services/local_image_store.dart';
+import '../services/user_feature_flags_service.dart';
 import '../services/user_profile_service.dart';
 import '../services/wishlist_service.dart';
 import '../utils/auth_input_decoration.dart';
@@ -20,9 +21,12 @@ import '../utils/profile_stats_helpers.dart';
 import '../widgets/achievement_badges.dart';
 import '../widgets/profile_collection_widgets.dart';
 import '../widgets/profile_stat_card.dart';
+import 'admin_tracked_restock_products_page.dart';
+import 'admin_user_feature_flags_page.dart';
 import 'card_details_page.dart';
 import 'friend_requests_page.dart';
 import 'friends_page.dart';
+import 'restock_alerts_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
 
@@ -223,6 +227,31 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
+
+  Future<void> _openRestockAlerts() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const RestockAlertsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openUserFeatures() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const AdminUserFeatureFlagsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openTrackedRestockProducts() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const AdminTrackedRestockProductsPage(),
+      ),
+    );
+  }
+
 
   Future<void> _openCardDetails(TcgCard card) async {
     await Navigator.of(context).push(
@@ -650,6 +679,140 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget _buildFeatureAccessSection() {
+    return StreamBuilder<bool>(
+      stream: UserFeatureFlagsService.watchCurrentUserRestockAlertsEnabled(),
+      builder: (context, restockSnapshot) {
+        final restockAlertsEnabled = restockSnapshot.data == true;
+
+        return StreamBuilder<bool>(
+          stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
+          builder: (context, managerSnapshot) {
+            final canManageFeatures = managerSnapshot.data == true;
+
+            if (!restockAlertsEnabled && !canManageFeatures) {
+              return const SizedBox(height: 16);
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 16),
+                RepaintBoundary(
+                  child: Card(
+                    color: const Color(0xFF102754),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Features',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Manage extra PocketChase tools and account features.',
+                            style: TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+                          ),
+                          if (restockAlertsEnabled)
+                            _buildFeatureTile(
+                              icon: Icons.notifications_active_outlined,
+                              iconColor: const Color(0xFFF7DE77),
+                              title: 'Restock Alerts',
+                              subtitle: 'Choose shops and Pokémon products to watch',
+                              onTap: _openRestockAlerts,
+                            ),
+                          if (canManageFeatures)
+                            _buildFeatureTile(
+                              icon: Icons.manage_search_outlined,
+                              iconColor: const Color(0xFFF7DE77),
+                              title: 'Tracked Products',
+                              subtitle: 'Add shop pages for automatic checking',
+                              onTap: _openTrackedRestockProducts,
+                            ),
+                          if (canManageFeatures)
+                            _buildFeatureTile(
+                              icon: Icons.admin_panel_settings_outlined,
+                              iconColor: const Color(0xFF54D39A),
+                              title: 'User Features',
+                              subtitle: 'Turn Restock Alerts on or off for users',
+                              onTap: _openUserFeatures,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFeatureTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Material(
+        color: const Color(0xFF0E2A5E),
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, color: iconColor, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Color(0xFFC8D4F0),
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.white54),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAccountSecurityCard() {
     return Card(
       color: const Color(0xFF102754),
@@ -836,7 +999,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           _buildFriendsCard(),
                           const SizedBox(height: 16),
                           _buildWishlistCard(),
-                          const SizedBox(height: 16),
+                          _buildFeatureAccessSection(),
                           _buildAccountSecurityCard(),
                           const SizedBox(height: 16),
                           _buildStatsSection(profileImageProvider),
