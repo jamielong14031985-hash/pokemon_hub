@@ -12,12 +12,13 @@ import 'pages/profile_page.dart';
 import 'services/currency_settings.dart';
 import 'services/custom_binder_sync_service.dart';
 import 'services/pokedex_sync_service.dart';
+import 'widgets/pocketchase_banner_ad.dart';
 import 'widgets/profile_app_bar_button.dart';
 
 const int _kCommunityMinimumAge = 18;
 
-const String _kCommunityForumDisclaimer = '''Disclaimer: PocketChase and the creators of this app are not responsible for any sales, swaps, trades, payments, deliveries, meetups, item condition, authenticity, losses, disputes, or damages arising from community posts or arrangements made between users. All transactions and interactions are carried out entirely at the users’ own risk.''';
-
+const String _kCommunityForumDisclaimer =
+    '''Disclaimer: PocketChase and the creators of this app are not responsible for any sales, swaps, trades, payments, deliveries, meetups, item condition, authenticity, losses, disputes, or damages arising from community posts or arrangements made between users. All transactions and interactions are carried out entirely at the users’ own risk.''';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key, required this.profile});
@@ -32,8 +33,10 @@ class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
   bool _communityDisclaimerAccepted = false;
   bool _loadingCommunityDisclaimer = true;
-  final GlobalKey<CardSearchPageState> _cardSearchKey = GlobalKey<CardSearchPageState>();
-  final GlobalKey<MasterSetsPageState> _masterSetsKey = GlobalKey<MasterSetsPageState>();
+  final GlobalKey<CardSearchPageState> _cardSearchKey =
+      GlobalKey<CardSearchPageState>();
+  final GlobalKey<MasterSetsPageState> _masterSetsKey =
+      GlobalKey<MasterSetsPageState>();
 
   @override
   void initState() {
@@ -210,7 +213,9 @@ class _AppShellState extends State<AppShell> {
       }
 
       if (!widget.profile.isAdult) {
-        _showMessage('Community is only available to users aged $_kCommunityMinimumAge or over.');
+        _showMessage(
+          'Community is only available to users aged $_kCommunityMinimumAge or over.',
+        );
         return;
       }
 
@@ -238,6 +243,34 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  String get _appBarSubtitle {
+    switch (_currentIndex) {
+      case 1:
+        return 'Scan and identify your cards';
+      case 2:
+        return 'Track and manage your sets';
+      case 3:
+        return 'Chat, swap, sell and trade safely';
+      case 0:
+      default:
+        return 'Search cards, sets and collection numbers';
+    }
+  }
+
+  IconData get _appBarIcon {
+    switch (_currentIndex) {
+      case 1:
+        return Icons.document_scanner_outlined;
+      case 2:
+        return Icons.collections_bookmark_outlined;
+      case 3:
+        return Icons.forum_outlined;
+      case 0:
+      default:
+        return Icons.style_outlined;
+    }
+  }
+
   Widget _buildCurrentPage() {
     switch (_currentIndex) {
       case 1:
@@ -252,37 +285,143 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_appBarTitle),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
-        actions: [
+  BoxDecoration _glassHeaderDecoration({double goldGlowAlpha = 0.08}) {
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(22),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: 0.16),
+          Colors.white.withValues(alpha: 0.07),
+          const Color(0xFF173A78).withValues(alpha: 0.20),
+        ],
+      ),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.18),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.18),
+          blurRadius: 18,
+          offset: const Offset(0, 8),
+        ),
+        BoxShadow(
+          color: const Color(0xFFF7DE77).withValues(alpha: goldGlowAlpha),
+          blurRadius: 24,
+          spreadRadius: 1,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGlassAppBarTitle() {
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: _glassHeaderDecoration(),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
+              border: Border.all(
+                color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
+              ),
+            ),
+            child: Icon(
+              _appBarIcon,
+              color: const Color(0xFFF7DE77),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: Column(
+                key: ValueKey<String>(_appBarTitle),
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _appBarTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      height: 1.05,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _appBarSubtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFC8D4F0),
+                      fontSize: 11.5,
+                      height: 1.1,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           ProfileAppBarButton(
             profile: widget.profile,
             onOpenProfile: () async {
               await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => ProfilePage(profile: widget.profile)),
+                MaterialPageRoute(
+                  builder: (_) => ProfilePage(profile: widget.profile),
+                ),
               );
             },
           ),
         ],
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 12,
+        toolbarHeight: 86,
+        title: _buildGlassAppBarTitle(),
+        backgroundColor: const Color(0xFF041B4A),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
       body: ValueListenableBuilder<int>(
         valueListenable: currencyRefreshNotifier,
-        builder: (context, _, __) => _buildCurrentPage(),
+        builder: (context, _, __) {
+          return Column(
+            children: [
+              Expanded(child: _buildCurrentPage()),
+              if (_currentIndex != 1) const PocketChaseBannerAd(),
+            ],
+          );
+        },
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: _onDestinationSelected,
         destinations: const [
           NavigationDestination(
-          icon: Icon(Icons.style_outlined),
-          selectedIcon: Icon(Icons.style),
-          label: 'Cards',
-        ),
+            icon: Icon(Icons.style_outlined),
+            selectedIcon: Icon(Icons.style),
+            label: 'Cards',
+          ),
           NavigationDestination(
             icon: Icon(Icons.document_scanner_outlined),
             selectedIcon: Icon(Icons.document_scanner),
