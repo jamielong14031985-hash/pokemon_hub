@@ -11,6 +11,16 @@ import '../utils/community_market_helpers.dart';
 import 'stored_image.dart';
 import 'trade_safety_composer_checklist.dart';
 
+class _CommunityArea {
+  const _CommunityArea({
+    required this.key,
+    required this.label,
+  });
+
+  final String key;
+  final String label;
+}
+
 class CreateCommunityPostSheet extends StatefulWidget {
   const CreateCommunityPostSheet({
     super.key,
@@ -41,6 +51,7 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
   String _askingCurrency = CurrencySettings.selectedCode;
   String _cardCondition = 'Near Mint';
   String _deliveryMethod = 'Post';
+  String _selectedAreaKey = '';
   bool _saving = false;
   bool _processingImages = false;
   List<String> _imageBase64List = <String>[];
@@ -57,6 +68,123 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
     'For Sale',
     'Wanted',
     'Thread',
+  ];
+
+  static const List<_CommunityArea> _communityAreaOptions = <_CommunityArea>[
+    _CommunityArea(key: '', label: 'Select county / area'),
+    _CommunityArea(key: 'bedfordshire', label: 'Bedfordshire'),
+    _CommunityArea(key: 'berkshire', label: 'Berkshire'),
+    _CommunityArea(key: 'bristol', label: 'Bristol'),
+    _CommunityArea(key: 'buckinghamshire', label: 'Buckinghamshire'),
+    _CommunityArea(key: 'cambridgeshire', label: 'Cambridgeshire'),
+    _CommunityArea(key: 'cheshire', label: 'Cheshire'),
+    _CommunityArea(key: 'city_of_london', label: 'City of London'),
+    _CommunityArea(key: 'cornwall', label: 'Cornwall'),
+    _CommunityArea(key: 'county_durham', label: 'County Durham'),
+    _CommunityArea(key: 'cumbria', label: 'Cumbria'),
+    _CommunityArea(key: 'derbyshire', label: 'Derbyshire'),
+    _CommunityArea(key: 'devon', label: 'Devon'),
+    _CommunityArea(key: 'dorset', label: 'Dorset'),
+    _CommunityArea(key: 'east_riding_of_yorkshire', label: 'East Riding of Yorkshire'),
+    _CommunityArea(key: 'east_sussex', label: 'East Sussex'),
+    _CommunityArea(key: 'essex', label: 'Essex'),
+    _CommunityArea(key: 'gloucestershire', label: 'Gloucestershire'),
+    _CommunityArea(key: 'greater_london', label: 'Greater London'),
+    _CommunityArea(key: 'greater_manchester', label: 'Greater Manchester'),
+    _CommunityArea(key: 'hampshire', label: 'Hampshire'),
+    _CommunityArea(key: 'herefordshire', label: 'Herefordshire'),
+    _CommunityArea(key: 'hertfordshire', label: 'Hertfordshire'),
+    _CommunityArea(key: 'isle_of_wight', label: 'Isle of Wight'),
+    _CommunityArea(key: 'kent', label: 'Kent'),
+    _CommunityArea(key: 'lancashire', label: 'Lancashire'),
+    _CommunityArea(key: 'leicestershire', label: 'Leicestershire'),
+    _CommunityArea(key: 'lincolnshire', label: 'Lincolnshire'),
+    _CommunityArea(key: 'merseyside', label: 'Merseyside'),
+    _CommunityArea(key: 'norfolk', label: 'Norfolk'),
+    _CommunityArea(key: 'north_yorkshire', label: 'North Yorkshire'),
+    _CommunityArea(key: 'northamptonshire', label: 'Northamptonshire'),
+    _CommunityArea(key: 'northumberland', label: 'Northumberland'),
+    _CommunityArea(key: 'nottinghamshire', label: 'Nottinghamshire'),
+    _CommunityArea(key: 'oxfordshire', label: 'Oxfordshire'),
+    _CommunityArea(key: 'rutland', label: 'Rutland'),
+    _CommunityArea(key: 'shropshire', label: 'Shropshire'),
+    _CommunityArea(key: 'somerset', label: 'Somerset'),
+    _CommunityArea(key: 'south_yorkshire', label: 'South Yorkshire'),
+    _CommunityArea(key: 'staffordshire', label: 'Staffordshire'),
+    _CommunityArea(key: 'suffolk', label: 'Suffolk'),
+    _CommunityArea(key: 'surrey', label: 'Surrey'),
+    _CommunityArea(key: 'tyne_and_wear', label: 'Tyne and Wear'),
+    _CommunityArea(key: 'warwickshire', label: 'Warwickshire'),
+    _CommunityArea(key: 'west_midlands', label: 'West Midlands'),
+    _CommunityArea(key: 'west_sussex', label: 'West Sussex'),
+    _CommunityArea(key: 'west_yorkshire', label: 'West Yorkshire'),
+    _CommunityArea(key: 'wiltshire', label: 'Wiltshire'),
+    _CommunityArea(key: 'worcestershire', label: 'Worcestershire'),
+    _CommunityArea(key: 'anglesey', label: 'Anglesey'),
+    _CommunityArea(key: 'blaenau_gwent', label: 'Blaenau Gwent'),
+    _CommunityArea(key: 'bridgend', label: 'Bridgend'),
+    _CommunityArea(key: 'caerphilly', label: 'Caerphilly'),
+    _CommunityArea(key: 'cardiff', label: 'Cardiff'),
+    _CommunityArea(key: 'carmarthenshire', label: 'Carmarthenshire'),
+    _CommunityArea(key: 'ceredigion', label: 'Ceredigion'),
+    _CommunityArea(key: 'conwy', label: 'Conwy'),
+    _CommunityArea(key: 'denbighshire', label: 'Denbighshire'),
+    _CommunityArea(key: 'flintshire', label: 'Flintshire'),
+    _CommunityArea(key: 'gwynedd', label: 'Gwynedd'),
+    _CommunityArea(key: 'merthyr_tydfil', label: 'Merthyr Tydfil'),
+    _CommunityArea(key: 'monmouthshire', label: 'Monmouthshire'),
+    _CommunityArea(key: 'neath_port_talbot', label: 'Neath Port Talbot'),
+    _CommunityArea(key: 'newport', label: 'Newport'),
+    _CommunityArea(key: 'pembrokeshire', label: 'Pembrokeshire'),
+    _CommunityArea(key: 'powys', label: 'Powys'),
+    _CommunityArea(key: 'rhondda_cynon_taf', label: 'Rhondda Cynon Taf'),
+    _CommunityArea(key: 'swansea', label: 'Swansea'),
+    _CommunityArea(key: 'torfaen', label: 'Torfaen'),
+    _CommunityArea(key: 'vale_of_glamorgan', label: 'Vale of Glamorgan'),
+    _CommunityArea(key: 'wrexham', label: 'Wrexham'),
+    _CommunityArea(key: 'aberdeen_city', label: 'Aberdeen City'),
+    _CommunityArea(key: 'aberdeenshire', label: 'Aberdeenshire'),
+    _CommunityArea(key: 'angus', label: 'Angus'),
+    _CommunityArea(key: 'argyll_and_bute', label: 'Argyll and Bute'),
+    _CommunityArea(key: 'city_of_edinburgh', label: 'City of Edinburgh'),
+    _CommunityArea(key: 'clackmannanshire', label: 'Clackmannanshire'),
+    _CommunityArea(key: 'dumfries_and_galloway', label: 'Dumfries and Galloway'),
+    _CommunityArea(key: 'dundee_city', label: 'Dundee City'),
+    _CommunityArea(key: 'east_ayrshire', label: 'East Ayrshire'),
+    _CommunityArea(key: 'east_dunbartonshire', label: 'East Dunbartonshire'),
+    _CommunityArea(key: 'east_lothian', label: 'East Lothian'),
+    _CommunityArea(key: 'east_renfrewshire', label: 'East Renfrewshire'),
+    _CommunityArea(key: 'falkirk', label: 'Falkirk'),
+    _CommunityArea(key: 'fife', label: 'Fife'),
+    _CommunityArea(key: 'glasgow_city', label: 'Glasgow City'),
+    _CommunityArea(key: 'highland', label: 'Highland'),
+    _CommunityArea(key: 'inverclyde', label: 'Inverclyde'),
+    _CommunityArea(key: 'midlothian', label: 'Midlothian'),
+    _CommunityArea(key: 'moray', label: 'Moray'),
+    _CommunityArea(key: 'na_h_eileanan_siar', label: 'Na h-Eileanan Siar'),
+    _CommunityArea(key: 'north_ayrshire', label: 'North Ayrshire'),
+    _CommunityArea(key: 'north_lanarkshire', label: 'North Lanarkshire'),
+    _CommunityArea(key: 'orkney_islands', label: 'Orkney Islands'),
+    _CommunityArea(key: 'perth_and_kinross', label: 'Perth and Kinross'),
+    _CommunityArea(key: 'renfrewshire', label: 'Renfrewshire'),
+    _CommunityArea(key: 'scottish_borders', label: 'Scottish Borders'),
+    _CommunityArea(key: 'shetland_islands', label: 'Shetland Islands'),
+    _CommunityArea(key: 'south_ayrshire', label: 'South Ayrshire'),
+    _CommunityArea(key: 'south_lanarkshire', label: 'South Lanarkshire'),
+    _CommunityArea(key: 'stirling', label: 'Stirling'),
+    _CommunityArea(key: 'west_dunbartonshire', label: 'West Dunbartonshire'),
+    _CommunityArea(key: 'west_lothian', label: 'West Lothian'),
+    _CommunityArea(key: 'antrim_and_newtownabbey', label: 'Antrim and Newtownabbey'),
+    _CommunityArea(key: 'ards_and_north_down', label: 'Ards and North Down'),
+    _CommunityArea(key: 'armagh_banbridge_craigavon', label: 'Armagh, Banbridge and Craigavon'),
+    _CommunityArea(key: 'belfast', label: 'Belfast'),
+    _CommunityArea(key: 'causeway_coast_and_glens', label: 'Causeway Coast and Glens'),
+    _CommunityArea(key: 'derry_and_strabane', label: 'Derry and Strabane'),
+    _CommunityArea(key: 'fermanagh_and_omagh', label: 'Fermanagh and Omagh'),
+    _CommunityArea(key: 'lisburn_and_castlereagh', label: 'Lisburn and Castlereagh'),
+    _CommunityArea(key: 'mid_and_east_antrim', label: 'Mid and East Antrim'),
+    _CommunityArea(key: 'mid_ulster', label: 'Mid Ulster'),
+    _CommunityArea(key: 'newry_mourne_and_down', label: 'Newry, Mourne and Down'),
   ];
 
   List<String> get _marketStatusOptions {
@@ -82,10 +210,12 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
       _postType = _safePostType(existingPost.postType);
       _titleController.text = existingPost.title;
       _descriptionController.text = existingPost.description;
-      _priceController.text =
-          existingPost.hasPrice ? existingPost.askingPrice!.toStringAsFixed(2) : '';
+      _priceController.text = existingPost.hasPrice
+          ? existingPost.askingPrice!.toStringAsFixed(2)
+          : '';
       _locationController.text = existingPost.locationText;
       _wantedTradeForController.text = existingPost.wantedTradeFor;
+      _selectedAreaKey = _safeAreaKey(existingPost.locationText);
       _marketStatus =
           existingPost.isMarketplace ? existingPost.normalizedMarketStatus : 'Available';
       if (!_marketStatusOptions.contains(_marketStatus)) {
@@ -165,6 +295,42 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
     final trimmed = value.trim();
     if (communityDeliveryMethods.contains(trimmed)) return trimmed;
     return communityDeliveryMethods.isNotEmpty ? communityDeliveryMethods.first : 'Post';
+  }
+
+  String _normaliseAreaKey(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  String _safeAreaKey(String value) {
+    final normalised = _normaliseAreaKey(value);
+    if (normalised.isEmpty) return '';
+
+    for (final area in _communityAreaOptions) {
+      if (area.key == normalised) return area.key;
+      if (_normaliseAreaKey(area.label) == normalised) return area.key;
+    }
+
+    final lowerValue = value.trim().toLowerCase();
+    for (final area in _communityAreaOptions) {
+      if (area.key.isEmpty) continue;
+      if (lowerValue.contains(area.label.toLowerCase())) return area.key;
+    }
+
+    return '';
+  }
+
+  _CommunityArea _areaForKey(String key) {
+    final safeKey = _safeAreaKey(key);
+    for (final area in _communityAreaOptions) {
+      if (area.key == safeKey) return area;
+    }
+    return _communityAreaOptions.first;
   }
 
   OutlineInputBorder get _fieldBorder => const OutlineInputBorder(
@@ -344,6 +510,11 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
       return;
     }
 
+    if (_isMarketplacePost && _selectedAreaKey.trim().isEmpty) {
+      _showComposerMessage('Choose a county / area for this listing');
+      return;
+    }
+
     final askingPrice = _parsePrice();
     if (_isForSale && askingPrice == null) {
       _showComposerMessage('Add a valid asking price for sale listings');
@@ -367,6 +538,7 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
       final safeCurrency = _safeCurrencyCode(_askingCurrency);
       final safeCondition = _safeCardCondition(_cardCondition);
       final safeDelivery = _safeDeliveryMethod(_deliveryMethod);
+      final safeArea = _isMarketplacePost ? _areaForKey(_selectedAreaKey) : null;
       final safeImages = _imageBase64List
           .map((imageRef) => imageRef.trim())
           .where((imageRef) => imageRef.isNotEmpty)
@@ -400,10 +572,14 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
           hiddenReplyIds: existingPost.hiddenReplyIds,
         );
 
+        final updatedPostData = updatedPost.toJson();
+        updatedPostData['area'] = safeArea?.label ?? '';
+        updatedPostData['areaKey'] = safeArea?.key ?? '';
+
         await FirebaseFirestore.instance
             .collection('community_posts')
             .doc(existingPost.id)
-            .set(updatedPost.toJson(), SetOptions(merge: true));
+            .set(updatedPostData, SetOptions(merge: true));
       } else {
         final postDoc =
             FirebaseFirestore.instance.collection('community_posts').doc();
@@ -429,17 +605,25 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
               : '',
           imageBase64List: safeImages,
         );
-        await postDoc.set(post.toJson());
+
+        final postData = post.toJson();
+        postData['area'] = safeArea?.label ?? '';
+        postData['areaKey'] = safeArea?.key ?? '';
+
+        await postDoc.set(postData);
       }
 
       if (!mounted) return;
       Navigator.of(context).pop();
     } on FirebaseException catch (error) {
       _showComposerMessage(
-        error.message ?? (_isEditing ? 'Could not update post' : 'Could not create post'),
+        error.message ??
+            (_isEditing ? 'Could not update post' : 'Could not create post'),
       );
     } catch (_) {
-      _showComposerMessage(_isEditing ? 'Could not update post' : 'Could not create post');
+      _showComposerMessage(
+        _isEditing ? 'Could not update post' : 'Could not create post',
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -650,6 +834,36 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                       }
                                     },
                             ),
+                            const SizedBox(height: 14),
+                            _fieldLabel('County / area'),
+                            const SizedBox(height: 8),
+                            DropdownButtonFormField<String>(
+                              initialValue: _safeAreaKey(_selectedAreaKey),
+                              isExpanded: true,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              iconEnabledColor: const Color(0xFFE4ECFF),
+                              dropdownColor: const Color(0xFF143163),
+                              decoration: _inputDecoration('Choose county / area'),
+                              items: _communityAreaOptions
+                                  .map(
+                                    (area) => DropdownMenuItem(
+                                      value: area.key,
+                                      child: Text(area.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: _saving
+                                  ? null
+                                  : (value) {
+                                      setState(() {
+                                        _selectedAreaKey = _safeAreaKey(value ?? '');
+                                      });
+                                    },
+                            ),
                             if (_isForSale) ...[
                               const SizedBox(height: 14),
                               _fieldLabel('Asking price'),
@@ -775,7 +989,7 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                     },
                             ),
                             const SizedBox(height: 14),
-                            _fieldLabel('Location'),
+                            _fieldLabel('Town / collection point'),
                             const SizedBox(height: 8),
                             TextField(
                               controller: _locationController,
@@ -785,7 +999,7 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
                                 fontSize: 17,
                               ),
                               decoration: _inputDecoration(
-                                'Manchester, collection point, or general area',
+                                'Manchester, local meetup, collection point, or extra details',
                               ),
                             ),
                             if (_isSwap || _isWanted) ...[

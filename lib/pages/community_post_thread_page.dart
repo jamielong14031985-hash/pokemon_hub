@@ -45,6 +45,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
   Set<String> _blockedUserIds = <String>{};
   bool _sending = false;
   bool _pendingScrollToLatestReply = false;
+  bool _isAdmin = false;
   String? _replyImageBase64;
 
   DocumentReference<Map<String, dynamic>> get _postRef =>
@@ -62,6 +63,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
 
     final currentUid = _currentUid;
     if (currentUid.isEmpty) return;
+
+    _loadAdminStatus();
 
     _blockedUsersSub = CommunitySafetyService.blockedUserIdsStream(currentUid).listen(
       (blockedUserIds) {
@@ -85,6 +88,32 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     _replyController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAdminStatus() async {
+    final currentUid = _currentUid;
+    if (currentUid.isEmpty) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('app_roles')
+          .doc(currentUid)
+          .get();
+
+      final data = snapshot.data();
+      final role = data?['role']?.toString().trim().toLowerCase() ?? '';
+      final isAdminOrModerator = role == 'admin' || role == 'moderator';
+
+      if (!mounted) return;
+      setState(() {
+        _isAdmin = isAdminOrModerator;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isAdmin = false;
+      });
+    }
   }
 
   Stream<CommunityPost> _postStream() async* {
@@ -284,6 +313,84 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     }
   }
 
+  Future<void> _deletePost(CommunityPost livePost) async {
+    final currentUid = _currentUid;
+    final canDeletePost = currentUid.isNotEmpty &&
+        (currentUid == livePost.authorId.trim() || _isAdmin);
+
+    if (!canDeletePost) {
+      _showThreadMessage('Only the post author or an admin can delete this post.');
+      return;
+    }
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF102754),
+        title: Text(
+          _isAdmin && currentUid != livePost.authorId.trim()
+              ? 'Admin delete post'
+              : 'Delete post',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          _isAdmin && currentUid != livePost.authorId.trim()
+              ? 'This will permanently remove this post and all replies for everyone.'
+              : 'This will permanently remove your post and all replies.',
+          style: const TextStyle(color: Color(0xFFC8D4F0)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB13B59),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true) return;
+
+    try {
+      final replies = await _repliesRef.get();
+      final replyImageRefs = replies.docs
+          .map(_safeReplyFromDoc)
+          .whereType<CommunityReply>()
+          .map((reply) => reply.imageBase64)
+          .whereType<String>()
+          .toList();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in replies.docs) {
+        batch.delete(doc.reference);
+      }
+      batch.delete(_postRef);
+      await batch.commit();
+
+      for (final imageRef in <String>[
+        ...livePost.imageBase64List,
+        ...replyImageRefs,
+      ]) {
+        unawaited(FirebaseImageStorageService.deleteByDownloadUrl(imageRef));
+      }
+
+      if (!mounted) return;
+      _showThreadMessage('Post deleted.');
+      Navigator.of(context).pop();
+    } on FirebaseException catch (error) {
+      _showThreadMessage(error.message ?? 'Could not delete post.');
+    } catch (_) {
+      _showThreadMessage('Could not delete post.');
+    }
+  }
+
   Future<void> _deleteReply(CommunityReply reply) async {
     final currentUid = _currentUid;
     if (currentUid.isEmpty) {
@@ -292,7 +399,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     }
 
     try {
-      if (currentUid == reply.authorId) {
+      if (currentUid == reply.authorId || _isAdmin) {
         await _repliesRef.doc(reply.id).delete();
         unawaited(FirebaseImageStorageService.deleteByDownloadUrl(reply.imageBase64));
       } else if (currentUid == widget.post.authorId) {
@@ -303,7 +410,9 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
           SetOptions(merge: true),
         );
       } else {
-        _showThreadMessage('Only the comment author or post owner can delete comments.');
+        _showThreadMessage(
+          'Only the comment author, post owner, or an admin can delete comments.',
+        );
         return;
       }
       _showThreadMessage('Comment deleted.');
@@ -322,7 +431,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     final replyAuthorId = reply.authorId.trim();
     final replyAuthorName =
         reply.authorName.trim().isEmpty ? 'Trainer' : reply.authorName.trim();
-    final canDelete = currentUid == reply.authorId || currentUid == livePost.authorId;
+    final canDelete =
+        currentUid == reply.authorId || currentUid == livePost.authorId || _isAdmin;
     final canAddFriend = replyAuthorId.isNotEmpty && replyAuthorId != currentUid;
 
     if (!canDelete && !canAddFriend) return;
@@ -466,9 +576,11 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                       foregroundColor: Colors.white,
                     ),
                     icon: const Icon(Icons.delete_outline),
-                    label: const Text(
-                      'Delete message',
-                      style: TextStyle(fontWeight: FontWeight.w800),
+                    label: Text(
+                      _isAdmin && currentUid != reply.authorId
+                          ? 'Admin delete message'
+                          : 'Delete message',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
                 ],
@@ -640,6 +752,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     final canManageListing = currentUid != null &&
         currentUid == livePost.authorId &&
         livePost.isMarketplace;
+    final canDeletePost = currentUid != null &&
+        (currentUid == livePost.authorId.trim() || _isAdmin);
     final accentColor = communityPostAccentColor(livePost);
 
     return Padding(
@@ -775,6 +889,14 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                               color: communityMarketStatusColor(
                                 livePost.normalizedMarketStatus,
                               ),
+                            ),
+                          ],
+                          if (_isAdmin) ...[
+                            const SizedBox(width: 8),
+                            const CommunityMetaChip(
+                              icon: Icons.admin_panel_settings_outlined,
+                              label: 'Admin',
+                              color: Color(0xFFB13B59),
                             ),
                           ],
                           const Spacer(),
@@ -989,6 +1111,22 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                           ],
                         ),
                       ],
+                      if (canDeletePost) ...[
+                        const SizedBox(height: 14),
+                        OutlinedButton.icon(
+                          onPressed: () => _deletePost(livePost),
+                          icon: const Icon(Icons.delete_outline),
+                          label: Text(
+                            _isAdmin && currentUid != livePost.authorId.trim()
+                                ? 'Admin delete post'
+                                : 'Delete post',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFFFCDD2),
+                            side: const BorderSide(color: Color(0xFFB13B59)),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1002,7 +1140,8 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     required CommunityPost livePost,
     required String? currentUid,
   }) {
-    final canDelete = reply.authorId == currentUid || livePost.authorId == currentUid;
+    final canDelete =
+        reply.authorId == currentUid || livePost.authorId == currentUid || _isAdmin;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Card(
@@ -1076,19 +1215,21 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                           _deleteReply(reply);
                         }
                       },
-                      itemBuilder: (_) => const [
+                      itemBuilder: (_) => [
                         PopupMenuItem<String>(
                           value: 'delete',
                           child: Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.delete_outline,
                                 color: Colors.redAccent,
                               ),
-                              SizedBox(width: 10),
+                              const SizedBox(width: 10),
                               Text(
-                                'Delete comment',
-                                style: TextStyle(
+                                _isAdmin && currentUid != reply.authorId
+                                    ? 'Admin delete comment'
+                                    : 'Delete comment',
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -1193,7 +1334,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: const Text('Post replies'),
+        title: Text(_isAdmin ? 'Post replies • Admin' : 'Post replies'),
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
       ),

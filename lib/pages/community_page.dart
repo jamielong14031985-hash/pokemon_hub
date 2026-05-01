@@ -27,6 +27,16 @@ import 'community_private_inbox_page.dart';
 import 'friend_requests_page.dart';
 import 'social_pages.dart';
 
+class _CommunityArea {
+  const _CommunityArea({
+    required this.key,
+    required this.label,
+  });
+
+  final String key;
+  final String label;
+}
+
 class CommunityPage extends StatefulWidget {
   const CommunityPage({super.key, required this.profile});
 
@@ -40,10 +50,12 @@ class _CommunityPageState extends State<CommunityPage> {
   String _section = 'Marketplace';
   String _filter = 'All';
   String _marketStatusFilter = 'All';
+  String _areaFilter = 'All';
   StreamSubscription<Set<String>>? _blockedUsersSub;
   Set<String> _blockedUserIds = <String>{};
   int? _lastSeenAtMs;
   bool _loadedLastSeen = false;
+  bool _isAdminOrModerator = false;
   bool _savedVisitMarker = false;
   late final int _visitStartedAtMs;
 
@@ -53,11 +65,162 @@ class _CommunityPageState extends State<CommunityPage> {
           .orderBy('createdAtMs', descending: true)
           .snapshots();
 
+  static const List<_CommunityArea> _communityAreaOptions = <_CommunityArea>[
+    _CommunityArea(key: 'All', label: 'All counties / areas'),
+    _CommunityArea(key: 'bedfordshire', label: 'Bedfordshire'),
+    _CommunityArea(key: 'berkshire', label: 'Berkshire'),
+    _CommunityArea(key: 'bristol', label: 'Bristol'),
+    _CommunityArea(key: 'buckinghamshire', label: 'Buckinghamshire'),
+    _CommunityArea(key: 'cambridgeshire', label: 'Cambridgeshire'),
+    _CommunityArea(key: 'cheshire', label: 'Cheshire'),
+    _CommunityArea(key: 'city_of_london', label: 'City of London'),
+    _CommunityArea(key: 'cornwall', label: 'Cornwall'),
+    _CommunityArea(key: 'county_durham', label: 'County Durham'),
+    _CommunityArea(key: 'cumbria', label: 'Cumbria'),
+    _CommunityArea(key: 'derbyshire', label: 'Derbyshire'),
+    _CommunityArea(key: 'devon', label: 'Devon'),
+    _CommunityArea(key: 'dorset', label: 'Dorset'),
+    _CommunityArea(
+      key: 'east_riding_of_yorkshire',
+      label: 'East Riding of Yorkshire',
+    ),
+    _CommunityArea(key: 'east_sussex', label: 'East Sussex'),
+    _CommunityArea(key: 'essex', label: 'Essex'),
+    _CommunityArea(key: 'gloucestershire', label: 'Gloucestershire'),
+    _CommunityArea(key: 'greater_london', label: 'Greater London'),
+    _CommunityArea(key: 'greater_manchester', label: 'Greater Manchester'),
+    _CommunityArea(key: 'hampshire', label: 'Hampshire'),
+    _CommunityArea(key: 'herefordshire', label: 'Herefordshire'),
+    _CommunityArea(key: 'hertfordshire', label: 'Hertfordshire'),
+    _CommunityArea(key: 'isle_of_wight', label: 'Isle of Wight'),
+    _CommunityArea(key: 'kent', label: 'Kent'),
+    _CommunityArea(key: 'lancashire', label: 'Lancashire'),
+    _CommunityArea(key: 'leicestershire', label: 'Leicestershire'),
+    _CommunityArea(key: 'lincolnshire', label: 'Lincolnshire'),
+    _CommunityArea(key: 'merseyside', label: 'Merseyside'),
+    _CommunityArea(key: 'norfolk', label: 'Norfolk'),
+    _CommunityArea(key: 'north_yorkshire', label: 'North Yorkshire'),
+    _CommunityArea(key: 'northamptonshire', label: 'Northamptonshire'),
+    _CommunityArea(key: 'northumberland', label: 'Northumberland'),
+    _CommunityArea(key: 'nottinghamshire', label: 'Nottinghamshire'),
+    _CommunityArea(key: 'oxfordshire', label: 'Oxfordshire'),
+    _CommunityArea(key: 'rutland', label: 'Rutland'),
+    _CommunityArea(key: 'shropshire', label: 'Shropshire'),
+    _CommunityArea(key: 'somerset', label: 'Somerset'),
+    _CommunityArea(key: 'south_yorkshire', label: 'South Yorkshire'),
+    _CommunityArea(key: 'staffordshire', label: 'Staffordshire'),
+    _CommunityArea(key: 'suffolk', label: 'Suffolk'),
+    _CommunityArea(key: 'surrey', label: 'Surrey'),
+    _CommunityArea(key: 'tyne_and_wear', label: 'Tyne and Wear'),
+    _CommunityArea(key: 'warwickshire', label: 'Warwickshire'),
+    _CommunityArea(key: 'west_midlands', label: 'West Midlands'),
+    _CommunityArea(key: 'west_sussex', label: 'West Sussex'),
+    _CommunityArea(key: 'west_yorkshire', label: 'West Yorkshire'),
+    _CommunityArea(key: 'wiltshire', label: 'Wiltshire'),
+    _CommunityArea(key: 'worcestershire', label: 'Worcestershire'),
+    _CommunityArea(key: 'anglesey', label: 'Anglesey'),
+    _CommunityArea(key: 'blaenau_gwent', label: 'Blaenau Gwent'),
+    _CommunityArea(key: 'bridgend', label: 'Bridgend'),
+    _CommunityArea(key: 'caerphilly', label: 'Caerphilly'),
+    _CommunityArea(key: 'cardiff', label: 'Cardiff'),
+    _CommunityArea(key: 'carmarthenshire', label: 'Carmarthenshire'),
+    _CommunityArea(key: 'ceredigion', label: 'Ceredigion'),
+    _CommunityArea(key: 'conwy', label: 'Conwy'),
+    _CommunityArea(key: 'denbighshire', label: 'Denbighshire'),
+    _CommunityArea(key: 'flintshire', label: 'Flintshire'),
+    _CommunityArea(key: 'gwynedd', label: 'Gwynedd'),
+    _CommunityArea(key: 'merthyr_tydfil', label: 'Merthyr Tydfil'),
+    _CommunityArea(key: 'monmouthshire', label: 'Monmouthshire'),
+    _CommunityArea(key: 'neath_port_talbot', label: 'Neath Port Talbot'),
+    _CommunityArea(key: 'newport', label: 'Newport'),
+    _CommunityArea(key: 'pembrokeshire', label: 'Pembrokeshire'),
+    _CommunityArea(key: 'powys', label: 'Powys'),
+    _CommunityArea(key: 'rhondda_cynon_taf', label: 'Rhondda Cynon Taf'),
+    _CommunityArea(key: 'swansea', label: 'Swansea'),
+    _CommunityArea(key: 'torfaen', label: 'Torfaen'),
+    _CommunityArea(key: 'vale_of_glamorgan', label: 'Vale of Glamorgan'),
+    _CommunityArea(key: 'wrexham', label: 'Wrexham'),
+    _CommunityArea(key: 'aberdeen_city', label: 'Aberdeen City'),
+    _CommunityArea(key: 'aberdeenshire', label: 'Aberdeenshire'),
+    _CommunityArea(key: 'angus', label: 'Angus'),
+    _CommunityArea(key: 'argyll_and_bute', label: 'Argyll and Bute'),
+    _CommunityArea(key: 'city_of_edinburgh', label: 'City of Edinburgh'),
+    _CommunityArea(key: 'clackmannanshire', label: 'Clackmannanshire'),
+    _CommunityArea(
+      key: 'dumfries_and_galloway',
+      label: 'Dumfries and Galloway',
+    ),
+    _CommunityArea(key: 'dundee_city', label: 'Dundee City'),
+    _CommunityArea(key: 'east_ayrshire', label: 'East Ayrshire'),
+    _CommunityArea(
+      key: 'east_dunbartonshire',
+      label: 'East Dunbartonshire',
+    ),
+    _CommunityArea(key: 'east_lothian', label: 'East Lothian'),
+    _CommunityArea(key: 'east_renfrewshire', label: 'East Renfrewshire'),
+    _CommunityArea(key: 'falkirk', label: 'Falkirk'),
+    _CommunityArea(key: 'fife', label: 'Fife'),
+    _CommunityArea(key: 'glasgow_city', label: 'Glasgow City'),
+    _CommunityArea(key: 'highland', label: 'Highland'),
+    _CommunityArea(key: 'inverclyde', label: 'Inverclyde'),
+    _CommunityArea(key: 'midlothian', label: 'Midlothian'),
+    _CommunityArea(key: 'moray', label: 'Moray'),
+    _CommunityArea(key: 'na_h_eileanan_siar', label: 'Na h-Eileanan Siar'),
+    _CommunityArea(key: 'north_ayrshire', label: 'North Ayrshire'),
+    _CommunityArea(key: 'north_lanarkshire', label: 'North Lanarkshire'),
+    _CommunityArea(key: 'orkney_islands', label: 'Orkney Islands'),
+    _CommunityArea(key: 'perth_and_kinross', label: 'Perth and Kinross'),
+    _CommunityArea(key: 'renfrewshire', label: 'Renfrewshire'),
+    _CommunityArea(key: 'scottish_borders', label: 'Scottish Borders'),
+    _CommunityArea(key: 'shetland_islands', label: 'Shetland Islands'),
+    _CommunityArea(key: 'south_ayrshire', label: 'South Ayrshire'),
+    _CommunityArea(key: 'south_lanarkshire', label: 'South Lanarkshire'),
+    _CommunityArea(key: 'stirling', label: 'Stirling'),
+    _CommunityArea(
+      key: 'west_dunbartonshire',
+      label: 'West Dunbartonshire',
+    ),
+    _CommunityArea(key: 'west_lothian', label: 'West Lothian'),
+    _CommunityArea(
+      key: 'antrim_and_newtownabbey',
+      label: 'Antrim and Newtownabbey',
+    ),
+    _CommunityArea(
+      key: 'ards_and_north_down',
+      label: 'Ards and North Down',
+    ),
+    _CommunityArea(
+      key: 'armagh_banbridge_craigavon',
+      label: 'Armagh, Banbridge and Craigavon',
+    ),
+    _CommunityArea(key: 'belfast', label: 'Belfast'),
+    _CommunityArea(
+      key: 'causeway_coast_and_glens',
+      label: 'Causeway Coast and Glens',
+    ),
+    _CommunityArea(key: 'derry_and_strabane', label: 'Derry and Strabane'),
+    _CommunityArea(
+      key: 'fermanagh_and_omagh',
+      label: 'Fermanagh and Omagh',
+    ),
+    _CommunityArea(
+      key: 'lisburn_and_castlereagh',
+      label: 'Lisburn and Castlereagh',
+    ),
+    _CommunityArea(key: 'mid_and_east_antrim', label: 'Mid and East Antrim'),
+    _CommunityArea(key: 'mid_ulster', label: 'Mid Ulster'),
+    _CommunityArea(
+      key: 'newry_mourne_and_down',
+      label: 'Newry, Mourne and Down',
+    ),
+  ];
+
   @override
   void initState() {
     super.initState();
     _visitStartedAtMs = DateTime.now().millisecondsSinceEpoch;
     _loadLastSeen();
+    _loadAdminStatus();
 
     final currentUid =
         FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
@@ -81,6 +244,33 @@ class _CommunityPageState extends State<CommunityPage> {
   void dispose() {
     _blockedUsersSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadAdminStatus() async {
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid).trim();
+    if (currentUid.isEmpty) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('app_roles')
+          .doc(currentUid)
+          .get();
+
+      final data = snapshot.data();
+      final role = data?['role']?.toString().trim().toLowerCase() ?? '';
+      final isAdminOrModerator = role == 'admin' || role == 'moderator';
+
+      if (!mounted) return;
+      setState(() {
+        _isAdminOrModerator = isAdminOrModerator;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isAdminOrModerator = false;
+      });
+    }
   }
 
   String _lastSeenPrefsKey() {
@@ -138,6 +328,74 @@ class _CommunityPageState extends State<CommunityPage> {
     }
   }
 
+  String _normaliseAreaKey(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  String _safeAreaFilterKey(String value) {
+    final trimmed = value.trim();
+    if (trimmed == 'All') return 'All';
+
+    final normalised = _normaliseAreaKey(trimmed);
+    if (normalised.isEmpty) return 'All';
+
+    for (final area in _communityAreaOptions) {
+      if (area.key == normalised || _normaliseAreaKey(area.label) == normalised) {
+        return area.key;
+      }
+    }
+
+    return 'All';
+  }
+
+  String _areaLabelForKey(String key) {
+    final safeKey = _safeAreaFilterKey(key);
+    for (final area in _communityAreaOptions) {
+      if (area.key == safeKey) return area.label;
+    }
+    return 'All counties / areas';
+  }
+
+  String _postAreaKeyFromData(Map<String, dynamic> data) {
+    final areaKey = (data['areaKey'] ?? data['countyKey'] ?? '').toString().trim();
+    final normalisedAreaKey = _normaliseAreaKey(areaKey);
+
+    for (final area in _communityAreaOptions) {
+      if (area.key != 'All' && area.key == normalisedAreaKey) {
+        return area.key;
+      }
+    }
+
+    final areaText = (data['area'] ?? data['county'] ?? '').toString().trim();
+    final normalisedAreaText = _normaliseAreaKey(areaText);
+
+    for (final area in _communityAreaOptions) {
+      if (area.key == 'All') continue;
+      if (area.key == normalisedAreaText ||
+          _normaliseAreaKey(area.label) == normalisedAreaText) {
+        return area.key;
+      }
+    }
+
+    final locationText = (data['locationText'] ?? '').toString().toLowerCase();
+    if (locationText.isNotEmpty) {
+      for (final area in _communityAreaOptions) {
+        if (area.key == 'All') continue;
+        if (locationText.contains(area.label.toLowerCase())) {
+          return area.key;
+        }
+      }
+    }
+
+    return '';
+  }
+
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -172,7 +430,7 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   bool get _hasActiveMarketplaceFilters =>
-      _filter != 'All' || _marketStatusFilter != 'All';
+      _filter != 'All' || _marketStatusFilter != 'All' || _areaFilter != 'All';
 
   String get _marketplaceFilterSummary {
     final listingType =
@@ -180,12 +438,37 @@ class _CommunityPageState extends State<CommunityPage> {
     final listingStatus = _marketStatusFilter == 'All'
         ? 'all statuses'
         : '${_marketStatusFilter.toLowerCase()} status';
-    return '$listingType • $listingStatus';
+    final listingArea =
+        _areaFilter == 'All' ? 'all areas' : _areaLabelForKey(_areaFilter);
+    return '$listingType • $listingStatus • $listingArea';
+  }
+
+  InputDecoration _filterSheetDropdownDecoration(String hintText) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
+      filled: true,
+      fillColor: const Color(0xFF16366E),
+      border: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(18)),
+        borderSide: BorderSide(color: Color(0xFF3F5C96)),
+      ),
+      enabledBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(18)),
+        borderSide: BorderSide(color: Color(0xFF3F5C96)),
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(18)),
+        borderSide: BorderSide(color: Color(0xFFF7DE77), width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    );
   }
 
   Future<void> _openMarketplaceFiltersSheet() async {
     var selectedType = _filter;
     var selectedStatus = _marketStatusFilter;
+    var selectedArea = _areaFilter;
 
     final applied = await showModalBottomSheet<bool>(
       context: context,
@@ -242,7 +525,7 @@ class _CommunityPageState extends State<CommunityPage> {
                                   ),
                                   const SizedBox(height: 8),
                                   const Text(
-                                    'Choose the type of listings and status you want to see.',
+                                    'Choose the listing type, status, and county you want to see.',
                                     style: TextStyle(
                                       color: Color(0xFFC8D4F0),
                                       fontSize: 14,
@@ -322,6 +605,42 @@ class _CommunityPageState extends State<CommunityPage> {
                                     }).toList(),
                                   ),
                                   const SizedBox(height: 18),
+                                  const Text(
+                                    'County / area',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  DropdownButtonFormField<String>(
+                                    initialValue: _safeAreaFilterKey(selectedArea),
+                                    isExpanded: true,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    iconEnabledColor: const Color(0xFFE4ECFF),
+                                    dropdownColor: const Color(0xFF143163),
+                                    decoration: _filterSheetDropdownDecoration(
+                                      'Choose county / area',
+                                    ),
+                                    items: _communityAreaOptions
+                                        .map(
+                                          (area) => DropdownMenuItem(
+                                            value: area.key,
+                                            child: Text(area.label),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (value) => setSheetState(
+                                      () => selectedArea =
+                                          _safeAreaFilterKey(value ?? 'All'),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 18),
                                 ],
                               ),
                             ),
@@ -335,6 +654,7 @@ class _CommunityPageState extends State<CommunityPage> {
                                     setSheetState(() {
                                       selectedType = 'All';
                                       selectedStatus = 'All';
+                                      selectedArea = 'All';
                                     });
                                   },
                                   style: OutlinedButton.styleFrom(
@@ -376,6 +696,7 @@ class _CommunityPageState extends State<CommunityPage> {
       setState(() {
         _filter = selectedType;
         _marketStatusFilter = selectedStatus;
+        _areaFilter = _safeAreaFilterKey(selectedArea);
       });
     }
   }
@@ -517,7 +838,10 @@ class _CommunityPageState extends State<CommunityPage> {
     );
   }
 
-  List<CommunityPost> _visiblePosts(List<CommunityPost> posts) {
+  List<CommunityPost> _visiblePosts(
+    List<CommunityPost> posts,
+    Map<String, String> areaKeysByPostId,
+  ) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
     final unblockedPosts = posts
         .where(
@@ -537,6 +861,11 @@ class _CommunityPageState extends State<CommunityPage> {
     if (_section == 'Marketplace' && _marketStatusFilter != 'All') {
       filtered = filtered.where(
         (post) => post.normalizedMarketStatus == _marketStatusFilter,
+      );
+    }
+    if (_section == 'Marketplace' && _areaFilter != 'All') {
+      filtered = filtered.where(
+        (post) => areaKeysByPostId[post.id] == _areaFilter,
       );
     }
 
@@ -1144,12 +1473,17 @@ class _CommunityPageState extends State<CommunityPage> {
                                 () => _marketStatusFilter = 'All',
                               ),
                             ),
+                          if (_areaFilter != 'All')
+                            CommunityActiveFilterPill(
+                              label: _areaLabelForKey(_areaFilter),
+                              onRemove: () => setState(() => _areaFilter = 'All'),
+                            ),
                         ],
                       ),
                       const SizedBox(height: 14),
                     ] else ...[
                       const Text(
-                        'Use filters to quickly find swaps, sales, available listings, pending deals, or sold items.',
+                        'Use filters to quickly find swaps, sales, wanted posts, available listings, pending deals, sold items, or local county listings.',
                         style: TextStyle(
                           color: Color(0xFFAFC0E6),
                           fontSize: 12,
@@ -1186,6 +1520,7 @@ class _CommunityPageState extends State<CommunityPage> {
                               onPressed: () => setState(() {
                                 _filter = 'All';
                                 _marketStatusFilter = 'All';
+                                _areaFilter = 'All';
                               }),
                               style: TextButton.styleFrom(
                                 foregroundColor: const Color(0xFFFFF2B3),
@@ -1235,6 +1570,7 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Widget _buildEmptyStateCard() {
+    final areaLabel = _areaFilter == 'All' ? '' : ' in ${_areaLabelForKey(_areaFilter)}';
     final emptyTitle = _section == 'Discussions'
         ? 'No discussion threads yet'
         : _marketStatusFilter == 'All'
@@ -1242,7 +1578,9 @@ class _CommunityPageState extends State<CommunityPage> {
             : 'No ${_marketStatusFilter.toLowerCase()} listings yet';
     final emptyMessage = _section == 'Discussions'
         ? 'Start a thread to chat about cards, collecting, trades, and making friends.'
-        : 'Create a professional swap or sale listing with status, condition, and delivery details.';
+        : _areaFilter == 'All'
+            ? 'Create a professional swap or sale listing with status, condition, and delivery details.'
+            : 'No matching listings were found$areaLabel. Try another county or clear the area filter.';
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1317,13 +1655,19 @@ class _CommunityPageState extends State<CommunityPage> {
               _markVisitSeenIfNeeded();
             });
 
-            final allPosts = (snapshot.data?.docs ??
-                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            final docs = snapshot.data?.docs ??
+                const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+            final areaKeysByPostId = <String, String>{
+              for (final doc in docs) doc.id: _postAreaKeyFromData(doc.data()),
+            };
+
+            final allPosts = docs
                 .map(_safePostFromDoc)
                 .whereType<CommunityPost>()
                 .toList();
 
-            final posts = _visiblePosts(allPosts);
+            final posts = _visiblePosts(allPosts, areaKeysByPostId);
             final hasNewPosts = _lastSeenAtMs != null &&
                 allPosts.any((post) => post.createdAtMs > (_lastSeenAtMs ?? 0));
 
@@ -1347,7 +1691,7 @@ class _CommunityPageState extends State<CommunityPage> {
                 return CommunityPostCard(
                   post: post,
                   currentProfile: widget.profile,
-                  canEdit: post.authorId == currentUid,
+                  canEdit: post.authorId == currentUid || _isAdminOrModerator,
                   canMessage:
                       post.authorId.isNotEmpty && post.authorId != currentUid,
                   isNew: isNew,
