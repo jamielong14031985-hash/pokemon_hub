@@ -1,78 +1,68 @@
 import 'package:flutter/material.dart';
 
+import '../services/tracked_restock_product_service.dart';
 import '../widgets/glass_page_header.dart';
 
-import '../services/tracked_restock_product_service.dart';
-import '../services/user_feature_flags_service.dart';
-
-class AdminTrackedRestockProductsPage extends StatelessWidget {
-  const AdminTrackedRestockProductsPage({super.key});
+class MyRestockTrackerPage extends StatelessWidget {
+  const MyRestockTrackerPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: const GlassPageAppBar(
-        title: 'Tracked Products',
-        subtitle: 'Manage restock tracking',
-        icon: Icons.manage_search_outlined,
+        title: 'My Restock Tracker',
+        subtitle: 'Track products you care about',
+        icon: Icons.notifications_active_outlined,
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showAddProductDialog(context),
-        icon: const Icon(Icons.add_link),
+        onPressed: () => _showProductDialog(context),
+        backgroundColor: const Color(0xFFF7DE77),
+        foregroundColor: Colors.black,
+        icon: const Icon(Icons.add_link_rounded),
         label: const Text('Add product'),
       ),
-      body: StreamBuilder<bool>(
-        stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
-        builder: (context, permissionSnapshot) {
-          if (permissionSnapshot.connectionState == ConnectionState.waiting) {
+      body: StreamBuilder<List<TrackedRestockProduct>>(
+        stream: TrackedRestockProductService.watchCurrentUserTrackedProducts(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return _ErrorMessage(error: snapshot.error.toString());
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (permissionSnapshot.data != true) {
-            return const _NoPermissionMessage();
-          }
+          final products = snapshot.data ?? const <TrackedRestockProduct>[];
 
-          return StreamBuilder<List<TrackedRestockProduct>>(
-            stream: TrackedRestockProductService.watchProducts(),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return _ErrorMessage(error: snapshot.error.toString());
-              }
-
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              final products = snapshot.data ?? const <TrackedRestockProduct>[];
-
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                children: [
-                  const _IntroCard(),
-                  const SizedBox(height: 16),
-                  if (products.isEmpty)
-                    const _EmptyProductsCard()
-                  else
-                    ...products.map(
-                      (product) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _TrackedProductCard(product: product),
-                      ),
-                    ),
-                ],
-              );
-            },
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+            children: [
+              const _IntroCard(),
+              const SizedBox(height: 16),
+              if (products.isEmpty)
+                const _EmptyProductsCard()
+              else
+                ...products.map(
+                  (product) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _TrackedProductCard(product: product),
+                  ),
+                ),
+            ],
           );
         },
       ),
     );
   }
 
-  static Future<void> _showAddProductDialog(BuildContext context) async {
+  static Future<void> _showProductDialog(
+    BuildContext context, {
+    TrackedRestockProduct? product,
+  }) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => const _AddTrackedProductDialog(),
+      builder: (_) => _MyTrackedProductDialog(product: product),
     );
   }
 }
@@ -87,10 +77,26 @@ class _IntroCard extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: const Padding(
         padding: EdgeInsets.all(18),
-        child: Text(
-          'Add Pokémon product pages here once. Firebase will check them automatically in the background. '
-          'When a tracked product changes from out of stock to in stock, a global Restock Alert is created and enabled users get a push notification.',
-          style: TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.notifications_active_outlined,
+              color: Color(0xFFF7DE77),
+              size: 30,
+            ),
+            SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                'Add products you want PocketChase to watch. '
+                'When one changes from out of stock to in stock, you will get a push notification.',
+                style: TextStyle(
+                  color: Color(0xFFD8E3FB),
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -106,24 +112,28 @@ class _EmptyProductsCard extends StatelessWidget {
       color: const Color(0xFF102754),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: const Padding(
-        padding: EdgeInsets.all(22),
+        padding: EdgeInsets.all(24),
         child: Column(
           children: [
-            Icon(Icons.link_outlined, color: Colors.white70, size: 42),
-            SizedBox(height: 12),
+            Icon(
+              Icons.inventory_2_outlined,
+              color: Colors.white60,
+              size: 54,
+            ),
+            SizedBox(height: 14),
             Text(
-              'No tracked products yet',
+              'No products tracked yet',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
               ),
             ),
-            SizedBox(height: 6),
+            SizedBox(height: 8),
             Text(
-              'Tap Add product to add a shop product page for automatic checks.',
+              'Press Add product to track a shop page.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFFD8E3FB)),
+              style: TextStyle(color: Color(0xFFC8D4F0), height: 1.35),
             ),
           ],
         ),
@@ -143,9 +153,8 @@ class _TrackedProductCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final statusText = product.inStock ? 'In stock' : 'Not in stock';
     final checkedText = _formatDate(product.lastCheckedAt);
-    final statusColor = product.inStock
-        ? const Color(0xFF54D39A)
-        : const Color(0xFFFFB3C7);
+    final statusColor =
+        product.inStock ? const Color(0xFF54D39A) : const Color(0xFFFFB3C7);
 
     return Card(
       color: const Color(0xFF102754),
@@ -157,10 +166,8 @@ class _TrackedProductCard extends StatelessWidget {
             CircleAvatar(
               backgroundColor: const Color(0xFF0E2A5E),
               child: Icon(
-                product.enabled ? Icons.link : Icons.link_off,
-                color: product.enabled
-                    ? const Color(0xFFF7DE77)
-                    : Colors.white54,
+                product.enabled ? Icons.link_rounded : Icons.link_off_rounded,
+                color: product.enabled ? const Color(0xFFF7DE77) : Colors.white54,
               ),
             ),
             const SizedBox(width: 12),
@@ -175,7 +182,7 @@ class _TrackedProductCard extends StatelessWidget {
                       product.productName,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w900,
                         fontSize: 16,
                       ),
                     ),
@@ -197,9 +204,7 @@ class _TrackedProductCard extends StatelessWidget {
                     ],
                     const SizedBox(height: 3),
                     Text(
-                      checkedText.isEmpty
-                          ? 'Not checked yet'
-                          : 'Last checked: $checkedText',
+                      checkedText.isEmpty ? 'Not checked yet' : 'Last checked: $checkedText',
                       style: const TextStyle(color: Colors.white54, fontSize: 11),
                     ),
                     if ((product.lastCheckError ?? '').trim().isNotEmpty) ...[
@@ -217,7 +222,7 @@ class _TrackedProductCard extends StatelessWidget {
                       statusText,
                       style: TextStyle(
                         color: statusColor,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ],
@@ -231,7 +236,8 @@ class _TrackedProductCard extends StatelessWidget {
                   value: product.enabled,
                   onChanged: (enabled) async {
                     try {
-                      await TrackedRestockProductService.setProductEnabled(
+                      await TrackedRestockProductService
+                          .setCurrentUserTrackedProductEnabled(
                         productId: product.id,
                         enabled: enabled,
                       );
@@ -243,18 +249,15 @@ class _TrackedProductCard extends StatelessWidget {
                 ),
                 IconButton(
                   tooltip: 'Edit',
-                  icon: const Icon(
-                    Icons.edit_outlined,
-                    color: Color(0xFFF7DE77),
+                  icon: const Icon(Icons.edit_outlined, color: Color(0xFFF7DE77)),
+                  onPressed: () => MyRestockTrackerPage._showProductDialog(
+                    context,
+                    product: product,
                   ),
-                  onPressed: () => _showEditProductDialog(context, product),
                 ),
                 IconButton(
                   tooltip: 'Delete',
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    color: Color(0xFFFFB3C7),
-                  ),
+                  icon: const Icon(Icons.delete_outline, color: Color(0xFFFFB3C7)),
                   onPressed: () => _confirmDelete(context, product.id),
                 ),
               ],
@@ -277,42 +280,42 @@ class _TrackedProductCard extends StatelessWidget {
     return '$day/$month $hour:$minute';
   }
 
-  static Future<void> _showEditProductDialog(
-    BuildContext context,
-    TrackedRestockProduct product,
-  ) async {
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _AddTrackedProductDialog(product: product),
-    );
-  }
-
-  static Future<void> _confirmDelete(
-    BuildContext context,
-    String productId,
-  ) async {
+  static Future<void> _confirmDelete(BuildContext context, String productId) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete tracked product?'),
-        content: const Text('Firebase will stop checking this product page.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF102754),
+          title: const Text(
+            'Delete tracked product?',
+            style: TextStyle(color: Colors.white),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete'),
+          content: const Text(
+            'PocketChase will stop watching this product for you.',
+            style: TextStyle(color: Color(0xFFD8E3FB)),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB13B59),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
     );
 
     if (shouldDelete != true) return;
 
     try {
-      await TrackedRestockProductService.deleteProduct(productId);
+      await TrackedRestockProductService.deleteCurrentUserTrackedProduct(productId);
     } catch (error) {
       if (!context.mounted) return;
       _showSnackBar(context, error.toString());
@@ -320,19 +323,18 @@ class _TrackedProductCard extends StatelessWidget {
   }
 }
 
-class _AddTrackedProductDialog extends StatefulWidget {
-  const _AddTrackedProductDialog({
+class _MyTrackedProductDialog extends StatefulWidget {
+  const _MyTrackedProductDialog({
     this.product,
   });
 
   final TrackedRestockProduct? product;
 
   @override
-  State<_AddTrackedProductDialog> createState() =>
-      _AddTrackedProductDialogState();
+  State<_MyTrackedProductDialog> createState() => _MyTrackedProductDialogState();
 }
 
-class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
+class _MyTrackedProductDialogState extends State<_MyTrackedProductDialog> {
   final TextEditingController _shopController = TextEditingController();
   final TextEditingController _regionController = TextEditingController();
   final TextEditingController _storeNameController = TextEditingController();
@@ -474,56 +476,6 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
     ],
   };
 
-  List<String> _optionsWithCurrentValue(
-    List<String> options,
-    String currentValue,
-  ) {
-    final cleanCurrentValue = currentValue.trim();
-    final values = <String>[
-      ...options,
-      if (cleanCurrentValue.isNotEmpty &&
-          !options.any(
-            (option) => option.toLowerCase() == cleanCurrentValue.toLowerCase(),
-          ))
-        cleanCurrentValue,
-    ];
-
-    final seen = <String>{};
-    final cleaned = <String>[];
-
-    for (final value in values) {
-      final cleanValue = value.trim();
-      final lookupValue = cleanValue.toLowerCase();
-
-      if (cleanValue.isEmpty || seen.contains(lookupValue)) continue;
-
-      seen.add(lookupValue);
-      cleaned.add(cleanValue);
-    }
-
-    return cleaned;
-  }
-
-  List<String> _storeOptionsForCurrentRegion() {
-    final region = _normalisedRegionValue(_regionController.text);
-    final stores = _storesByRegion[region] ?? const <String>['All stores'];
-
-    return _optionsWithCurrentValue(stores, _storeNameController.text);
-  }
-
-  String _normalisedRegionValue(String value) {
-    final cleanValue = value.trim();
-
-    if (cleanValue.isEmpty) return 'All regions';
-
-    if (cleanValue.toLowerCase() == 'northwest') {
-      return 'North West England';
-    }
-
-    return cleanValue;
-  }
-
-
   @override
   void initState() {
     super.initState();
@@ -573,10 +525,7 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
                 controller: _shopController,
                 label: 'Shop name',
                 hint: 'Choose a shop',
-                options: _optionsWithCurrentValue(
-                  _shopOptions,
-                  _shopController.text,
-                ),
+                options: _optionsWithCurrentValue(_shopOptions, _shopController.text),
               ),
               const SizedBox(height: 12),
               _dropdownField(
@@ -612,7 +561,7 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
               _field(
                 controller: _productController,
                 label: 'Product name',
-                hint: 'Example: 151 Booster Bundle',
+                hint: 'Example: Ascended Heroes Booster Bundle',
               ),
               const SizedBox(height: 12),
               _field(
@@ -700,10 +649,7 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
           .map(
             (option) => DropdownMenuItem<String>(
               value: option,
-              child: Text(
-                option,
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: Text(option, overflow: TextOverflow.ellipsis),
             ),
           )
           .toList(),
@@ -741,16 +687,6 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
     );
   }
 
-  String _saveableRegionValue() {
-    final value = _normalisedRegionValue(_regionController.text);
-    return value == 'All regions' ? '' : value;
-  }
-
-  String _saveableStoreValue() {
-    final value = _storeNameController.text.trim();
-    return value == 'All stores' ? '' : value;
-  }
-
   Future<void> _save() async {
     setState(() => _isSaving = true);
 
@@ -758,7 +694,7 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
       final existingProduct = widget.product;
 
       if (existingProduct == null) {
-        await TrackedRestockProductService.createProduct(
+        await TrackedRestockProductService.createCurrentUserTrackedProduct(
           shopName: _shopController.text,
           region: _saveableRegionValue(),
           storeName: _saveableStoreValue(),
@@ -771,7 +707,7 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
           outOfStockKeywords: _splitKeywords(_outKeywordsController.text),
         );
       } else {
-        await TrackedRestockProductService.updateProduct(
+        await TrackedRestockProductService.updateCurrentUserTrackedProduct(
           productId: existingProduct.id,
           shopName: _shopController.text,
           region: _saveableRegionValue(),
@@ -795,6 +731,16 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
     }
   }
 
+  String _saveableRegionValue() {
+    final value = _normalisedRegionValue(_regionController.text);
+    return value == 'All regions' ? '' : value;
+  }
+
+  String _saveableStoreValue() {
+    final value = _storeNameController.text.trim();
+    return value == 'All stores' ? '' : value;
+  }
+
   List<String> _splitKeywords(String value) {
     return value
         .split(',')
@@ -802,27 +748,54 @@ class _AddTrackedProductDialogState extends State<_AddTrackedProductDialog> {
         .where((keyword) => keyword.isNotEmpty)
         .toList();
   }
-}
 
-class _NoPermissionMessage extends StatelessWidget {
-  const _NoPermissionMessage();
+  List<String> _optionsWithCurrentValue(
+    List<String> options,
+    String currentValue,
+  ) {
+    final cleanCurrentValue = currentValue.trim();
+    final values = <String>[
+      ...options,
+      if (cleanCurrentValue.isNotEmpty &&
+          !options.any(
+            (option) => option.toLowerCase() == cleanCurrentValue.toLowerCase(),
+          ))
+        cleanCurrentValue,
+    ];
 
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Card(
-        color: Color(0xFF102754),
-        margin: EdgeInsets.all(16),
-        child: Padding(
-          padding: EdgeInsets.all(18),
-          child: Text(
-            'You do not have permission to manage tracked products.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white),
-          ),
-        ),
-      ),
-    );
+    final seen = <String>{};
+    final cleaned = <String>[];
+
+    for (final value in values) {
+      final cleanValue = value.trim();
+      final lookupValue = cleanValue.toLowerCase();
+
+      if (cleanValue.isEmpty || seen.contains(lookupValue)) continue;
+
+      seen.add(lookupValue);
+      cleaned.add(cleanValue);
+    }
+
+    return cleaned;
+  }
+
+  List<String> _storeOptionsForCurrentRegion() {
+    final region = _normalisedRegionValue(_regionController.text);
+    final stores = _storesByRegion[region] ?? const <String>['All stores'];
+
+    return _optionsWithCurrentValue(stores, _storeNameController.text);
+  }
+
+  String _normalisedRegionValue(String value) {
+    final cleanValue = value.trim();
+
+    if (cleanValue.isEmpty) return 'All regions';
+
+    if (cleanValue.toLowerCase() == 'northwest') {
+      return 'North West England';
+    }
+
+    return cleanValue;
   }
 }
 
@@ -839,10 +812,11 @@ class _ErrorMessage extends StatelessWidget {
       child: Card(
         color: const Color(0xFF102754),
         margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: Text(
-            'Could not load tracked products.\n\n$error',
+            'Could not load your tracked products.\n\n$error',
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white),
           ),

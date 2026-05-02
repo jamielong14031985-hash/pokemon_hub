@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_page_header.dart';
+
 import '../models/app_user_profile.dart';
 import '../models/friend_models.dart';
 import '../services/friend_service.dart';
@@ -21,10 +23,10 @@ class FriendsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: const Text('Friends'),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
+      appBar: const GlassPageAppBar(
+        title: 'Friends',
+        subtitle: 'Shared Pokédex and wishlists',
+        icon: Icons.people_alt_outlined,
       ),
       body: SafeArea(
         child: StreamBuilder<List<FriendSummary>>(

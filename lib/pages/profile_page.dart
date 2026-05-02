@@ -28,7 +28,8 @@ import 'card_details_page.dart';
 import 'friend_requests_page.dart';
 import 'friends_page.dart';
 import 'pro_upgrade_page.dart';
-import 'restock_alerts_page.dart';
+import 'restock_alert_preferences_page.dart';
+import 'my_restock_tracker_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
 
@@ -257,10 +258,11 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<void> _openRestockAlerts() async {
+
+  Future<void> _openMyRestockTracker() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => const RestockAlertsPage(),
+        builder: (_) => const MyRestockTrackerPage(),
       ),
     );
   }
@@ -269,6 +271,14 @@ class _ProfilePageState extends State<ProfilePage> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const AdminUserFeatureFlagsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openRestockAlertPreferences() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const RestockAlertPreferencesPage(),
       ),
     );
   }
@@ -786,78 +796,77 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildFeatureAccessSection() {
     return StreamBuilder<bool>(
-      stream: UserFeatureFlagsService.watchCurrentUserRestockAlertsEnabled(),
-      builder: (context, restockSnapshot) {
-        final restockAlertsEnabled = restockSnapshot.data == true;
+      stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
+      builder: (context, managerSnapshot) {
+        final canManageFeatures = managerSnapshot.data == true;
 
-        return StreamBuilder<bool>(
-          stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
-          builder: (context, managerSnapshot) {
-            final canManageFeatures = managerSnapshot.data == true;
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 16),
-                RepaintBoundary(
-                  child: Card(
-                    color: const Color(0xFF102754),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Features',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Manage extra PocketChase tools and account features.',
-                            style: TextStyle(
-                              color: Color(0xFFD8E3FB),
-                              height: 1.35,
-                            ),
-                          ),
-                          if (restockAlertsEnabled)
-                            _buildFeatureTile(
-                              icon: Icons.notifications_active_outlined,
-                              iconColor: const Color(0xFFF7DE77),
-                              title: 'Restock Alerts',
-                              subtitle: 'Choose shops and Pokémon products to watch',
-                              onTap: _openRestockAlerts,
-                            ),
-                          if (canManageFeatures)
-                            _buildFeatureTile(
-                              icon: Icons.manage_search_outlined,
-                              iconColor: const Color(0xFFF7DE77),
-                              title: 'Tracked Products',
-                              subtitle: 'Add shop pages for automatic checking',
-                              onTap: _openTrackedRestockProducts,
-                            ),
-                          _buildFeatureTile(
-                            icon: Icons.admin_panel_settings_outlined,
-                            iconColor: const Color(0xFF54D39A),
-                            title: 'User Features',
-                            subtitle: 'Turn Restock Alerts and PocketChase Pro on or off for users',
-                            onTap: _openUserFeatures,
-                          ),
-                        ],
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 16),
+            RepaintBoundary(
+              child: Card(
+                color: const Color(0xFF102754),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Features',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Manage extra PocketChase tools and account features.',
+                        style: TextStyle(
+                          color: Color(0xFFD8E3FB),
+                          height: 1.35,
+                        ),
+                      ),
+                      _buildFeatureTile(
+                        icon: Icons.add_alert_outlined,
+                        iconColor: const Color(0xFFF7DE77),
+                        title: 'My Restock Tracker',
+                        subtitle: 'Add product pages you want to track yourself',
+                        onTap: _openMyRestockTracker,
+                      ),
+                      _buildFeatureTile(
+                        icon: Icons.notifications_active_outlined,
+                        iconColor: const Color(0xFFF7DE77),
+                        title: 'Alert Preferences',
+                        subtitle: 'Choose shops, regions, and stores to get notifications from',
+                        onTap: _openRestockAlertPreferences,
+                      ),
+                      if (canManageFeatures)
+                        _buildFeatureTile(
+                          icon: Icons.manage_search_outlined,
+                          iconColor: const Color(0xFFF7DE77),
+                          title: 'Tracked Products',
+                          subtitle: 'Add shop pages for automatic checking',
+                          onTap: _openTrackedRestockProducts,
+                        ),
+                      _buildFeatureTile(
+                        icon: Icons.admin_panel_settings_outlined,
+                        iconColor: const Color(0xFF54D39A),
+                        title: 'User Features',
+                        subtitle: 'Turn PocketChase Pro and admin permissions on or off for users',
+                        onTap: _openUserFeatures,
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
-              ],
-            );
-          },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
         );
       },
     );

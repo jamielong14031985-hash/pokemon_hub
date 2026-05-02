@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_page_header.dart';
+
 import '../models/app_user_profile.dart';
 import '../models/card_ownership.dart';
 import '../models/tcg_card.dart';
@@ -29,10 +31,10 @@ class FriendPokedexSetsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text(friendPokedexLabel(friendName)),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
+      appBar: GlassPageAppBar(
+        title: friendPokedexLabel(friendName),
+        subtitle: 'Friend Pokédex',
+        icon: Icons.collections_bookmark_outlined,
       ),
       body: SafeArea(
         child: StreamBuilder<List<String>>(
@@ -142,10 +144,10 @@ class FriendSetPokedexPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text(friendPokedexLabel(friendName)),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
+      appBar: GlassPageAppBar(
+        title: friendPokedexLabel(friendName),
+        subtitle: 'Friend Pokédex',
+        icon: Icons.collections_bookmark_outlined,
       ),
       body: FutureBuilder<List<TcgCard>>(
         future: PokemonTcgService.fetchCardsBySet(set.id),

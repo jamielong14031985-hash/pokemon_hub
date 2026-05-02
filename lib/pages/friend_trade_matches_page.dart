@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_page_header.dart';
+
 import '../models/app_user_profile.dart';
 import '../models/friend_trade_match_models.dart';
 import '../models/wishlist_entry.dart';
@@ -77,10 +79,10 @@ class _FriendTradeMatchesPageState extends State<FriendTradeMatchesPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text('Trade matches with ${widget.friendName}'),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
+      appBar: GlassPageAppBar(
+        title: 'Trade matches',
+        subtitle: widget.friendName,
+        icon: Icons.handshake_outlined,
       ),
       body: SafeArea(
         child: FutureBuilder<FriendTradeMatchSnapshot>(

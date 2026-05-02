@@ -375,6 +375,10 @@ service cloud.firestore {
           'notes',
           'enabled',
           'inStock',
+          'region',
+          'storeName',
+          'storeId',
+          'storeAddress',
           'inStockKeywords',
           'outOfStockKeywords',
           'createdAt',
@@ -392,6 +396,10 @@ service cloud.firestore {
         && data.notes is string
         && data.enabled is bool
         && data.inStock is bool
+        && data.region is string
+        && data.storeName is string
+        && data.storeId is string
+        && data.storeAddress is string
         && data.inStockKeywords is list
         && data.inStockKeywords.size() <= 30
         && data.outOfStockKeywords is list
@@ -403,6 +411,74 @@ service cloud.firestore {
         && (!('lastAlertedAt' in data) || data.lastAlertedAt == null || data.lastAlertedAt is timestamp)
         && data.lastCheckStatus is string
         && data.lastCheckError is string;
+    }
+
+    function validUserTrackedRestockProductData(data, userId) {
+      return data.keys().hasOnly([
+          'userId',
+          'shopName',
+          'productName',
+          'productUrl',
+          'imageUrl',
+          'notes',
+          'enabled',
+          'inStock',
+          'region',
+          'storeName',
+          'storeId',
+          'storeAddress',
+          'inStockKeywords',
+          'outOfStockKeywords',
+          'createdAt',
+          'updatedAt',
+          'lastCheckedAt',
+          'lastAlertedAt',
+          'lastCheckStatus',
+          'lastCheckError'
+        ])
+        && data.userId == userId
+        && data.shopName is string
+        && data.productName is string
+        && data.productUrl is string
+        && data.imageUrl is string
+        && data.notes is string
+        && data.enabled is bool
+        && data.inStock is bool
+        && data.region is string
+        && data.storeName is string
+        && data.storeId is string
+        && data.storeAddress is string
+        && data.inStockKeywords is list
+        && data.inStockKeywords.size() <= 30
+        && data.outOfStockKeywords is list
+        && data.outOfStockKeywords.size() <= 30
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('lastCheckedAt' in data) || data.lastCheckedAt == null || data.lastCheckedAt is timestamp)
+        && (!('lastAlertedAt' in data) || data.lastAlertedAt == null || data.lastAlertedAt is timestamp)
+        && data.lastCheckStatus is string
+        && data.lastCheckError is string;
+    }
+
+    function validUserRestockAlertPreferencesData(data, userId) {
+      return data.keys().hasOnly([
+          'userId',
+          'enabled',
+          'selectedShops',
+          'selectedRegions',
+          'selectedStoreIds',
+          'updatedAt'
+        ])
+        && data.userId == userId
+        && data.enabled is bool
+        && data.selectedShops is list
+        && data.selectedShops.size() <= 100
+        && data.selectedRegions is list
+        && data.selectedRegions.size() <= 200
+        && data.selectedStoreIds is list
+        && data.selectedStoreIds.size() <= 500
+        && data.updatedAt is timestamp
+        && userExists(userId);
     }
 
     function validAppRoleData(data, userId) {
@@ -474,10 +550,25 @@ service cloud.firestore {
     match /tracked_restock_products/{productId} {
       allow read: if isAdminOrModerator();
 
+      // Admins/moderators can add and edit tracked products.
+      // Keep this rule simple so adding region/store fields does not block edits.
       allow create, update: if isAdminOrModerator()
-        && validTrackedRestockProductData(request.resource.data);
+        && request.resource.data.shopName is string
+        && request.resource.data.productName is string
+        && request.resource.data.productUrl is string
+        && request.resource.data.enabled is bool
+        && request.resource.data.inStock is bool;
 
       allow delete: if isAdminOrModerator();
+    }
+
+    match /user_restock_alert_preferences/{userId} {
+      allow read: if isSelf(userId) || isAdminOrModerator();
+
+      allow create, update: if isSelf(userId)
+        && validUserRestockAlertPreferencesData(request.resource.data, userId);
+
+      allow delete: if isSelf(userId) || isAdmin();
     }
 
     match /users/{userId} {
@@ -500,6 +591,15 @@ service cloud.firestore {
         && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int);
 
       allow delete: if isSelf(userId);
+
+      match /tracked_restock_products/{productId} {
+        allow read: if isSelf(userId);
+
+        allow create, update: if isSelf(userId)
+          && validUserTrackedRestockProductData(request.resource.data, userId);
+
+        allow delete: if isSelf(userId);
+      }
 
       match /fcmTokens/{tokenId} {
         allow read: if isSelf(userId);

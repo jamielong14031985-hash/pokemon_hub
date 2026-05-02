@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_page_header.dart';
+
 import '../models/wishlist_entry.dart';
 import '../services/pokemon_tcg_service.dart';
 import '../services/wishlist_service.dart';
@@ -45,10 +47,10 @@ class WishlistPage extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text(isOwnWishlist ? 'Wishlist' : "$ownerName's Wishlist"),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
+      appBar: GlassPageAppBar(
+        title: isOwnWishlist ? 'Wishlist' : "$ownerName's Wishlist",
+        subtitle: isOwnWishlist ? 'Saved cards' : 'Friend wishlist',
+        icon: Icons.favorite_outline_rounded,
       ),
       body: SafeArea(
         child: StreamBuilder<List<WishlistEntry>>(

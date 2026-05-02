@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_page_header.dart';
+
 import '../models/app_user_profile.dart';
 import '../models/community_private_models.dart';
 import '../models/profile_stats.dart';
@@ -769,10 +771,10 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text('$fallbackName profile'),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
+      appBar: GlassPageAppBar(
+        title: '$fallbackName profile',
+        subtitle: 'Friend profile',
+        icon: Icons.person_search_outlined,
       ),
       body: SafeArea(
         child: FutureBuilder<AppUserProfile?>(

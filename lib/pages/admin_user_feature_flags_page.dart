@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_page_header.dart';
+
 import '../services/user_feature_flags_service.dart';
 
 class AdminUserFeatureFlagsPage extends StatefulWidget {
@@ -176,135 +178,14 @@ class _AdminUserFeatureFlagsPageState extends State<AdminUserFeatureFlagsPage> {
     );
   }
 
-
-  BoxDecoration _glassHeaderDecoration({double goldGlowAlpha = 0.08}) {
-    return BoxDecoration(
-      borderRadius: BorderRadius.circular(22),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withValues(alpha: 0.16),
-          Colors.white.withValues(alpha: 0.07),
-          const Color(0xFF173A78).withValues(alpha: 0.20),
-        ],
-      ),
-      border: Border.all(
-        color: Colors.white.withValues(alpha: 0.18),
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.18),
-          blurRadius: 18,
-          offset: const Offset(0, 8),
-        ),
-        BoxShadow(
-          color: const Color(0xFFF7DE77).withValues(alpha: goldGlowAlpha),
-          blurRadius: 24,
-          spreadRadius: 1,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildGlassBackButton() {
-    return Container(
-      height: 64,
-      width: 64,
-      margin: const EdgeInsets.only(left: 8),
-      decoration: _glassHeaderDecoration(goldGlowAlpha: 0.05),
-      alignment: Alignment.center,
-      child: IconButton(
-        tooltip: 'Back',
-        onPressed: () => Navigator.of(context).maybePop(),
-        icon: const Icon(Icons.arrow_back_rounded),
-        color: Colors.white,
-      ),
-    );
-  }
-
-  Widget _buildGlassPageTitle({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: _glassHeaderDecoration(),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
-              border: Border.all(
-                color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
-              ),
-            ),
-            child: Icon(
-              icon,
-              color: const Color(0xFFF7DE77),
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    height: 1.05,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFC8D4F0),
-                    fontSize: 11.5,
-                    height: 1.1,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leadingWidth: 76,
-        leading: _buildGlassBackButton(),
-        titleSpacing: 0,
-        toolbarHeight: 86,
-        title: _buildGlassPageTitle(
-          icon: Icons.admin_panel_settings_outlined,
-          title: 'User Features',
-          subtitle: 'Manage access and permissions',
-        ),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
+      appBar: const GlassPageAppBar(
+        title: 'User Features',
+        subtitle: 'Manage app permissions',
+        icon: Icons.admin_panel_settings_outlined,
       ),
       body: StreamBuilder<List<AppUserSummary>>(
         stream: UserFeatureFlagsService.watchUsers(),
