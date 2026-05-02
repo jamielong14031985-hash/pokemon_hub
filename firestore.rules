@@ -19,6 +19,33 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/users/$(uid));
     }
 
+    function roleDoc(uid) {
+      return get(/databases/$(database)/documents/app_roles/$(uid));
+    }
+
+    function roleExists(uid) {
+      return exists(/databases/$(database)/documents/app_roles/$(uid));
+    }
+
+    function hasRole(uid, allowedRoles) {
+      return signedIn()
+        && roleExists(uid)
+        && roleDoc(uid).data.role in allowedRoles;
+    }
+
+    function isAdmin() {
+      return signedIn() && hasRole(request.auth.uid, ['admin']);
+    }
+
+    function isAdminOrModerator() {
+      return signedIn() && hasRole(request.auth.uid, ['admin', 'moderator']);
+    }
+
+    function restockAlertsEnabledFor(uid) {
+      return exists(/databases/$(database)/documents/user_feature_flags/$(uid))
+        && get(/databases/$(database)/documents/user_feature_flags/$(uid)).data.restockAlertsEnabled == true;
+    }
+
     function hasDob(uid) {
       return userExists(uid) && userDoc(uid).data.dateOfBirthMs is int;
     }
@@ -132,6 +159,20 @@ service cloud.firestore {
         && twoAdultParticipants(data.participants);
     }
 
+    function validPrivateMirrorConversationData(data, userId) {
+      return data.participants is list
+        && data.participants.size() == 2
+        && request.auth.uid in data.participants
+        && userId in data.participants
+        && data.participantNames is map
+        && data.relatedPostId is string
+        && data.relatedPostTitle is string
+        && data.createdAtMs is int
+        && data.updatedAtMs is int
+        && data.lastMessage is string
+        && data.lastSenderId is string;
+    }
+
     function validPrivateMessageData(data) {
       return data.authorId == request.auth.uid
         && data.authorName is string
@@ -172,6 +213,273 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function validCustomBinderData(data, binderId) {
+      return data.keys().hasOnly([
+          'id',
+          'name',
+          'createdAtMs',
+          'updatedAtMs',
+          'imageRef',
+          'imageUrl',
+          'imageBase64'
+        ])
+        && data.id == binderId
+        && data.name is string
+        && data.createdAtMs is int
+        && data.updatedAtMs is int
+        && (!('imageRef' in data) || data.imageRef is string)
+        && (!('imageUrl' in data) || data.imageUrl is string)
+        && (!('imageBase64' in data) || data.imageBase64 is string);
+    }
+
+    function validCustomBinderCardData(data, cardId) {
+      return data.keys().hasOnly([
+          'cardId',
+          'name',
+          'setId',
+          'setName',
+          'number',
+          'imageUrl',
+          'largeImageUrl',
+          'setLogoUrl',
+          'normal',
+          'reverseHolo',
+          'holo',
+          'copies',
+          'condition',
+          'gradingCompany',
+          'grade',
+          'conditionNotes',
+          'updatedAtMs'
+        ])
+        && data.cardId == cardId
+        && data.name is string
+        && data.setId is string
+        && data.setName is string
+        && data.number is string
+        && (!('imageUrl' in data) || data.imageUrl is string)
+        && (!('largeImageUrl' in data) || data.largeImageUrl is string)
+        && (!('setLogoUrl' in data) || data.setLogoUrl is string)
+        && data.normal is bool
+        && data.reverseHolo is bool
+        && data.holo is bool
+        && data.copies is int
+        && data.copies >= 1
+        && (!('condition' in data) || data.condition is string)
+        && (!('gradingCompany' in data) || data.gradingCompany is string)
+        && (!('grade' in data) || data.grade is number)
+        && (!('conditionNotes' in data) || (data.conditionNotes is string && data.conditionNotes.size() <= 300))
+        && data.updatedAtMs is int;
+    }
+
+    function validBlockedUserData(data, userId, blockedUid) {
+      return data.keys().hasOnly([
+          'blockedUid',
+          'blockedName',
+          'blockedByUid',
+          'blockedByName',
+          'source',
+          'createdAtMs',
+          'updatedAtMs'
+        ])
+        && data.blockedUid == blockedUid
+        && data.blockedByUid == userId
+        && data.blockedByUid == request.auth.uid
+        && data.blockedUid != request.auth.uid
+        && data.blockedName is string
+        && data.blockedByName is string
+        && data.source is string
+        && data.createdAtMs is int
+        && data.updatedAtMs is int;
+    }
+
+    function validCommunityReportData(data) {
+      return data.keys().hasOnly([
+          'reporterUid',
+          'reporterName',
+          'reportedUid',
+          'reportedName',
+          'targetType',
+          'targetId',
+          'targetTitle',
+          'reason',
+          'details',
+          'status',
+          'appArea',
+          'createdAtMs',
+          'updatedAtMs'
+        ])
+        && data.reporterUid == request.auth.uid
+        && data.reporterName is string
+        && data.reportedUid is string
+        && (data.reportedUid == '' || data.reportedUid != request.auth.uid)
+        && data.reportedName is string
+        && data.targetType is string
+        && data.targetId is string
+        && data.targetTitle is string
+        && data.reason is string
+        && data.details is string
+        && data.details.size() <= 1500
+        && data.status == 'open'
+        && data.appArea == 'community'
+        && data.createdAtMs is int
+        && data.updatedAtMs is int;
+    }
+
+    function validFcmTokenData(data, userId) {
+      return data.keys().hasOnly([
+          'token',
+          'platform',
+          'app',
+          'userId',
+          'updatedAt'
+        ])
+        && data.token is string
+        && data.platform is string
+        && data.app == 'PocketChase'
+        && data.userId == userId
+        && data.updatedAt is timestamp;
+    }
+
+    function validRestockAlertData(data) {
+      return data.keys().hasOnly([
+          'shopName',
+          'productName',
+          'productUrl',
+          'imageUrl',
+          'notes',
+          'inStock',
+          'createdAt',
+          'updatedAt',
+          'createdByUid',
+          'createdByName'
+        ])
+        && data.shopName is string
+        && data.productName is string
+        && data.productUrl is string
+        && data.imageUrl is string
+        && data.notes is string
+        && data.inStock is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdByUid == request.auth.uid
+        && data.createdByName is string;
+    }
+
+    function validTrackedRestockProductData(data) {
+      return data.keys().hasOnly([
+          'shopName',
+          'productName',
+          'productUrl',
+          'imageUrl',
+          'notes',
+          'enabled',
+          'inStock',
+          'inStockKeywords',
+          'outOfStockKeywords',
+          'createdAt',
+          'updatedAt',
+          'createdByUid',
+          'lastCheckedAt',
+          'lastAlertedAt',
+          'lastCheckStatus',
+          'lastCheckError'
+        ])
+        && data.shopName is string
+        && data.productName is string
+        && data.productUrl is string
+        && data.imageUrl is string
+        && data.notes is string
+        && data.enabled is bool
+        && data.inStock is bool
+        && data.inStockKeywords is list
+        && data.inStockKeywords.size() <= 30
+        && data.outOfStockKeywords is list
+        && data.outOfStockKeywords.size() <= 30
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdByUid == request.auth.uid
+        && (!('lastCheckedAt' in data) || data.lastCheckedAt == null || data.lastCheckedAt is timestamp)
+        && (!('lastAlertedAt' in data) || data.lastAlertedAt == null || data.lastAlertedAt is timestamp)
+        && data.lastCheckStatus is string
+        && data.lastCheckError is string;
+    }
+
+    function validAppRoleData(data, userId) {
+      return data.keys().hasOnly([
+          'uid',
+          'role',
+          'createdAt',
+          'updatedAt',
+          'updatedBy'
+        ])
+        && data.uid == userId
+        && data.role in ['admin', 'moderator']
+        && (!('createdAt' in data) || data.createdAt is timestamp)
+        && (!('updatedAt' in data) || data.updatedAt is timestamp)
+        && (!('updatedBy' in data) || data.updatedBy is string);
+    }
+
+    function validUserFeatureFlagsData(data, userId) {
+      return data.keys().hasOnly([
+          'userId',
+          'restockAlertsEnabled',
+          'proEnabled',
+          'updatedAt',
+          'updatedBy'
+        ])
+        && data.userId == userId
+        && data.restockAlertsEnabled is bool
+        && data.proEnabled is bool
+        && data.updatedAt is timestamp
+        && data.updatedBy is string
+        && userExists(userId);
+    }
+
+    match /app_roles/{userId} {
+      allow read: if isSelf(userId) || isAdminOrModerator();
+
+      allow create, update: if isAdmin()
+        && validAppRoleData(request.resource.data, userId);
+
+      allow delete: if isAdmin();
+    }
+
+    match /user_feature_flags/{userId} {
+      allow read: if isSelf(userId) || isAdminOrModerator();
+
+      // Admins/moderators can grant or remove feature access.
+      // Keep this rule simple so adding fields like proEnabled does not break writes.
+      allow create, update: if isAdminOrModerator()
+        && request.resource.data.userId == userId
+        && request.resource.data.restockAlertsEnabled is bool
+        && request.resource.data.proEnabled is bool
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedBy is string
+        && userExists(userId);
+
+      allow delete: if isAdmin();
+    }
+
+    match /restock_alerts/{alertId} {
+      allow read: if signedIn()
+        && (restockAlertsEnabledFor(request.auth.uid) || isAdminOrModerator());
+
+      allow create, update: if isAdminOrModerator()
+        && validRestockAlertData(request.resource.data);
+
+      allow delete: if isAdminOrModerator();
+    }
+
+    match /tracked_restock_products/{productId} {
+      allow read: if isAdminOrModerator();
+
+      allow create, update: if isAdminOrModerator()
+        && validTrackedRestockProductData(request.resource.data);
+
+      allow delete: if isAdminOrModerator();
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
 
@@ -191,7 +499,16 @@ service cloud.firestore {
         && request.resource.data.updatedAtMs is int
         && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int);
 
-      allow delete: if false;
+      allow delete: if isSelf(userId);
+
+      match /fcmTokens/{tokenId} {
+        allow read: if isSelf(userId);
+
+        allow create, update: if isSelf(userId)
+          && validFcmTokenData(request.resource.data, userId);
+
+        allow delete: if isSelf(userId);
+      }
 
       match /friends/{friendUid} {
         allow read: if canViewSharedCollection(userId);
@@ -203,7 +520,8 @@ service cloud.firestore {
           && request.resource.data.sinceMs is int;
 
         allow update: if isSelf(userId);
-        allow delete: if isSelf(userId);
+        allow delete: if isSelf(userId)
+          || (signedIn() && request.auth.uid == friendUid && resource.data.uid == request.auth.uid);
       }
 
       match /wishlist/{cardId} {
@@ -221,36 +539,52 @@ service cloud.firestore {
         }
       }
 
+      match /custom_binders/{binderId} {
+        allow read: if canViewSharedCollection(userId);
+
+        allow create, update: if isSelf(userId)
+          && validCustomBinderData(request.resource.data, binderId);
+
+        allow delete: if isSelf(userId);
+
+        match /cards/{cardId} {
+          allow read: if canViewSharedCollection(userId);
+
+          allow create, update: if isSelf(userId)
+            && validCustomBinderCardData(request.resource.data, cardId);
+
+          allow delete: if isSelf(userId);
+        }
+      }
+
+      match /blocked_users/{blockedUid} {
+        allow read: if isSelf(userId);
+
+        allow create, update: if isSelf(userId)
+          && validBlockedUserData(request.resource.data, userId, blockedUid);
+
+        allow delete: if isSelf(userId);
+      }
+
       match /community_private_conversations/{conversationId} {
-        allow read: if canUseCommunity()
-          && request.auth.uid == userId
-          && request.auth.uid in resource.data.participants
-          && twoAdultParticipants(resource.data.participants);
+        allow read: if signedIn() && request.auth.uid == userId;
 
-        allow create: if canUseCommunity()
-          && userId in request.resource.data.participants
-          && validPrivateConversationData(request.resource.data);
+        allow create, update: if canUseCommunity()
+          && validPrivateMirrorConversationData(request.resource.data, userId);
 
-        allow update: if canUseCommunity()
-          && request.auth.uid in resource.data.participants
-          && userId in request.resource.data.participants
-          && validPrivateConversationData(request.resource.data);
-
-        allow delete: if false;
+        allow delete: if signedIn() && request.auth.uid == userId;
 
         match /messages/{messageId} {
-          allow read: if canUseCommunity()
-            && exists(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId))
-            && request.auth.uid in get(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants
-            && twoAdultParticipants(get(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants);
+          allow read: if signedIn() && request.auth.uid == userId;
 
           allow create: if canUseCommunity()
+            && validPrivateMessageData(request.resource.data)
+            && getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants is list
             && request.auth.uid in getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants
-            && userId in getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants
-            && twoAdultParticipants(getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants)
-            && validPrivateMessageData(request.resource.data);
+            && userId in getAfter(/databases/$(database)/documents/users/$(userId)/community_private_conversations/$(conversationId)).data.participants;
 
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if signedIn() && request.auth.uid == userId;
         }
       }
     }
@@ -299,11 +633,15 @@ service cloud.firestore {
           request.resource.data.status == "declined"
         );
 
-      allow delete: if false;
+      allow delete: if signedIn()
+        && (
+          request.auth.uid == resource.data.fromUid ||
+          request.auth.uid == resource.data.toUid
+        );
     }
 
     match /community_posts/{postId} {
-      allow read: if canUseCommunity();
+      allow read: if canUseCommunity() || isAdminOrModerator();
 
       allow create: if canUseCommunity()
         && request.resource.data.authorId == request.auth.uid
@@ -319,11 +657,17 @@ service cloud.firestore {
         && request.resource.data.authorId == resource.data.authorId
         && request.resource.data.createdAtMs == resource.data.createdAtMs;
 
-      allow delete: if canUseCommunity()
-        && request.auth.uid == resource.data.authorId;
+      allow delete: if signedIn()
+        && (
+          (
+            canUseCommunity() &&
+            request.auth.uid == resource.data.authorId
+          ) ||
+          isAdminOrModerator()
+        );
 
       match /replies/{replyId} {
-        allow read: if canUseCommunity();
+        allow read: if canUseCommunity() || isAdminOrModerator();
 
         allow create: if canUseCommunity()
           && request.resource.data.authorId == request.auth.uid
@@ -334,10 +678,16 @@ service cloud.firestore {
         allow update: if canUseCommunity()
           && request.auth.uid == resource.data.authorId;
 
-        allow delete: if canUseCommunity()
+        allow delete: if signedIn()
           && (
-            request.auth.uid == resource.data.authorId ||
-            request.auth.uid == get(/databases/$(database)/documents/community_posts/$(postId)).data.authorId
+            (
+              canUseCommunity() &&
+              (
+                request.auth.uid == resource.data.authorId ||
+                request.auth.uid == get(/databases/$(database)/documents/community_posts/$(postId)).data.authorId
+              )
+            ) ||
+            isAdminOrModerator()
           );
       }
     }
@@ -369,6 +719,77 @@ service cloud.firestore {
 
         allow update, delete: if false;
       }
+    }
+
+    match /community_user_ratings/{ratingId} {
+      allow read: if canUseCommunity();
+
+      allow create: if canUseCommunity()
+        && request.resource.data.keys().hasOnly([
+          'sellerId',
+          'sellerName',
+          'raterId',
+          'raterName',
+          'stars',
+          'comment',
+          'createdAtMs',
+          'updatedAtMs',
+          'sourcePostId',
+          'sourcePostTitle'
+        ])
+        && request.resource.data.raterId == request.auth.uid
+        && request.resource.data.sellerId is string
+        && request.resource.data.sellerId != request.auth.uid
+        && request.resource.data.sellerName is string
+        && request.resource.data.raterName is string
+        && request.resource.data.stars is int
+        && request.resource.data.stars >= 1
+        && request.resource.data.stars <= 5
+        && request.resource.data.comment is string
+        && request.resource.data.comment.size() <= 180
+        && request.resource.data.createdAtMs is int
+        && request.resource.data.updatedAtMs is int
+        && (!('sourcePostId' in request.resource.data) || request.resource.data.sourcePostId is string)
+        && (!('sourcePostTitle' in request.resource.data) || request.resource.data.sourcePostTitle is string);
+
+      allow update: if canUseCommunity()
+        && resource.data.raterId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'sellerId',
+          'sellerName',
+          'raterId',
+          'raterName',
+          'stars',
+          'comment',
+          'createdAtMs',
+          'updatedAtMs',
+          'sourcePostId',
+          'sourcePostTitle'
+        ])
+        && request.resource.data.raterId == resource.data.raterId
+        && request.resource.data.sellerId == resource.data.sellerId
+        && request.resource.data.sellerId != request.auth.uid
+        && request.resource.data.sellerName is string
+        && request.resource.data.raterName is string
+        && request.resource.data.stars is int
+        && request.resource.data.stars >= 1
+        && request.resource.data.stars <= 5
+        && request.resource.data.comment is string
+        && request.resource.data.comment.size() <= 180
+        && request.resource.data.createdAtMs == resource.data.createdAtMs
+        && request.resource.data.updatedAtMs is int
+        && (!('sourcePostId' in request.resource.data) || request.resource.data.sourcePostId is string)
+        && (!('sourcePostTitle' in request.resource.data) || request.resource.data.sourcePostTitle is string);
+
+      allow delete: if canUseCommunity()
+        && resource.data.raterId == request.auth.uid;
+    }
+
+    match /community_reports/{reportId} {
+      allow read, update, delete: if false;
+
+      allow create: if canUseCommunity()
+        && validCommunityReportData(request.resource.data);
     }
 
     match /chats/{chatId} {

@@ -404,9 +404,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+
   ImageProvider? _profileImageProvider() {
     final imageFile = _profileImagePath != null ? File(_profileImagePath!) : null;
-    final existingImageFile = imageFile != null && imageFile.existsSync() ? imageFile : null;
+    final existingImageFile =
+        imageFile != null && imageFile.existsSync() ? imageFile : null;
     final sharedImageRef = widget.profile.profileImageBase64?.trim() ?? '';
 
     if (existingImageFile != null) {
@@ -429,12 +431,6 @@ class _ProfilePageState extends State<ProfilePage> {
     return null;
   }
 
-  @override
-  void dispose() {
-    collectionRefreshNotifier.removeListener(_handleCollectionRefresh);
-    _nameController.dispose();
-    super.dispose();
-  }
 
   Widget _buildProfileSettingsCard(ImageProvider? profileImageProvider) {
     return RepaintBoundary(
@@ -799,10 +795,6 @@ class _ProfilePageState extends State<ProfilePage> {
           builder: (context, managerSnapshot) {
             final canManageFeatures = managerSnapshot.data == true;
 
-            if (!restockAlertsEnabled && !canManageFeatures) {
-              return const SizedBox(height: 16);
-            }
-
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -829,7 +821,10 @@ class _ProfilePageState extends State<ProfilePage> {
                           const SizedBox(height: 8),
                           const Text(
                             'Manage extra PocketChase tools and account features.',
-                            style: TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+                            style: TextStyle(
+                              color: Color(0xFFD8E3FB),
+                              height: 1.35,
+                            ),
                           ),
                           if (restockAlertsEnabled)
                             _buildFeatureTile(
@@ -847,14 +842,13 @@ class _ProfilePageState extends State<ProfilePage> {
                               subtitle: 'Add shop pages for automatic checking',
                               onTap: _openTrackedRestockProducts,
                             ),
-                          if (canManageFeatures)
-                            _buildFeatureTile(
-                              icon: Icons.admin_panel_settings_outlined,
-                              iconColor: const Color(0xFF54D39A),
-                              title: 'User Features',
-                              subtitle: 'Turn Restock Alerts on or off for users',
-                              onTap: _openUserFeatures,
-                            ),
+                          _buildFeatureTile(
+                            icon: Icons.admin_panel_settings_outlined,
+                            iconColor: const Color(0xFF54D39A),
+                            title: 'User Features',
+                            subtitle: 'Turn Restock Alerts and PocketChase Pro on or off for users',
+                            onTap: _openUserFeatures,
+                          ),
                         ],
                       ),
                     ),
@@ -1091,16 +1085,75 @@ class _ProfilePageState extends State<ProfilePage> {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: const Text('Profile'),
+        automaticallyImplyLeading: false,
+        titleSpacing: 12,
+        toolbarHeight: 68,
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: _signOut,
-            icon: const Icon(Icons.logout),
+        title: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.12),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
-        ],
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+                color: Colors.white,
+              ),
+              const SizedBox(width: 4),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFFF7DE77).withValues(alpha: 0.26),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.person_rounded,
+                  color: Color(0xFFF7DE77),
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Profile',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Sign out',
+                onPressed: _signOut,
+                icon: const Icon(Icons.logout_rounded),
+                color: Colors.white,
+              ),
+            ],
+          ),
+        ),
       ),
       body: _loadingProfile
           ? const Center(child: CircularProgressIndicator())

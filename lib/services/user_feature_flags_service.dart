@@ -7,12 +7,14 @@ class UserFeatureFlags {
   const UserFeatureFlags({
     required this.userId,
     required this.restockAlertsEnabled,
+    required this.proEnabled,
     this.updatedAt,
     this.updatedBy,
   });
 
   final String userId;
   final bool restockAlertsEnabled;
+  final bool proEnabled;
   final DateTime? updatedAt;
   final String? updatedBy;
 
@@ -20,6 +22,7 @@ class UserFeatureFlags {
     return UserFeatureFlags(
       userId: userId,
       restockAlertsEnabled: false,
+      proEnabled: false,
     );
   }
 
@@ -38,6 +41,47 @@ class UserFeatureFlags {
     return UserFeatureFlags(
       userId: userId,
       restockAlertsEnabled: data['restockAlertsEnabled'] == true,
+      proEnabled: data['proEnabled'] == true,
+      updatedAt: updatedAt is Timestamp ? updatedAt.toDate() : null,
+      updatedBy: data['updatedBy']?.toString(),
+    );
+  }
+}
+
+
+class UserAppRole {
+  const UserAppRole({
+    required this.userId,
+    required this.role,
+    this.updatedAt,
+    this.updatedBy,
+  });
+
+  final String userId;
+  final String role;
+  final DateTime? updatedAt;
+  final String? updatedBy;
+
+  bool get isAdmin => role.toLowerCase().trim() == 'admin';
+  bool get isModerator => role.toLowerCase().trim() == 'moderator';
+  bool get canManageFeatures => isAdmin || isModerator;
+
+  factory UserAppRole.none(String userId) {
+    return UserAppRole(userId: userId, role: '');
+  }
+
+  factory UserAppRole.fromDoc({
+    required String userId,
+    required DocumentSnapshot<Map<String, dynamic>> doc,
+  }) {
+    final data = doc.data();
+    if (data == null) return UserAppRole.none(userId);
+
+    final updatedAt = data['updatedAt'];
+
+    return UserAppRole(
+      userId: userId,
+      role: data['role']?.toString().toLowerCase().trim() ?? '',
       updatedAt: updatedAt is Timestamp ? updatedAt.toDate() : null,
       updatedBy: data['updatedBy']?.toString(),
     );
@@ -91,6 +135,18 @@ class UserFeatureFlagsService {
     });
   }
 
+  static Stream<bool> watchCurrentUserProEnabled() {
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream<bool>.value(false);
+
+      return _firestore
+          .collection('user_feature_flags')
+          .doc(user.uid)
+          .snapshots()
+          .map((doc) => doc.data()?['proEnabled'] == true);
+    });
+  }
+
   static Stream<bool> watchCurrentUserCanManageFeatureFlags() {
     return _auth.authStateChanges().asyncExpand((user) {
       if (user == null) return Stream<bool>.value(false);
@@ -135,9 +191,39 @@ class UserFeatureFlagsService {
         );
   }
 
+  static Stream<UserAppRole> watchRoleForUser(String userId) {
+    return _firestore.collection('app_roles').doc(userId).snapshots().map(
+          (doc) => UserAppRole.fromDoc(
+            userId: userId,
+            doc: doc,
+          ),
+        );
+  }
+
   static Future<void> setRestockAlertsEnabled({
     required String userId,
     required bool enabled,
+  }) async {
+    await updateFeatureFlags(
+      userId: userId,
+      restockAlertsEnabled: enabled,
+    );
+  }
+
+  static Future<void> setProEnabled({
+    required String userId,
+    required bool enabled,
+  }) async {
+    await updateFeatureFlags(
+      userId: userId,
+      proEnabled: enabled,
+    );
+  }
+
+  static Future<void> updateFeatureFlags({
+    required String userId,
+    bool? restockAlertsEnabled,
+    bool? proEnabled,
   }) async {
     final currentUser = _auth.currentUser;
 
@@ -145,18 +231,56 @@ class UserFeatureFlagsService {
       throw StateError('You must be signed in to manage feature flags.');
     }
 
+    final docRef = _firestore.collection('user_feature_flags').doc(userId);
+    final existing = await docRef.get();
+    final existingData = existing.data() ?? <String, dynamic>{};
+
     final data = <String, dynamic>{
       'userId': userId,
-      'restockAlertsEnabled': enabled,
+      'restockAlertsEnabled': restockAlertsEnabled ??
+          (existingData['restockAlertsEnabled'] == true),
+      'proEnabled': proEnabled ?? (existingData['proEnabled'] == true),
       'updatedAt': FieldValue.serverTimestamp(),
       'updatedBy': currentUser.uid,
     };
 
-    final options = SetOptions(merge: true);
-
-    await _firestore
-        .collection('user_feature_flags')
-        .doc(userId)
-        .set(data, options);
+    await docRef.set(data, SetOptions(merge: true));
   }
+  static Future<void> setAdminEnabled({
+    required String userId,
+    required bool enabled,
+  }) async {
+    final currentUser = _auth.currentUser;
+
+    if (currentUser == null) {
+      throw StateError('You must be signed in to manage admin permissions.');
+    }
+
+    final trimmedUserId = userId.trim();
+    if (trimmedUserId.isEmpty) {
+      throw StateError('Missing user ID.');
+    }
+
+    if (enabled) {
+      await _firestore.collection('app_roles').doc(trimmedUserId).set(
+        <String, dynamic>{
+          'uid': trimmedUserId,
+          'role': 'admin',
+          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedBy': currentUser.uid,
+        },
+        SetOptions(merge: true),
+      );
+      return;
+    }
+
+    if (trimmedUserId == currentUser.uid) {
+      throw StateError(
+        'You cannot remove admin permission from yourself inside the app.',
+      );
+    }
+
+    await _firestore.collection('app_roles').doc(trimmedUserId).delete();
+  }
+
 }
