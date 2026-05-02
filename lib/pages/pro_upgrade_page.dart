@@ -44,6 +44,9 @@ class _ProUpgradePageState extends State<ProUpgradePage> {
 
   String _statusText(ProPurchaseState state) {
     if (ProStatusService.isProActive || state == ProPurchaseState.purchased) {
+      if (ProStatusService.adminGrantedProActive) {
+        return 'Pro is active because an admin has enabled it for your account. Banner ads are hidden.';
+      }
       return 'Pro is active on this device. Banner ads are hidden.';
     }
 
