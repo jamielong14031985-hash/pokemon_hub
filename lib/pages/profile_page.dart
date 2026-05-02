@@ -13,6 +13,7 @@ import '../services/collection_refresh_notifier.dart';
 import '../services/community_image_services.dart';
 import '../services/currency_settings.dart';
 import '../services/local_image_store.dart';
+import '../services/pro_status_service.dart';
 import '../services/user_feature_flags_service.dart';
 import '../services/user_profile_service.dart';
 import '../services/wishlist_service.dart';
@@ -26,6 +27,7 @@ import 'admin_user_feature_flags_page.dart';
 import 'card_details_page.dart';
 import 'friend_requests_page.dart';
 import 'friends_page.dart';
+import 'pro_upgrade_page.dart';
 import 'restock_alerts_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
@@ -243,6 +245,14 @@ class _ProfilePageState extends State<ProfilePage> {
           ownerUid: widget.profile.uid,
           ownerName: widget.profile.displayName,
         ),
+      ),
+    );
+  }
+
+  Future<void> _openProUpgrade() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ProUpgradePage(),
       ),
     );
   }
@@ -698,6 +708,86 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget _buildProUpgradeCard() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: ProStatusService.isProNotifier,
+      builder: (context, isPro, _) {
+        return RepaintBoundary(
+          child: Card(
+            color: const Color(0xFF102754),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(
+                color: isPro
+                    ? const Color(0xFFF7DE77).withValues(alpha: 0.45)
+                    : Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            child: InkWell(
+              onTap: _openProUpgrade,
+              borderRadius: BorderRadius.circular(24),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFFF7DE77).withValues(alpha: 0.30),
+                        ),
+                      ),
+                      child: Icon(
+                        isPro
+                            ? Icons.verified_rounded
+                            : Icons.workspace_premium_outlined,
+                        color: const Color(0xFFF7DE77),
+                        size: 27,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isPro ? 'PocketChase Pro active' : 'Remove ads with Pro',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isPro
+                                ? 'Thanks for supporting PocketChase. Ads are hidden.'
+                                : 'Upgrade once to remove banner ads from the app.',
+                            style: const TextStyle(
+                              color: Color(0xFFC8D4F0),
+                              fontSize: 12,
+                              height: 1.35,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.chevron_right, color: Colors.white54),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildFeatureAccessSection() {
     return StreamBuilder<bool>(
       stream: UserFeatureFlagsService.watchCurrentUserRestockAlertsEnabled(),
@@ -1031,6 +1121,8 @@ class _ProfilePageState extends State<ProfilePage> {
                           _buildFriendsCard(),
                           const SizedBox(height: 16),
                           _buildWishlistCard(),
+                          const SizedBox(height: 16),
+                          _buildProUpgradeCard(),
                           _buildFeatureAccessSection(),
                           _buildAccountSecurityCard(),
                           const SizedBox(height: 16),

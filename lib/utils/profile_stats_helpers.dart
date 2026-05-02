@@ -5,6 +5,7 @@ import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
 import '../services/community_image_services.dart';
 import '../services/currency_settings.dart';
+import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/pokemon_tcg_service.dart';
 
@@ -37,6 +38,19 @@ String formatProfilePercent(double value) {
   return '${value.toStringAsFixed(value >= 10 ? 0 : 1)}%';
 }
 
+bool isLocalPromoFallbackCardId(String cardId) {
+  final value = cardId.trim().toLowerCase();
+  return value.startsWith('mep-');
+}
+
+Map<String, int> normalPokedexCardCopiesOnly(Map<String, int> cardCopies) {
+  return <String, int>{
+    for (final entry in cardCopies.entries)
+      if (!isLocalPromoFallbackCardId(entry.key) && entry.value > 0)
+        entry.key: entry.value,
+  };
+}
+
 
 ProfileStats emptyProfileStats() {
   return const ProfileStats(
@@ -51,6 +65,61 @@ ProfileStats emptyProfileStats() {
     rarityValues: <String, double>{},
     topValueCards: <TcgCard>[],
   );
+}
+
+ProfileStats basicProfileStatsFromCopies(Map<String, int> cardCopies) {
+  if (cardCopies.isEmpty) return emptyProfileStats();
+
+  final totalCards = cardCopies.values.fold<int>(
+    0,
+    (runningTotal, value) => runningTotal + value,
+  );
+
+  return ProfileStats(
+    totalCards: totalCards,
+    uniqueCards: cardCopies.length,
+    totalEstimatedPrice: 0,
+    mostExpensiveCard: null,
+    mostExpensiveCardCopies: 0,
+    favouriteSetName: null,
+    favouriteSetCopies: 0,
+    rarityCopies: const <String, int>{},
+    rarityValues: const <String, double>{},
+    topValueCards: const <TcgCard>[],
+  );
+}
+
+Future<List<TcgCard>> fetchProfileCardsFast(Iterable<String> cardIds) async {
+  final ids = cardIds
+      .map((cardId) => cardId.trim())
+      .where((cardId) => cardId.isNotEmpty)
+      .toList();
+
+  if (ids.isEmpty) return const <TcgCard>[];
+
+  const chunkSize = 12;
+  final fetchedCards = <TcgCard>[];
+
+  for (var start = 0; start < ids.length; start += chunkSize) {
+    final end = (start + chunkSize) > ids.length ? ids.length : start + chunkSize;
+    final chunk = ids.sublist(start, end);
+
+    final results = await Future.wait<TcgCard?>(
+      chunk.map((cardId) async {
+        try {
+          return await PokemonTcgService.fetchCardById(cardId).timeout(
+            const Duration(seconds: 5),
+          );
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+
+    fetchedCards.addAll(results.whereType<TcgCard>());
+  }
+
+  return fetchedCards;
 }
 
 ImageProvider? profileImageProviderFromRef(String? imageRef) {
@@ -74,26 +143,33 @@ Future<ProfileStats> loadProfileStatsForOwner(
   if (trimmedOwnerUid.isEmpty) return emptyProfileStats();
 
   Map<String, int> cardCopies;
-  if (preferCurrentUserLocalCache && FirebaseAuth.instance.currentUser?.uid == trimmedOwnerUid) {
-    cardCopies = await PokedexSyncService.loadCurrentUserAllCardCopies();
+
+  if (FirebaseAuth.instance.currentUser?.uid == trimmedOwnerUid) {
+    // For your own profile, use the same local Pokédex source that the
+    // Pokédex screens use. This prevents old cloud data from showing deleted
+    // cards on the profile when the local Pokédex is empty.
+    cardCopies = await LocalPokedexStore.loadAllCardCopies();
   } else {
-    final ownershipByCardId = await PokedexSyncService.fetchAllOwnedCards(trimmedOwnerUid);
+    // For friends/other users, local storage is not available, so use cloud.
+    final ownershipByCardId = await PokedexSyncService.fetchAllOwnedCards(
+      trimmedOwnerUid,
+    );
+
     cardCopies = <String, int>{
       for (final entry in ownershipByCardId.entries)
-        if (entry.value.collectionCount > 0) entry.key: entry.value.collectionCount,
+        if (entry.value.collectionCount > 0)
+          entry.key: entry.value.collectionCount,
     };
   }
 
+  cardCopies = normalPokedexCardCopiesOnly(cardCopies);
+
   if (cardCopies.isEmpty) return emptyProfileStats();
 
-  final fetchedCards = <TcgCard>[];
-  for (final cardId in cardCopies.keys) {
-    try {
-      fetchedCards.add(await PokemonTcgService.fetchCardById(cardId));
-    } catch (_) {}
-  }
+  final fallbackBasicStats = basicProfileStatsFromCopies(cardCopies);
+  final fetchedCards = await fetchProfileCardsFast(cardCopies.keys);
 
-  if (fetchedCards.isEmpty) return emptyProfileStats();
+  if (fetchedCards.isEmpty) return fallbackBasicStats;
 
   double totalEstimatedPrice = 0;
   TcgCard? mostExpensiveCard;
