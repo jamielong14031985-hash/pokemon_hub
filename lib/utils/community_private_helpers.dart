@@ -44,9 +44,7 @@ String communityConversationIdForPost({
   ].where((uid) => uid.isNotEmpty).toList()
     ..sort();
 
-  final safePostId = postId
-      .trim()
-      .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+  final safePostId = postId.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
 
   if (safePostId.isEmpty || ids.length < 2) {
     return '';
@@ -87,11 +85,14 @@ Map<String, dynamic> _communityPrivateConversationData({
   required int updatedAtMs,
   required String lastMessage,
   required String lastSenderId,
+  bool? hasUnreadPrivateMessage,
+  int? unreadUpdatedAtMs,
+  int? lastReadAtMs,
 }) {
   final safeCurrentUid = currentUid.trim();
   final safeOtherUserId = otherUserId.trim();
 
-  return <String, dynamic>{
+  final data = <String, dynamic>{
     'participants': <String>[safeCurrentUid, safeOtherUserId],
     'participantNames': <String, String>{
       safeCurrentUid: _safeDisplayName(currentUserName),
@@ -104,6 +105,20 @@ Map<String, dynamic> _communityPrivateConversationData({
     'lastMessage': lastMessage.trim(),
     'lastSenderId': lastSenderId.trim(),
   };
+
+  if (hasUnreadPrivateMessage != null) {
+    data['hasUnreadPrivateMessage'] = hasUnreadPrivateMessage;
+  }
+
+  if (unreadUpdatedAtMs != null) {
+    data['unreadUpdatedAtMs'] = unreadUpdatedAtMs;
+  }
+
+  if (lastReadAtMs != null) {
+    data['lastReadAtMs'] = lastReadAtMs;
+  }
+
+  return data;
 }
 
 Future<void> syncCommunityPrivateConversation({
@@ -192,6 +207,7 @@ Future<void> syncCommunityPrivateMessage({
   final safeCurrentUid = currentUid.trim();
   final safeOtherUserId = otherUserId.trim();
   final safeMessageId = message.id.trim();
+  final safeSenderId = message.authorId.trim();
 
   if (safeConversationId.isEmpty ||
       safeCurrentUid.isEmpty ||
@@ -211,14 +227,33 @@ Future<void> syncCommunityPrivateMessage({
     createdAtMs: message.createdAtMs,
     updatedAtMs: message.createdAtMs,
     lastMessage: message.message,
-    lastSenderId: message.authorId,
+    lastSenderId: safeSenderId,
   );
+
+  final currentUserHasUnread =
+      safeSenderId.isNotEmpty && safeSenderId != safeCurrentUid;
+  final otherUserHasUnread =
+      safeSenderId.isNotEmpty && safeSenderId != safeOtherUserId;
+
+  final currentConversationData = <String, dynamic>{
+    ...conversationData,
+    'hasUnreadPrivateMessage': currentUserHasUnread,
+    'unreadUpdatedAtMs': message.createdAtMs,
+    if (!currentUserHasUnread) 'lastReadAtMs': message.createdAtMs,
+  };
+
+  final otherConversationData = <String, dynamic>{
+    ...conversationData,
+    'hasUnreadPrivateMessage': otherUserHasUnread,
+    'unreadUpdatedAtMs': message.createdAtMs,
+    if (!otherUserHasUnread) 'lastReadAtMs': message.createdAtMs,
+  };
 
   final messageData = <String, dynamic>{
     ...message.toJson(),
     'id': safeMessageId,
     'message': _safeText(message.message),
-    'authorId': message.authorId.trim(),
+    'authorId': safeSenderId,
     'authorName': _safeDisplayName(message.authorName),
   };
 
@@ -239,8 +274,16 @@ Future<void> syncCommunityPrivateMessage({
   final batch = FirebaseFirestore.instance.batch();
 
   batch.set(sharedConversationRef, conversationData, SetOptions(merge: true));
-  batch.set(currentConversationRef, conversationData, SetOptions(merge: true));
-  batch.set(otherConversationRef, conversationData, SetOptions(merge: true));
+  batch.set(
+    currentConversationRef,
+    currentConversationData,
+    SetOptions(merge: true),
+  );
+  batch.set(
+    otherConversationRef,
+    otherConversationData,
+    SetOptions(merge: true),
+  );
 
   batch.set(
     sharedConversationRef.collection('messages').doc(safeMessageId),

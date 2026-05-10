@@ -512,6 +512,171 @@ service cloud.firestore {
         && userExists(userId);
     }
 
+    function communityFeaturedPostFields() {
+      return [
+        'featuredByUser',
+        'featuredByUserId',
+        'featuredByUserAtMs',
+        'featuredByAdmin',
+        'featuredByAdminUid',
+        'featuredByAdminAtMs'
+      ];
+    }
+
+    function communityCreateHasNoFeaturedFields() {
+      return !request.resource.data.keys().hasAny(communityFeaturedPostFields());
+    }
+
+    function communityFeaturedFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data)
+        .affectedKeys()
+        .hasAny(communityFeaturedPostFields());
+    }
+
+    function validTcgShopSubmissionCreateData(data) {
+      return data.keys().hasOnly([
+          'name',
+          'nameLower',
+          'address',
+          'town',
+          'townLower',
+          'county',
+          'countyLower',
+          'country',
+          'postcode',
+          'postcodeLower',
+          'lat',
+          'lng',
+          'location',
+          'games',
+          'services',
+          'website',
+          'phone',
+          'imageUrl',
+          'imagePath',
+          'status',
+          'submittedBy',
+          'submittedByEmail',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 120
+        && data.nameLower is string
+        && data.address is string
+        && data.address.size() <= 300
+        && data.town is string
+        && data.town.size() <= 120
+        && data.townLower is string
+        && data.county is string
+        && data.county.size() <= 120
+        && data.countyLower is string
+        && data.country is string
+        && data.country.size() <= 120
+        && data.postcode is string
+        && data.postcode.size() <= 30
+        && data.postcodeLower is string
+        && data.lat is number
+        && data.lat >= -90
+        && data.lat <= 90
+        && data.lng is number
+        && data.lng >= -180
+        && data.lng <= 180
+        && data.location is latlng
+        && data.games is list
+        && data.games.size() <= 20
+        && data.services is list
+        && data.services.size() <= 30
+        && data.website is string
+        && data.website.size() <= 300
+        && data.phone is string
+        && data.phone.size() <= 40
+        && data.imageUrl is string
+        && data.imageUrl.size() <= 1000
+        && data.imagePath is string
+        && data.imagePath.size() <= 1000
+        && data.status == 'pending'
+        && data.submittedBy == request.auth.uid
+        && data.submittedByEmail is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validTcgShopData(data) {
+      return data.keys().hasOnly([
+          'name',
+          'nameLower',
+          'address',
+          'town',
+          'townLower',
+          'county',
+          'countyLower',
+          'country',
+          'postcode',
+          'postcodeLower',
+          'lat',
+          'lng',
+          'location',
+          'games',
+          'services',
+          'website',
+          'phone',
+          'imageUrl',
+          'imagePath',
+          'status',
+          'submittedBy',
+          'submittedByEmail',
+          'approvedBy',
+          'approvedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 120
+        && data.nameLower is string
+        && data.address is string
+        && data.address.size() <= 300
+        && data.town is string
+        && data.town.size() <= 120
+        && data.townLower is string
+        && data.county is string
+        && data.county.size() <= 120
+        && data.countyLower is string
+        && data.country is string
+        && data.country.size() <= 120
+        && data.postcode is string
+        && data.postcode.size() <= 30
+        && data.postcodeLower is string
+        && data.lat is number
+        && data.lat >= -90
+        && data.lat <= 90
+        && data.lng is number
+        && data.lng >= -180
+        && data.lng <= 180
+        && data.location is latlng
+        && data.games is list
+        && data.games.size() <= 20
+        && data.services is list
+        && data.services.size() <= 30
+        && data.website is string
+        && data.website.size() <= 300
+        && data.phone is string
+        && data.phone.size() <= 40
+        && data.imageUrl is string
+        && data.imageUrl.size() <= 1000
+        && data.imagePath is string
+        && data.imagePath.size() <= 1000
+        && data.status in ['approved', 'pending', 'rejected']
+        && data.submittedBy is string
+        && data.submittedByEmail is string
+        && (!('approvedBy' in data) || data.approvedBy is string)
+        && (!('approvedAt' in data) || data.approvedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     match /app_roles/{userId} {
       allow read: if isSelf(userId) || isAdminOrModerator();
 
@@ -524,8 +689,6 @@ service cloud.firestore {
     match /user_feature_flags/{userId} {
       allow read: if isSelf(userId) || isAdminOrModerator();
 
-      // Admins/moderators can grant or remove feature access.
-      // Keep this rule simple so adding fields like proEnabled does not break writes.
       allow create, update: if isAdminOrModerator()
         && request.resource.data.userId == userId
         && request.resource.data.restockAlertsEnabled is bool
@@ -535,6 +698,30 @@ service cloud.firestore {
         && userExists(userId);
 
       allow delete: if isAdmin();
+    }
+
+    match /tcg_shops/{shopId} {
+      // Public map data. Anyone can read shop pins.
+      // Submissions are still kept private in tcg_shop_submissions until approved.
+      allow read: if true;
+
+      allow create, update: if isAdminOrModerator()
+        && validTcgShopData(request.resource.data);
+
+      allow delete: if isAdminOrModerator();
+    }
+
+    match /tcg_shop_submissions/{submissionId} {
+      allow create: if signedIn()
+        && validTcgShopSubmissionCreateData(request.resource.data);
+
+      allow read: if signedIn()
+        && (
+          resource.data.submittedBy == request.auth.uid ||
+          isAdminOrModerator()
+        );
+
+      allow update, delete: if isAdminOrModerator();
     }
 
     match /restock_alerts/{alertId} {
@@ -550,8 +737,6 @@ service cloud.firestore {
     match /tracked_restock_products/{productId} {
       allow read: if isAdminOrModerator();
 
-      // Admins/moderators can add and edit tracked products.
-      // Keep this rule simple so adding region/store fields does not block edits.
       allow create, update: if isAdminOrModerator()
         && request.resource.data.shopName is string
         && request.resource.data.productName is string
@@ -750,12 +935,16 @@ service cloud.firestore {
         && request.resource.data.title is string
         && request.resource.data.description is string
         && request.resource.data.contact is string
-        && request.resource.data.createdAtMs is int;
+        && request.resource.data.createdAtMs is int
+        && communityCreateHasNoFeaturedFields();
 
-      allow update: if canUseCommunity()
-        && request.auth.uid == resource.data.authorId
-        && request.resource.data.authorId == resource.data.authorId
-        && request.resource.data.createdAtMs == resource.data.createdAtMs;
+      allow update: if (
+          canUseCommunity()
+          && request.auth.uid == resource.data.authorId
+          && request.resource.data.authorId == resource.data.authorId
+          && request.resource.data.createdAtMs == resource.data.createdAtMs
+          && communityFeaturedFieldsUnchanged()
+        ) || isAdminOrModerator();
 
       allow delete: if signedIn()
         && (
@@ -913,5 +1102,23 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+    /*
+      PUBLIC READ FALLBACK WITH PROTECTED WRITES
+
+      Why this is here:
+      - The TCG Shop Map only loaded when Firestore public reads were allowed.
+      - This keeps reads open so the map/profile/community data can load.
+      - This does NOT open public writes.
+
+      Writes:
+      - Client writes are still controlled by the specific create/update/delete
+        rules above.
+      - The fallback write rule is false, so unknown write paths stay blocked.
+    */
+    match /{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
   }
 }

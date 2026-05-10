@@ -439,6 +439,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
 
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF102754),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -446,146 +447,155 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
       builder: (sheetContext) {
         return SafeArea(
           top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 48,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  replyAuthorName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Choose an action for this reply.',
-                  style: TextStyle(
-                    color: Color(0xFFC8D4F0),
-                    fontSize: 14,
-                    height: 1.35,
-                  ),
-                ),
-                if (canAddFriend) ...[
-                  const SizedBox(height: 16),
-                  CommunitySellerTrustPanel(
-                    sellerId: replyAuthorId,
-                    sellerName: replyAuthorName,
-                    compact: true,
-                  ),
-                  const SizedBox(height: 10),
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                      _openMemberRatingSheet(
-                        memberId: replyAuthorId,
-                        memberName: replyAuthorName,
-                        livePost: livePost,
-                      );
-                    },
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      backgroundColor: const Color(0xFFF7DE77),
-                      foregroundColor: Colors.black,
-                    ),
-                    icon: const Icon(Icons.star_outline_rounded),
-                    label: const Text(
-                      'Rate this member',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  FriendActionButton(
-                    currentProfile: widget.currentProfile,
-                    otherUserId: replyAuthorId,
-                    otherUserName: replyAuthorName,
-                    onOpenFriendProfile: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => FriendProfilePage(
-                            currentProfile: widget.currentProfile,
-                            friendUid: replyAuthorId,
-                            friendName: replyAuthorName,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxHeight = MediaQuery.of(context).size.height * 0.88;
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 48,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(999),
                           ),
                         ),
-                      );
-                    },
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        replyAuthorName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Choose an action for this reply.',
+                        style: TextStyle(
+                          color: Color(0xFFC8D4F0),
+                          fontSize: 14,
+                          height: 1.35,
+                        ),
+                      ),
+                      if (canAddFriend) ...[
+                        const SizedBox(height: 16),
+                        CommunitySellerTrustPanel(
+                          sellerId: replyAuthorId,
+                          sellerName: replyAuthorName,
+                          compact: true,
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                            _openMemberRatingSheet(
+                              memberId: replyAuthorId,
+                              memberName: replyAuthorName,
+                              livePost: livePost,
+                            );
+                          },
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                            backgroundColor: const Color(0xFFF7DE77),
+                            foregroundColor: Colors.black,
+                          ),
+                          icon: const Icon(Icons.star_outline_rounded),
+                          label: const Text(
+                            'Rate this member',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        FriendActionButton(
+                          currentProfile: widget.currentProfile,
+                          otherUserId: replyAuthorId,
+                          otherUserName: replyAuthorName,
+                          onOpenFriendProfile: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => FriendProfilePage(
+                                  currentProfile: widget.currentProfile,
+                                  friendUid: replyAuthorId,
+                                  friendName: replyAuthorName,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                            _reportReply(reply: reply, livePost: livePost);
+                          },
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Color(0xFF3F5C96)),
+                          ),
+                          icon: const Icon(Icons.flag_outlined),
+                          label: const Text(
+                            'Report reply',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                            _blockCommunityMember(
+                              memberId: replyAuthorId,
+                              memberName: replyAuthorName,
+                            );
+                          },
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                            foregroundColor: const Color(0xFFFFCDD2),
+                            side: const BorderSide(color: Color(0xFFB13B59)),
+                          ),
+                          icon: const Icon(Icons.block_outlined),
+                          label: const Text(
+                            'Block member',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                      if (canDelete) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                            _deleteReply(reply);
+                          },
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                            backgroundColor: const Color(0xFFB13B59),
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.delete_outline),
+                          label: Text(
+                            _isAdmin && currentUid != reply.authorId
+                                ? 'Admin delete message'
+                                : 'Delete message',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                      _reportReply(reply: reply, livePost: livePost);
-                    },
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFF3F5C96)),
-                    ),
-                    icon: const Icon(Icons.flag_outlined),
-                    label: const Text(
-                      'Report reply',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                      _blockCommunityMember(
-                        memberId: replyAuthorId,
-                        memberName: replyAuthorName,
-                      );
-                    },
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      foregroundColor: const Color(0xFFFFCDD2),
-                      side: const BorderSide(color: Color(0xFFB13B59)),
-                    ),
-                    icon: const Icon(Icons.block_outlined),
-                    label: const Text(
-                      'Block member',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ],
-                if (canDelete) ...[
-                  const SizedBox(height: 10),
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                      _deleteReply(reply);
-                    },
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      backgroundColor: const Color(0xFFB13B59),
-                      foregroundColor: Colors.white,
-                    ),
-                    icon: const Icon(Icons.delete_outline),
-                    label: Text(
-                      _isAdmin && currentUid != reply.authorId
-                          ? 'Admin delete message'
-                          : 'Delete message',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+                ),
+              );
+            },
           ),
         );
       },
@@ -864,7 +874,10 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           CommunityMetaChip(
                             icon: livePost.isDiscussion
@@ -879,8 +892,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                                 : livePost.postType,
                             color: accentColor,
                           ),
-                          if (livePost.isMarketplace) ...[
-                            const SizedBox(width: 8),
+                          if (livePost.isMarketplace)
                             CommunityMetaChip(
                               icon: communityMarketStatusIcon(
                                 livePost.normalizedMarketStatus,
@@ -890,21 +902,31 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                                 livePost.normalizedMarketStatus,
                               ),
                             ),
-                          ],
-                          if (_isAdmin) ...[
-                            const SizedBox(width: 8),
+                          if (_isAdmin)
                             const CommunityMetaChip(
                               icon: Icons.admin_panel_settings_outlined,
                               label: 'Admin',
                               color: Color(0xFFB13B59),
                             ),
-                          ],
-                          const Spacer(),
-                          Text(
-                            _formatDate(livePost.createdAt),
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.08),
+                              ),
+                            ),
+                            child: Text(
+                              _formatDate(livePost.createdAt),
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ],
@@ -1199,11 +1221,16 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                       ),
                     ),
                   ),
-                  Text(
-                    _formatDate(reply.createdAt),
-                    style: const TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
+                  Flexible(
+                    child: Text(
+                      _formatDate(reply.createdAt),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                   if (canDelete)

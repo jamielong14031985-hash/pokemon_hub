@@ -30,6 +30,7 @@ import 'friends_page.dart';
 import 'pro_upgrade_page.dart';
 import 'restock_alert_preferences_page.dart';
 import 'my_restock_tracker_page.dart';
+import 'tcg_shop_submissions_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
 
@@ -51,6 +52,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _savingName = false;
   bool _savingCurrency = false;
   bool _deletingAccount = false;
+  bool _featuresExpanded = false;
   String _selectedCurrencyCode = CurrencySettings.selectedCode;
   late Future<ProfileStats> _statsFuture;
 
@@ -267,12 +269,46 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<void> _openUserFeatures() async {
+
+  Future<void> _openTcgShopSubmissions() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => const AdminUserFeatureFlagsPage(),
+        builder: (_) => const TcgShopSubmissionsPage(),
       ),
     );
+  }
+
+  Future<void> _openUserFeatures() async {
+    try {
+      final canManage = await UserFeatureFlagsService
+          .watchCurrentUserCanManageFeatureFlags()
+          .first
+          .timeout(const Duration(seconds: 8));
+
+      if (!mounted) return;
+
+      if (canManage != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only admins and moderators can open User Features.'),
+          ),
+        );
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const AdminUserFeatureFlagsPage(),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not check your staff permission right now.'),
+        ),
+      );
+    }
   }
 
   Future<void> _openRestockAlertPreferences() async {
@@ -799,6 +835,7 @@ class _ProfilePageState extends State<ProfilePage> {
       stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
       builder: (context, managerSnapshot) {
         final canManageFeatures = managerSnapshot.data == true;
+        final toolCount = canManageFeatures ? 5 : 2;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -810,58 +847,145 @@ class _ProfilePageState extends State<ProfilePage> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Features',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () {
+                        setState(() {
+                          _featuresExpanded = !_featuresExpanded;
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: const Color(0xFFF7DE77)
+                                    .withValues(alpha: 0.14),
+                                border: Border.all(
+                                  color: const Color(0xFFF7DE77)
+                                      .withValues(alpha: 0.28),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.tune_outlined,
+                                color: Color(0xFFF7DE77),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Features',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _featuresExpanded
+                                        ? 'Tap to hide extra PocketChase tools.'
+                                        : '$toolCount tool${toolCount == 1 ? '' : 's'} hidden. Tap to show.',
+                                    style: const TextStyle(
+                                      color: Color(0xFFD8E3FB),
+                                      height: 1.35,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            AnimatedRotation(
+                              turns: _featuresExpanded ? 0.5 : 0,
+                              duration: const Duration(milliseconds: 180),
+                              curve: Curves.easeOut,
+                              child: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: Colors.white70,
+                                size: 30,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Manage extra PocketChase tools and account features.',
-                        style: TextStyle(
-                          color: Color(0xFFD8E3FB),
-                          height: 1.35,
+                    ),
+                    AnimatedCrossFade(
+                      firstChild: const SizedBox.shrink(),
+                      secondChild: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Manage extra PocketChase tools and account features.',
+                              style: TextStyle(
+                                color: Color(0xFFD8E3FB),
+                                height: 1.35,
+                              ),
+                            ),
+                            _buildFeatureTile(
+                              icon: Icons.add_alert_outlined,
+                              iconColor: const Color(0xFFF7DE77),
+                              title: 'My Restock Tracker',
+                              subtitle: 'Add product pages you want to track yourself',
+                              onTap: _openMyRestockTracker,
+                            ),
+                            _buildFeatureTile(
+                              icon: Icons.notifications_active_outlined,
+                              iconColor: const Color(0xFFF7DE77),
+                              title: 'Alert Preferences',
+                              subtitle: 'Choose shops, regions, and stores to get notifications from',
+                              onTap: _openRestockAlertPreferences,
+                            ),
+                            if (canManageFeatures)
+                              _buildFeatureTile(
+                                icon: Icons.manage_search_outlined,
+                                iconColor: const Color(0xFFF7DE77),
+                                title: 'Tracked Products',
+                                subtitle: 'Add shop pages for automatic checking',
+                                onTap: _openTrackedRestockProducts,
+                              ),
+                            if (canManageFeatures)
+                              _buildFeatureTile(
+                                icon: Icons.storefront_outlined,
+                                iconColor: const Color(0xFF54D39A),
+                                title: 'TCG Shop Submissions',
+                                subtitle: 'Approve or reject user-submitted card shops',
+                                onTap: _openTcgShopSubmissions,
+                              ),
+                            if (canManageFeatures)
+                              _buildFeatureTile(
+                                icon: Icons.admin_panel_settings_outlined,
+                                iconColor: const Color(0xFF54D39A),
+                                title: 'User Features',
+                                subtitle: 'Turn PocketChase Pro and admin permissions on or off for users',
+                                onTap: _openUserFeatures,
+                              ),
+                          ],
                         ),
                       ),
-                      _buildFeatureTile(
-                        icon: Icons.add_alert_outlined,
-                        iconColor: const Color(0xFFF7DE77),
-                        title: 'My Restock Tracker',
-                        subtitle: 'Add product pages you want to track yourself',
-                        onTap: _openMyRestockTracker,
-                      ),
-                      _buildFeatureTile(
-                        icon: Icons.notifications_active_outlined,
-                        iconColor: const Color(0xFFF7DE77),
-                        title: 'Alert Preferences',
-                        subtitle: 'Choose shops, regions, and stores to get notifications from',
-                        onTap: _openRestockAlertPreferences,
-                      ),
-                      if (canManageFeatures)
-                        _buildFeatureTile(
-                          icon: Icons.manage_search_outlined,
-                          iconColor: const Color(0xFFF7DE77),
-                          title: 'Tracked Products',
-                          subtitle: 'Add shop pages for automatic checking',
-                          onTap: _openTrackedRestockProducts,
-                        ),
-                      _buildFeatureTile(
-                        icon: Icons.admin_panel_settings_outlined,
-                        iconColor: const Color(0xFF54D39A),
-                        title: 'User Features',
-                        subtitle: 'Turn PocketChase Pro and admin permissions on or off for users',
-                        onTap: _openUserFeatures,
-                      ),
-                    ],
-                  ),
+                      crossFadeState: _featuresExpanded
+                          ? CrossFadeState.showSecond
+                          : CrossFadeState.showFirst,
+                      duration: const Duration(milliseconds: 220),
+                      reverseDuration: const Duration(milliseconds: 160),
+                      firstCurve: Curves.easeOut,
+                      secondCurve: Curves.easeOut,
+                      sizeCurve: Curves.easeOut,
+                    ),
+                  ],
                 ),
               ),
             ),

@@ -2,7 +2,7 @@ name: pokemon_hub_flutter
 description: PocketChase app
 publish_to: 'none'
 
-version: 1.0.0+4
+version: 1.0.0+8
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -10,10 +10,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
   http: ^1.6.0
   firebase_core: ^4.6.0
   firebase_auth: ^6.3.0
-  cloud_firestore: ^6.3.0
+  cloud_firestore: ^6.1.0
   image_picker: ^1.2.2
   google_mlkit_text_recognition: ^0.15.1
   shared_preferences: ^2.5.5
@@ -28,6 +29,8 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   google_mobile_ads: ^6.0.0
   in_app_purchase: ^3.2.3
+  flutter_map: ^8.3.0
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_lints: ^6.0.0

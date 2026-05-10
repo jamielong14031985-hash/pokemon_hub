@@ -9,13 +9,22 @@ import 'pages/card_search_page.dart';
 import 'pages/community_page.dart';
 import 'pages/master_sets_page.dart';
 import 'pages/profile_page.dart';
+import 'pages/tcg_shop_map_page.dart';
+import 'services/community_unread_private_message_service.dart';
 import 'services/currency_settings.dart';
+import 'services/friend_service.dart';
 import 'services/custom_binder_sync_service.dart';
 import 'services/pokedex_sync_service.dart';
 import 'widgets/pocketchase_banner_ad.dart';
 import 'widgets/profile_app_bar_button.dart';
 
 const int _kCommunityMinimumAge = 18;
+
+const int _kCardsIndex = 0;
+const int _kScanIndex = 1;
+const int _kMasterSetsIndex = 2;
+const int _kMapIndex = 3;
+const int _kCommunityIndex = 4;
 
 const String _kCommunityForumDisclaimer =
     '''Disclaimer: PocketChase and the creators of this app are not responsible for any sales, swaps, trades, payments, deliveries, meetups, item condition, authenticity, losses, disputes, or damages arising from community posts or arrangements made between users. All transactions and interactions are carried out entirely at the users’ own risk.''';
@@ -30,7 +39,7 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  int _currentIndex = 0;
+  int _currentIndex = _kCardsIndex;
   bool _communityDisclaimerAccepted = false;
   bool _loadingCommunityDisclaimer = true;
   final GlobalKey<CardSearchPageState> _cardSearchKey =
@@ -186,19 +195,19 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _applyDestinationSelected(int index) {
-    final wasOnCards = _currentIndex == 0;
+    final wasOnCards = _currentIndex == _kCardsIndex;
 
     setState(() {
       _currentIndex = index;
     });
 
-    if (index == 0) {
+    if (index == _kCardsIndex) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _cardSearchKey.currentState?.scrollToTop(animated: wasOnCards);
       });
     }
 
-    if (index == 2) {
+    if (index == _kMasterSetsIndex) {
       _masterSetsKey.currentState?.refreshSets();
     }
   }
@@ -206,7 +215,7 @@ class _AppShellState extends State<AppShell> {
   Future<void> _onDestinationSelected(int index) async {
     HapticFeedback.lightImpact();
 
-    if (index == 3) {
+    if (index == _kCommunityIndex) {
       if (!widget.profile.hasDateOfBirth) {
         _showMessage('Please complete your profile with your date of birth first.');
         return;
@@ -231,13 +240,15 @@ class _AppShellState extends State<AppShell> {
 
   String get _appBarTitle {
     switch (_currentIndex) {
-      case 1:
+      case _kScanIndex:
         return 'Scan Card';
-      case 2:
+      case _kMasterSetsIndex:
         return 'Master Sets';
-      case 3:
+      case _kMapIndex:
+        return 'TCG Shop Map';
+      case _kCommunityIndex:
         return 'Community';
-      case 0:
+      case _kCardsIndex:
       default:
         return 'PocketChase';
     }
@@ -245,13 +256,15 @@ class _AppShellState extends State<AppShell> {
 
   String get _appBarSubtitle {
     switch (_currentIndex) {
-      case 1:
+      case _kScanIndex:
         return 'Scan and identify your cards';
-      case 2:
+      case _kMasterSetsIndex:
         return 'Track and manage your sets';
-      case 3:
+      case _kMapIndex:
+        return 'Find local TCG shops and submit new ones';
+      case _kCommunityIndex:
         return 'Chat, swap, sell and trade safely';
-      case 0:
+      case _kCardsIndex:
       default:
         return 'Search cards, sets and collection numbers';
     }
@@ -259,13 +272,15 @@ class _AppShellState extends State<AppShell> {
 
   IconData get _appBarIcon {
     switch (_currentIndex) {
-      case 1:
+      case _kScanIndex:
         return Icons.document_scanner_outlined;
-      case 2:
+      case _kMasterSetsIndex:
         return Icons.collections_bookmark_outlined;
-      case 3:
+      case _kMapIndex:
+        return Icons.map_outlined;
+      case _kCommunityIndex:
         return Icons.forum_outlined;
-      case 0:
+      case _kCardsIndex:
       default:
         return Icons.style_outlined;
     }
@@ -273,13 +288,15 @@ class _AppShellState extends State<AppShell> {
 
   Widget _buildCurrentPage() {
     switch (_currentIndex) {
-      case 1:
+      case _kScanIndex:
         return const CardScannerPage(showAppBar: false);
-      case 2:
+      case _kMasterSetsIndex:
         return MasterSetsPage(key: _masterSetsKey);
-      case 3:
+      case _kMapIndex:
+        return const TcgShopMapPage();
+      case _kCommunityIndex:
         return CommunityPage(profile: widget.profile);
-      case 0:
+      case _kCardsIndex:
       default:
         return CardSearchPage(key: _cardSearchKey);
     }
@@ -390,55 +407,164 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  Widget _buildCommunityNavIcon({
+    required bool selected,
+    required bool hasUnreadPrivateMessages,
+    required bool hasPendingFriendRequests,
+  }) {
+    final hasCommunityAlert = hasUnreadPrivateMessages || hasPendingFriendRequests;
+    final icon = Icon(selected ? Icons.forum : Icons.forum_outlined);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: hasCommunityAlert
+            ? const Color(0xFFF7DE77).withValues(alpha: selected ? 0.24 : 0.16)
+            : Colors.transparent,
+        boxShadow: hasCommunityAlert
+            ? [
+                BoxShadow(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.80),
+                  blurRadius: 18,
+                  spreadRadius: 2,
+                ),
+              ]
+            : const [],
+      ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          icon,
+          if (hasCommunityAlert)
+            Positioned(
+              right: -3,
+              top: -3,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7DE77),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF041B4A), width: 1.5),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  NavigationBar _buildNavigationBar({
+    required bool hasUnreadPrivateMessages,
+    required bool hasPendingFriendRequests,
+  }) {
+    return NavigationBar(
+      selectedIndex: _currentIndex,
+      onDestinationSelected: _onDestinationSelected,
+      destinations: [
+        const NavigationDestination(
+          icon: Icon(Icons.style_outlined),
+          selectedIcon: Icon(Icons.style),
+          label: 'Cards',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.document_scanner_outlined),
+          selectedIcon: Icon(Icons.document_scanner),
+          label: 'Scan',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.collections_bookmark_outlined),
+          selectedIcon: Icon(Icons.collections_bookmark),
+          label: 'Master Sets',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.map_outlined),
+          selectedIcon: Icon(Icons.map),
+          label: 'Map',
+        ),
+        NavigationDestination(
+          icon: _buildCommunityNavIcon(
+            selected: false,
+            hasUnreadPrivateMessages: hasUnreadPrivateMessages,
+            hasPendingFriendRequests: hasPendingFriendRequests,
+          ),
+          selectedIcon: _buildCommunityNavIcon(
+            selected: true,
+            hasUnreadPrivateMessages: hasUnreadPrivateMessages,
+            hasPendingFriendRequests: hasPendingFriendRequests,
+          ),
+          label: (hasUnreadPrivateMessages || hasPendingFriendRequests)
+              ? 'Community • New'
+              : 'Community',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomNavigationBar() {
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid).trim();
+
+    return ValueListenableBuilder<int>(
+      valueListenable:
+          CommunityUnreadPrivateMessageService.privateInboxSeenVersion,
+      builder: (context, _, __) {
+        if (currentUid.isEmpty) {
+          return _buildNavigationBar(
+            hasUnreadPrivateMessages: false,
+            hasPendingFriendRequests: false,
+          );
+        }
+
+        return StreamBuilder<bool>(
+          stream: CommunityUnreadPrivateMessageService
+              .hasUnreadPrivateMessagesStream(currentUid),
+          builder: (context, privateSnapshot) {
+            return StreamBuilder(
+              stream: FriendService.incomingRequestsStream(currentUid),
+              builder: (context, friendSnapshot) {
+                final incomingRequests = friendSnapshot.data ?? const [];
+                return _buildNavigationBar(
+                  hasUnreadPrivateMessages: privateSnapshot.data == true,
+                  hasPendingFriendRequests: incomingRequests.isNotEmpty,
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 12,
-        toolbarHeight: 86,
-        title: _buildGlassAppBarTitle(),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: _currentIndex == _kMapIndex
+          ? null
+          : AppBar(
+              titleSpacing: 12,
+              toolbarHeight: 86,
+              title: _buildGlassAppBarTitle(),
+              backgroundColor: const Color(0xFF041B4A),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+            ),
       body: ValueListenableBuilder<int>(
         valueListenable: currencyRefreshNotifier,
         builder: (context, _, __) {
           return Column(
             children: [
               Expanded(child: _buildCurrentPage()),
-              if (_currentIndex != 1) const PocketChaseBannerAd(),
+              if (_currentIndex != _kScanIndex) const PocketChaseBannerAd(),
             ],
           );
         },
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: _onDestinationSelected,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.style_outlined),
-            selectedIcon: Icon(Icons.style),
-            label: 'Cards',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.document_scanner_outlined),
-            selectedIcon: Icon(Icons.document_scanner),
-            label: 'Scan',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.collections_bookmark_outlined),
-            selectedIcon: Icon(Icons.collections_bookmark),
-            label: 'Master Sets',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.forum_outlined),
-            selectedIcon: Icon(Icons.forum),
-            label: 'Community',
-          ),
-        ],
-      ),
+      bottomNavigationBar: _buildBottomNavigationBar(),
     );
   }
 }

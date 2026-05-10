@@ -53,6 +53,12 @@ class CommunityPost {
     this.lastBumpedAtMs,
     this.imageBase64List = const <String>[],
     this.hiddenReplyIds = const <String>[],
+    this.featuredByUser = false,
+    this.featuredByUserId = '',
+    this.featuredByUserAtMs,
+    this.featuredByAdmin = false,
+    this.featuredByAdminUid = '',
+    this.featuredByAdminAtMs,
   });
 
   final String id;
@@ -74,6 +80,12 @@ class CommunityPost {
   final int? lastBumpedAtMs;
   final List<String> imageBase64List;
   final List<String> hiddenReplyIds;
+  final bool featuredByUser;
+  final String featuredByUserId;
+  final int? featuredByUserAtMs;
+  final bool featuredByAdmin;
+  final String featuredByAdminUid;
+  final int? featuredByAdminAtMs;
 
   DateTime get createdAt => DateTime.fromMillisecondsSinceEpoch(createdAtMs);
   DateTime get updatedAt => DateTime.fromMillisecondsSinceEpoch(
@@ -84,6 +96,13 @@ class CommunityPost {
           ? null
           : DateTime.fromMillisecondsSinceEpoch(lastBumpedAtMs!);
   bool get hasImages => imageBase64List.isNotEmpty;
+  bool get isUserFeatured => featuredByUser;
+  bool get isAdminFeatured => featuredByAdmin;
+  bool get isFeatured => isUserFeatured || isAdminFeatured;
+  int get featuredSortAtMs => math.max(
+        featuredByUserAtMs ?? 0,
+        featuredByAdminAtMs ?? 0,
+      );
   int get imageCount => imageBase64List.length;
   String? get primaryImageBase64 => hasImages ? imageBase64List.first : null;
   bool get isDiscussion => postType == 'Thread';
@@ -151,6 +170,14 @@ class CommunityPost {
         if ((isSwap || isWanted) && wantedTradeFor.trim().isNotEmpty) 'wantedTradeFor': wantedTradeFor.trim(),
         if (lastBumpedAtMs != null && lastBumpedAtMs! > 0) 'lastBumpedAtMs': lastBumpedAtMs,
         if (hiddenReplyIds.isNotEmpty) 'hiddenReplyIds': hiddenReplyIds,
+        if (featuredByUser) 'featuredByUser': true,
+        if (featuredByUser) 'featuredByUserId': featuredByUserId,
+        if (featuredByUser && featuredByUserAtMs != null)
+          'featuredByUserAtMs': featuredByUserAtMs,
+        if (featuredByAdmin) 'featuredByAdmin': true,
+        if (featuredByAdmin) 'featuredByAdminUid': featuredByAdminUid,
+        if (featuredByAdmin && featuredByAdminAtMs != null)
+          'featuredByAdminAtMs': featuredByAdminAtMs,
       };
 
   factory CommunityPost.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -206,6 +233,12 @@ class CommunityPost {
           .map((item) => item.toString().trim())
           .where((item) => item.isNotEmpty)
           .toList(),
+      featuredByUser: json['featuredByUser'] == true,
+      featuredByUserId: (json['featuredByUserId'] ?? '').toString(),
+      featuredByUserAtMs: (json['featuredByUserAtMs'] as num?)?.toInt(),
+      featuredByAdmin: json['featuredByAdmin'] == true,
+      featuredByAdminUid: (json['featuredByAdminUid'] ?? '').toString(),
+      featuredByAdminAtMs: (json['featuredByAdminAtMs'] as num?)?.toInt(),
     );
   }
 }

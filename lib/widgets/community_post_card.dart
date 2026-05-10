@@ -31,6 +31,10 @@ class CommunityPostCard extends StatelessWidget {
     this.onBlock,
     this.onSetMarketStatus,
     this.onBump,
+    this.canUserFeature = false,
+    this.canAdminFeature = false,
+    this.onToggleUserFeatured,
+    this.onToggleAdminFeatured,
   });
 
   final CommunityPost post;
@@ -47,12 +51,114 @@ class CommunityPostCard extends StatelessWidget {
   final VoidCallback? onBlock;
   final ValueChanged<String>? onSetMarketStatus;
   final VoidCallback? onBump;
+  final bool canUserFeature;
+  final bool canAdminFeature;
+  final VoidCallback? onToggleUserFeatured;
+  final VoidCallback? onToggleAdminFeatured;
+
+  Widget _buildFeaturedPanel() {
+    final showUserChip = post.isUserFeatured;
+    final showAdminChip = post.isAdminFeatured;
+    final showControls = canUserFeature || canAdminFeature;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7DE77).withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (showUserChip)
+                _FeaturedBadge(
+                  icon: Icons.workspace_premium_rounded,
+                  label: 'Pro featured',
+                ),
+              if (showAdminChip)
+                _FeaturedBadge(
+                  icon: Icons.admin_panel_settings_outlined,
+                  label: 'Admin featured',
+                ),
+              if (!showUserChip && !showAdminChip)
+                const _FeaturedBadge(
+                  icon: Icons.star_border_rounded,
+                  label: 'Feature this post',
+                ),
+            ],
+          ),
+          if (showControls) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (canUserFeature)
+                  OutlinedButton.icon(
+                    onPressed: onToggleUserFeatured,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFFF2B3),
+                      side: const BorderSide(color: Color(0xFFF7DE77)),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: Icon(
+                      post.isUserFeatured
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
+                      size: 18,
+                    ),
+                    label: Text(
+                      post.isUserFeatured
+                          ? 'Remove my featured post'
+                          : 'Make my featured post',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                if (canAdminFeature)
+                  OutlinedButton.icon(
+                    onPressed: onToggleAdminFeatured,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.22),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: Icon(
+                      post.isAdminFeatured
+                          ? Icons.admin_panel_settings
+                          : Icons.admin_panel_settings_outlined,
+                      size: 18,
+                    ),
+                    label: Text(
+                      post.isAdminFeatured
+                          ? 'Remove admin feature'
+                          : 'Admin feature',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDiscussion = post.isDiscussion;
     final accentColor = communityPostAccentColor(post);
     final canManageListing = canEdit && post.isMarketplace && onSetMarketStatus != null;
+    final showFeaturedPanel = post.isFeatured || canUserFeature || canAdminFeature;
 
     void handleMenuAction(CommunityPostMenuAction value) {
       switch (value) {
@@ -255,9 +361,11 @@ class CommunityPostCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isNew
-              ? const Color(0xFFF7DE77).withValues(alpha: 0.34)
-              : Colors.white.withValues(alpha: 0.07),
+          color: post.isFeatured
+              ? const Color(0xFFF7DE77).withValues(alpha: 0.44)
+              : isNew
+                  ? const Color(0xFFF7DE77).withValues(alpha: 0.34)
+                  : Colors.white.withValues(alpha: 0.07),
         ),
         boxShadow: [
           BoxShadow(
@@ -368,6 +476,10 @@ class CommunityPostCard extends StatelessWidget {
                           ),
                       ],
                     ),
+                    if (showFeaturedPanel) ...[
+                      const SizedBox(height: 10),
+                      _buildFeaturedPanel(),
+                    ],
                     if (post.hasImages) ...[
                       const SizedBox(height: 10),
                       ClipRRect(
@@ -474,6 +586,49 @@ class CommunityPostCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _FeaturedBadge extends StatelessWidget {
+  const _FeaturedBadge({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7DE77),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFF7DE77).withValues(alpha: 0.25),
+            blurRadius: 12,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.black, size: 16),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }

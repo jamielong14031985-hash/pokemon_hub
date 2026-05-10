@@ -1,12 +1,12 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'app_shell.dart';
 import 'models/app_user_profile.dart';
 import 'pages/complete_profile_page.dart';
 import 'pages/email_verification_page.dart';
 import 'pages/sign_in_page.dart';
 import 'services/user_profile_service.dart';
+import 'welcome_gate.dart';
 import 'widgets/full_screen_loader.dart';
 
 class AuthGate extends StatelessWidget {
@@ -44,7 +44,7 @@ class AuthGate extends StatelessWidget {
               return CompleteProfilePage(user: user);
             }
 
-            return AppShell(profile: profile);
+            return WelcomeGate(profile: profile);
           },
         );
       },

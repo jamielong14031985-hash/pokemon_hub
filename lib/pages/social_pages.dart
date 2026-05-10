@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -10,7 +12,9 @@ import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
 import '../models/wishlist_entry.dart';
 import '../services/community_safety_service.dart';
+import '../services/community_unread_private_message_service.dart';
 import '../services/currency_settings.dart';
+import '../services/friend_service.dart';
 import '../services/pokemon_tcg_service.dart';
 import '../services/user_profile_service.dart';
 import '../utils/community_dialog_helpers.dart';
@@ -117,6 +121,24 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
     } catch (_) {
       // The chat screen can still load existing local/user-scoped messages.
     }
+
+    await _markConversationRead();
+  }
+
+  Future<void> _markConversationRead() async {
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid)
+            .trim();
+    final conversationId = widget.conversationId.trim();
+
+    if (currentUid.isEmpty || conversationId.isEmpty) {
+      return;
+    }
+
+    await CommunityUnreadPrivateMessageService.markConversationRead(
+      ownerUid: currentUid,
+      conversationId: conversationId,
+    );
   }
 
   Future<void> _sendMessage() async {
@@ -443,6 +465,14 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
                       .whereType<CommunityPrivateMessage>()
                       .toList();
 
+                  if (messages.any(
+                    (message) => message.authorId.trim() != currentUid,
+                  )) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      unawaited(_markConversationRead());
+                    });
+                  }
+
                   if (messages.isEmpty) {
                     return const Center(
                       child: Padding(
@@ -737,6 +767,128 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     );
   }
 
+  Future<void> _removeFriend(AppUserProfile profile) async {
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.currentProfile.uid)
+            .trim();
+    final friendUid = profile.uid.trim();
+    final friendName = profile.displayName.trim().isEmpty
+        ? 'this friend'
+        : profile.displayName.trim();
+
+    if (currentUid.isEmpty || friendUid.isEmpty || currentUid == friendUid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This friend cannot be removed right now.')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF102754),
+          title: const Text(
+            'Remove friend?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+          ),
+          content: Text(
+            'This will remove $friendName from your friends list. You can send another friend request again later.',
+            style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D5D),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await FriendService.removeFriend(
+        currentUid: currentUid,
+        friendUid: friendUid,
+      );
+
+      if (!mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('$friendName removed from your friends.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
+  Widget _buildRemoveFriendCard(AppUserProfile profile) {
+    return Card(
+      color: const Color(0xFF102754),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Friend options',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Remove this person from your friends list. This does not block them.',
+              style: TextStyle(
+                color: Color(0xFFC8D4F0),
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => _removeFriend(profile),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                foregroundColor: const Color(0xFFFFCDD2),
+                side: const BorderSide(color: Color(0xFFE85D5D)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              icon: const Icon(Icons.person_remove_alt_1_outlined),
+              label: const Text(
+                'Remove friend',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _openWishlistCard(WishlistEntry entry) async {
     try {
       final card = await PokemonTcgService.fetchCardById(entry.cardId);
@@ -797,6 +949,8 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                     onOpenTradeMatches: () => _openTradeMatches(friendProfile),
                     onMessage: () => _messageFriend(friendProfile),
                   ),
+                  const SizedBox(height: 12),
+                  _buildRemoveFriendCard(friendProfile),
                   if (profileSnapshot.hasError)
                     Card(
                       color: const Color(0xFF102754),
@@ -907,4 +1061,3 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     );
   }
 }
-

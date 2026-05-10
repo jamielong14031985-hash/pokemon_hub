@@ -178,6 +178,80 @@ class _AdminUserFeatureFlagsPageState extends State<AdminUserFeatureFlagsPage> {
     );
   }
 
+  Widget _buildStaffOnlyMessage() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Card(
+          color: const Color(0xFF102754),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: const Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.lock_outline_rounded,
+                  color: Color(0xFFF7DE77),
+                  size: 42,
+                ),
+                SizedBox(height: 14),
+                Text(
+                  'Admins and moderators only',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'You do not have permission to view or manage user features.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFFD8E3FB),
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserListBody() {
+    return StreamBuilder<List<AppUserSummary>>(
+      stream: UserFeatureFlagsService.watchUsers(),
+      builder: (context, usersSnapshot) {
+        if (usersSnapshot.hasError) {
+          return _ErrorMessage(error: usersSnapshot.error.toString());
+        }
+
+        if (usersSnapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final users = usersSnapshot.data ?? const <AppUserSummary>[];
+
+        if (users.isEmpty) {
+          return const Center(
+            child: Text(
+              'No users found.',
+              style: TextStyle(color: Colors.white),
+            ),
+          );
+        }
+
+        return _buildLoadedContent(users);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -187,29 +261,18 @@ class _AdminUserFeatureFlagsPageState extends State<AdminUserFeatureFlagsPage> {
         subtitle: 'Manage app permissions',
         icon: Icons.admin_panel_settings_outlined,
       ),
-      body: StreamBuilder<List<AppUserSummary>>(
-        stream: UserFeatureFlagsService.watchUsers(),
-        builder: (context, usersSnapshot) {
-          if (usersSnapshot.hasError) {
-            return _ErrorMessage(error: usersSnapshot.error.toString());
-          }
-
-          if (usersSnapshot.connectionState == ConnectionState.waiting) {
+      body: StreamBuilder<bool>(
+        stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
+        builder: (context, managerSnapshot) {
+          if (managerSnapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final users = usersSnapshot.data ?? const <AppUserSummary>[];
-
-          if (users.isEmpty) {
-            return const Center(
-              child: Text(
-                'No users found.',
-                style: TextStyle(color: Colors.white),
-              ),
-            );
+          if (managerSnapshot.hasError || managerSnapshot.data != true) {
+            return _buildStaffOnlyMessage();
           }
 
-          return _buildLoadedContent(users);
+          return _buildUserListBody();
         },
       ),
     );

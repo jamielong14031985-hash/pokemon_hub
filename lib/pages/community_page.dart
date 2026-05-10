@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,9 @@ import '../models/app_user_profile.dart';
 import '../models/community_models.dart';
 import '../services/community_image_services.dart';
 import '../services/community_safety_service.dart';
+import '../services/friend_service.dart';
+import '../services/community_unread_private_message_service.dart';
+import '../services/pro_status_service.dart';
 import '../utils/community_dialog_helpers.dart';
 import '../utils/community_market_helpers.dart';
 import '../utils/community_private_helpers.dart';
@@ -56,6 +60,7 @@ class _CommunityPageState extends State<CommunityPage> {
   int? _lastSeenAtMs;
   bool _loadedLastSeen = false;
   bool _isAdminOrModerator = false;
+  final Set<String> _featureBusyPostIds = <String>{};
   bool _savedVisitMarker = false;
   late final int _visitStartedAtMs;
 
@@ -800,6 +805,121 @@ class _CommunityPageState extends State<CommunityPage> {
     }
   }
 
+  Future<void> _toggleUserFeaturedPost(CommunityPost post) async {
+    final currentUid = (FirebaseAuth.instance.currentUser?.uid ?? '').trim();
+    if (currentUid.isEmpty) {
+      _showMessage('Please sign in before featuring a post.');
+      return;
+    }
+
+    if (post.authorId != currentUid) {
+      _showMessage('You can only choose one of your own posts as your Pro featured post.');
+      return;
+    }
+
+    if (!ProStatusService.isProActive) {
+      _showMessage('Featured posts are available with PocketChase Pro.');
+      return;
+    }
+
+    if (_featureBusyPostIds.contains(post.id)) return;
+
+    final shouldFeature = !post.isUserFeatured;
+    if (shouldFeature) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF102754),
+          title: const Text(
+            'Make featured post?',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: const Text(
+            'This will make this your one Pro featured post. If you already have another Pro featured post, it will be changed to this one.',
+            style: TextStyle(color: Color(0xFFC8D4F0)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Make featured'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+    }
+
+    setState(() {
+      _featureBusyPostIds.add(post.id);
+    });
+
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'europe-west2')
+          .httpsCallable('setUserFeaturedCommunityPost');
+      await callable.call(<String, dynamic>{
+        'postId': post.id,
+        'featured': shouldFeature,
+      });
+
+      _showMessage(
+        shouldFeature
+            ? 'Your featured post has been updated.'
+            : 'Your featured post has been removed.',
+      );
+    } on FirebaseFunctionsException catch (error) {
+      _showMessage(error.message ?? 'Could not update your featured post.');
+    } catch (_) {
+      _showMessage('Could not update your featured post.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _featureBusyPostIds.remove(post.id);
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleAdminFeaturedPost(CommunityPost post) async {
+    if (!_isAdminOrModerator) return;
+    if (_featureBusyPostIds.contains(post.id)) return;
+
+    final shouldFeature = !post.isAdminFeatured;
+
+    setState(() {
+      _featureBusyPostIds.add(post.id);
+    });
+
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'europe-west2')
+          .httpsCallable('setAdminFeaturedCommunityPost');
+      await callable.call(<String, dynamic>{
+        'postId': post.id,
+        'featured': shouldFeature,
+      });
+
+      _showMessage(
+        shouldFeature
+            ? 'Post has been admin featured.'
+            : 'Admin feature removed from post.',
+      );
+    } on FirebaseFunctionsException catch (error) {
+      _showMessage(error.message ?? 'Could not update admin featured post.');
+    } catch (_) {
+      _showMessage('Could not update admin featured post.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _featureBusyPostIds.remove(post.id);
+        });
+      }
+    }
+  }
+
   Future<void> _reportPost(CommunityPost post) async {
     await showCommunityReportSheet(
       context: context,
@@ -870,7 +990,19 @@ class _CommunityPageState extends State<CommunityPage> {
     }
 
     final visible = filtered.toList()
-      ..sort((a, b) => b.lastActivityAtMs.compareTo(a.lastActivityAtMs));
+      ..sort((a, b) {
+        final featuredCompare =
+            (b.isFeatured ? 1 : 0).compareTo(a.isFeatured ? 1 : 0);
+        if (featuredCompare != 0) return featuredCompare;
+
+        if (a.isFeatured && b.isFeatured) {
+          final featuredTimeCompare =
+              b.featuredSortAtMs.compareTo(a.featuredSortAtMs);
+          if (featuredTimeCompare != 0) return featuredTimeCompare;
+        }
+
+        return b.lastActivityAtMs.compareTo(a.lastActivityAtMs);
+      });
     return visible;
   }
 
@@ -992,6 +1124,7 @@ class _CommunityPageState extends State<CommunityPage> {
 
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF102754),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -999,148 +1132,308 @@ class _CommunityPageState extends State<CommunityPage> {
       builder: (sheetContext) {
         return SafeArea(
           top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 48,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Center(
-                  child: CommunityUserAvatar(
-                    userId: post.authorId,
-                    displayName: post.authorName,
-                    size: 62,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  post.authorName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Choose an action for this community member.',
-                  style: TextStyle(
-                    color: Color(0xFFC8D4F0),
-                    fontSize: 14,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                CommunitySellerTrustPanel(
-                  sellerId: post.authorId,
-                  sellerName: post.authorName,
-                  compact: true,
-                ),
-                const SizedBox(height: 10),
-                FilledButton.icon(
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                    _openPostAuthorRatingSheet(post);
-                  },
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    backgroundColor: const Color(0xFFF7DE77),
-                    foregroundColor: Colors.black,
-                  ),
-                  icon: const Icon(Icons.star_outline_rounded),
-                  label: const Text(
-                    'Rate this seller',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                    _openPrivateMessageForPost(post);
-                  },
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFF3F5C96)),
-                  ),
-                  icon: const Icon(Icons.mail_outline_rounded),
-                  label: const Text(
-                    'Send message',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                FriendActionButton(
-                  currentProfile: widget.profile,
-                  otherUserId: post.authorId,
-                  otherUserName: post.authorName,
-                  onOpenFriendProfile: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => FriendProfilePage(
-                          currentProfile: widget.profile,
-                          friendUid: post.authorId,
-                          friendName: post.authorName,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxHeight = MediaQuery.of(context).size.height * 0.88;
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 48,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
                         ),
                       ),
-                    );
-                  },
+                      const SizedBox(height: 16),
+                      Center(
+                        child: CommunityUserAvatar(
+                          userId: post.authorId,
+                          displayName: post.authorName,
+                          size: 62,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        post.authorName,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Choose an action for this community member.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFFC8D4F0),
+                          fontSize: 14,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      CommunitySellerTrustPanel(
+                        sellerId: post.authorId,
+                        sellerName: post.authorName,
+                        compact: true,
+                      ),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _openPostAuthorRatingSheet(post);
+                        },
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          backgroundColor: const Color(0xFFF7DE77),
+                          foregroundColor: Colors.black,
+                        ),
+                        icon: const Icon(Icons.star_outline_rounded),
+                        label: const Text(
+                          'Rate this seller',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _openPrivateMessageForPost(post);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Color(0xFF3F5C96)),
+                        ),
+                        icon: const Icon(Icons.mail_outline_rounded),
+                        label: const Text(
+                          'Send message',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      FriendActionButton(
+                        currentProfile: widget.profile,
+                        otherUserId: post.authorId,
+                        otherUserName: post.authorName,
+                        onOpenFriendProfile: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => FriendProfilePage(
+                                currentProfile: widget.profile,
+                                friendUid: post.authorId,
+                                friendName: post.authorName,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _reportPost(post);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Color(0xFF3F5C96)),
+                        ),
+                        icon: const Icon(Icons.flag_outlined),
+                        label: const Text(
+                          'Report post',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _blockCommunityMember(
+                            memberId: post.authorId,
+                            memberName: post.authorName,
+                          );
+                        },
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          foregroundColor: const Color(0xFFFFCDD2),
+                          side: const BorderSide(color: Color(0xFFB13B59)),
+                        ),
+                        icon: const Icon(Icons.block_outlined),
+                        label: const Text(
+                          'Block member',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                    _reportPost(post);
-                  },
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFF3F5C96)),
-                  ),
-                  icon: const Icon(Icons.flag_outlined),
-                  label: const Text(
-                    'Report post',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                    _blockCommunityMember(
-                      memberId: post.authorId,
-                      memberName: post.authorName,
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    foregroundColor: const Color(0xFFFFCDD2),
-                    side: const BorderSide(color: Color(0xFFB13B59)),
-                  ),
-                  icon: const Icon(Icons.block_outlined),
-                  label: const Text(
-                    'Block member',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
         );
       },
+    );
+  }
+
+
+  Widget _buildPrivateInboxButton() {
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid).trim();
+
+    Widget buildButton({required bool hasUnreadPrivateMessages}) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: hasUnreadPrivateMessages
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFFF7DE77).withValues(alpha: 0.72),
+                    blurRadius: 18,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : const [],
+        ),
+        child: SizedBox(
+          height: 38,
+          child: OutlinedButton.icon(
+            onPressed: _openPrivateInbox,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: hasUnreadPrivateMessages
+                  ? const Color(0xFFFFF2B3)
+                  : Colors.white,
+              side: BorderSide(
+                color: hasUnreadPrivateMessages
+                    ? const Color(0xFFF7DE77)
+                    : Colors.white.withValues(alpha: 0.14),
+                width: hasUnreadPrivateMessages ? 1.5 : 1,
+              ),
+              backgroundColor: hasUnreadPrivateMessages
+                  ? const Color(0xFFF7DE77).withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.05),
+              padding: const EdgeInsets.symmetric(vertical: 0),
+              textStyle: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            icon: Icon(
+              hasUnreadPrivateMessages
+                  ? Icons.mark_email_unread_rounded
+                  : Icons.mail_outline_rounded,
+              size: 16,
+            ),
+            label: Text(hasUnreadPrivateMessages ? 'Inbox • New' : 'Inbox'),
+          ),
+        ),
+      );
+    }
+
+    return Expanded(
+      child: ValueListenableBuilder<int>(
+        valueListenable:
+            CommunityUnreadPrivateMessageService.privateInboxSeenVersion,
+        builder: (context, _, __) {
+          if (currentUid.isEmpty) {
+            return buildButton(hasUnreadPrivateMessages: false);
+          }
+
+          return StreamBuilder<bool>(
+            stream: CommunityUnreadPrivateMessageService
+                .hasUnreadPrivateMessagesStream(currentUid),
+            builder: (context, snapshot) {
+              return buildButton(
+                hasUnreadPrivateMessages: snapshot.data == true,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+
+  Widget _buildFriendRequestsButton() {
+    final currentUid =
+        (FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid).trim();
+
+    Widget buildButton({required bool hasPendingFriendRequests}) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: hasPendingFriendRequests
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFFF7DE77).withValues(alpha: 0.72),
+                    blurRadius: 18,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : const [],
+        ),
+        child: SizedBox(
+          height: 38,
+          child: OutlinedButton.icon(
+            onPressed: _openFriendRequestsPage,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: hasPendingFriendRequests
+                  ? const Color(0xFFFFF2B3)
+                  : Colors.white,
+              side: BorderSide(
+                color: hasPendingFriendRequests
+                    ? const Color(0xFFF7DE77)
+                    : Colors.white.withValues(alpha: 0.14),
+                width: hasPendingFriendRequests ? 1.5 : 1,
+              ),
+              backgroundColor: hasPendingFriendRequests
+                  ? const Color(0xFFF7DE77).withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.05),
+              padding: const EdgeInsets.symmetric(vertical: 0),
+              textStyle: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            icon: Icon(
+              hasPendingFriendRequests
+                  ? Icons.person_add_alt_1_rounded
+                  : Icons.person_add_alt_1_outlined,
+              size: 16,
+            ),
+            label: Text(hasPendingFriendRequests ? 'Requests • New' : 'Requests'),
+          ),
+        ),
+      );
+    }
+
+    return Expanded(
+      child: currentUid.isEmpty
+          ? buildButton(hasPendingFriendRequests: false)
+          : StreamBuilder(
+              stream: FriendService.incomingRequestsStream(currentUid),
+              builder: (context, snapshot) {
+                final requests = snapshot.data ?? const [];
+                return buildButton(
+                  hasPendingFriendRequests: requests.isNotEmpty,
+                );
+              },
+            ),
     );
   }
 
@@ -1220,52 +1513,9 @@ class _CommunityPageState extends State<CommunityPage> {
             const SizedBox(height: 8),
             Row(
               children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 38,
-                    child: OutlinedButton.icon(
-                      onPressed: _openPrivateInbox,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.14),
-                        ),
-                        backgroundColor: Colors.white.withValues(alpha: 0.05),
-                        padding: const EdgeInsets.symmetric(vertical: 0),
-                        textStyle: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      icon: const Icon(Icons.mail_outline_rounded, size: 16),
-                      label: const Text('Inbox'),
-                    ),
-                  ),
-                ),
+                _buildPrivateInboxButton(),
                 const SizedBox(width: 6),
-                Expanded(
-                  child: SizedBox(
-                    height: 38,
-                    child: OutlinedButton.icon(
-                      onPressed: _openFriendRequestsPage,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.14),
-                        ),
-                        backgroundColor: Colors.white.withValues(alpha: 0.05),
-                        padding: const EdgeInsets.symmetric(vertical: 0),
-                        textStyle: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      icon:
-                          const Icon(Icons.person_add_alt_1_outlined, size: 16),
-                      label: const Text('Requests'),
-                    ),
-                  ),
-                ),
+                _buildFriendRequestsButton(),
                 const SizedBox(width: 6),
                 Expanded(
                   child: SizedBox(
@@ -1688,43 +1938,60 @@ class _CommunityPageState extends State<CommunityPage> {
                 final isNew =
                     _lastSeenAtMs != null && post.createdAtMs > (_lastSeenAtMs ?? 0);
 
-                return CommunityPostCard(
-                  post: post,
-                  currentProfile: widget.profile,
-                  canEdit: post.authorId == currentUid || _isAdminOrModerator,
-                  canMessage:
-                      post.authorId.isNotEmpty && post.authorId != currentUid,
-                  isNew: isNew,
-                  onEdit: () => _openEditPostSheet(post),
-                  onDelete: () => _deletePost(post),
-                  onMessage: () => _openPrivateMessageForPost(post),
-                  onReport: post.authorId == currentUid
-                      ? null
-                      : () => _reportPost(post),
-                  onBlock: post.authorId == currentUid
-                      ? null
-                      : () => _blockCommunityMember(
-                            memberId: post.authorId,
-                            memberName: post.authorName,
-                          ),
-                  onSetMarketStatus: post.authorId == currentUid
-                      ? (status) => _updateMarketStatus(post, status)
-                      : null,
-                  onBump: post.authorId == currentUid && post.isMarketplace
-                      ? () => _bumpPost(post)
-                      : null,
-                  onAuthorTap:
-                      post.authorId.trim().isEmpty || post.authorId == currentUid
+                return ValueListenableBuilder<bool>(
+                  valueListenable: ProStatusService.isProNotifier,
+                  builder: (context, isProActive, _) {
+                    final isOwnPost = post.authorId == currentUid;
+                    final isFeatureBusy = _featureBusyPostIds.contains(post.id);
+
+                    return CommunityPostCard(
+                      post: post,
+                      currentProfile: widget.profile,
+                      canEdit: isOwnPost || _isAdminOrModerator,
+                      canMessage:
+                          post.authorId.isNotEmpty && post.authorId != currentUid,
+                      isNew: isNew,
+                      canUserFeature: isOwnPost && isProActive && !isFeatureBusy,
+                      canAdminFeature: _isAdminOrModerator && !isFeatureBusy,
+                      onToggleUserFeatured:
+                          isOwnPost && isProActive && !isFeatureBusy
+                              ? () => _toggleUserFeaturedPost(post)
+                              : null,
+                      onToggleAdminFeatured: _isAdminOrModerator && !isFeatureBusy
+                          ? () => _toggleAdminFeaturedPost(post)
+                          : null,
+                      onEdit: () => _openEditPostSheet(post),
+                      onDelete: () => _deletePost(post),
+                      onMessage: () => _openPrivateMessageForPost(post),
+                      onReport: post.authorId == currentUid
+                          ? null
+                          : () => _reportPost(post),
+                      onBlock: post.authorId == currentUid
+                          ? null
+                          : () => _blockCommunityMember(
+                                memberId: post.authorId,
+                                memberName: post.authorName,
+                              ),
+                      onSetMarketStatus: isOwnPost
+                          ? (status) => _updateMarketStatus(post, status)
+                          : null,
+                      onBump: isOwnPost && post.isMarketplace
+                          ? () => _bumpPost(post)
+                          : null,
+                      onAuthorTap: post.authorId.trim().isEmpty ||
+                              post.authorId == currentUid
                           ? null
                           : () => _openCommunityMemberSheet(post),
-                  onOpen: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => CommunityPostThreadPage(
-                          post: post,
-                          currentProfile: widget.profile,
-                        ),
-                      ),
+                      onOpen: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CommunityPostThreadPage(
+                              post: post,
+                              currentProfile: widget.profile,
+                            ),
+                          ),
+                        );
+                      },
                     );
                   },
                 );

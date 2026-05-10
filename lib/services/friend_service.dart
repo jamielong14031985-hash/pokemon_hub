@@ -73,7 +73,8 @@ class FriendService {
     }
 
     try {
-      await for (final snapshot in _users.doc(safeUid).collection('friends').snapshots()) {
+      await for (final snapshot
+          in _users.doc(safeUid).collection('friends').snapshots()) {
         final items = snapshot.docs
             .map(_safeFriendSummaryFromDoc)
             .whereType<FriendSummary>()
@@ -94,9 +95,11 @@ class FriendService {
     }
 
     try {
-      final snapshot = await _users.doc(safeUid).collection('friends').get().timeout(
-            _kFirebaseReadTimeout,
-          );
+      final snapshot = await _users
+          .doc(safeUid)
+          .collection('friends')
+          .get()
+          .timeout(_kFirebaseReadTimeout);
 
       final items = snapshot.docs
           .map(_safeFriendSummaryFromDoc)
@@ -118,7 +121,8 @@ class FriendService {
     }
 
     try {
-      await for (final snapshot in _requests.where('toUid', isEqualTo: safeUid).snapshots()) {
+      await for (final snapshot
+          in _requests.where('toUid', isEqualTo: safeUid).snapshots()) {
         final items = snapshot.docs
             .map(_safeFriendRequestFromDoc)
             .whereType<FriendRequest>()
@@ -141,7 +145,8 @@ class FriendService {
     }
 
     try {
-      await for (final snapshot in _requests.where('fromUid', isEqualTo: safeUid).snapshots()) {
+      await for (final snapshot
+          in _requests.where('fromUid', isEqualTo: safeUid).snapshots()) {
         final items = snapshot.docs
             .map(_safeFriendRequestFromDoc)
             .whereType<FriendRequest>()
@@ -317,7 +322,9 @@ class FriendService {
         'updatedAtMs': now,
       }, SetOptions(merge: true)).timeout(_kFirebaseWriteTimeout);
     } catch (_) {
-      throw Exception('Could not send friend request. Please check your connection and try again.');
+      throw Exception(
+        'Could not send friend request. Please check your connection and try again.',
+      );
     }
   }
 
@@ -364,7 +371,9 @@ class FriendService {
     try {
       await batch.commit().timeout(_kFirebaseWriteTimeout);
     } catch (_) {
-      throw Exception('Could not accept friend request. Please check your connection and try again.');
+      throw Exception(
+        'Could not accept friend request. Please check your connection and try again.',
+      );
     }
   }
 
@@ -382,7 +391,36 @@ class FriendService {
         'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
       }, SetOptions(merge: true)).timeout(_kFirebaseWriteTimeout);
     } catch (_) {
-      throw Exception('Could not decline friend request. Please check your connection and try again.');
+      throw Exception(
+        'Could not decline friend request. Please check your connection and try again.',
+      );
+    }
+  }
+
+  static Future<void> removeFriend({
+    required String currentUid,
+    required String friendUid,
+  }) async {
+    final safeCurrentUid = currentUid.trim();
+    final safeFriendUid = friendUid.trim();
+
+    if (safeCurrentUid.isEmpty ||
+        safeFriendUid.isEmpty ||
+        safeCurrentUid == safeFriendUid) {
+      return;
+    }
+
+    final batch = FirebaseFirestore.instance.batch();
+
+    batch.delete(_friendDoc(safeCurrentUid, safeFriendUid));
+    batch.delete(_friendDoc(safeFriendUid, safeCurrentUid));
+
+    try {
+      await batch.commit().timeout(_kFirebaseWriteTimeout);
+    } catch (_) {
+      throw Exception(
+        'Could not remove friend. Please check your connection and try again.',
+      );
     }
   }
 }

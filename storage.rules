@@ -1,0 +1,32 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isShopImage() {
+      return request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /tcg_shop_submissions/{userId}/{submissionId}/{fileName} {
+      allow read: if true;
+
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && isShopImage();
+
+      allow delete: if signedIn()
+        && request.auth.uid == userId;
+    }
+
+    match /{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+  }
+}

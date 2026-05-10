@@ -1,5 +1,6 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 
@@ -364,6 +365,296 @@ async function getTokensForUser(userId) {
     tokenRefsByToken,
   };
 }
+
+function truncateForNotification(value, maxLength) {
+  const text = cleanString(value).replace(/\s+/g, " ");
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.substring(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function cleanNotificationData(data) {
+  const cleanedData = {};
+
+  Object.entries(data || {}).forEach(([key, value]) => {
+    cleanedData[key] = cleanString(value);
+  });
+
+  return cleanedData;
+}
+
+function isInvalidFcmTokenError(errorCode) {
+  return (
+    errorCode === "messaging/registration-token-not-registered" ||
+    errorCode === "messaging/invalid-registration-token"
+  );
+}
+
+function isAlreadyExistsError(error) {
+  return (
+    error &&
+    (error.code === 6 ||
+      error.code === "already-exists" ||
+      error.code === "ALREADY_EXISTS")
+  );
+}
+
+function safeDedupeId(value) {
+  return cleanString(value)
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .substring(0, 1400);
+}
+
+async function shouldSendNotificationOnce(dedupeId, metadata) {
+  const cleanDedupeId = safeDedupeId(dedupeId);
+
+  if (!cleanDedupeId) {
+    return true;
+  }
+
+  const dedupeRef = db.collection("notification_dedup").doc(cleanDedupeId);
+
+  try {
+    await dedupeRef.create({
+      ...cleanNotificationData(metadata),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return true;
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      logger.info("Skipping duplicate notification.", {
+        dedupeId: cleanDedupeId,
+      });
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function getUserDisplayName(userId) {
+  const cleanUserId = cleanString(userId);
+
+  if (!cleanUserId) {
+    return "Someone";
+  }
+
+  try {
+    const userSnapshot = await db.collection("users").doc(cleanUserId).get();
+
+    if (!userSnapshot.exists) {
+      return "Someone";
+    }
+
+    const user = userSnapshot.data() || {};
+
+    return (
+      cleanString(user.username) ||
+      cleanString(user.displayName) ||
+      cleanString(user.name) ||
+      cleanString(user.email) ||
+      "Someone"
+    );
+  } catch (error) {
+    logger.warn("Could not read user display name.", {
+      userId: cleanUserId,
+      error: productCheckMessageFromError(error),
+    });
+    return "Someone";
+  }
+}
+
+async function sendPushToUser({ userId, title, body, data, logContext }) {
+  const cleanUserId = cleanString(userId);
+
+  if (!cleanUserId) {
+    logger.warn("Cannot send notification without a userId.", logContext || {});
+    return {
+      successCount: 0,
+      failureCount: 0,
+      tokenCount: 0,
+    };
+  }
+
+  const { tokens, tokenRefsByToken } = await getTokensForUser(cleanUserId);
+
+  if (tokens.length === 0) {
+    logger.info("No FCM tokens found for notification recipient.", {
+      ...(logContext || {}),
+      userId: cleanUserId,
+    });
+
+    return {
+      successCount: 0,
+      failureCount: 0,
+      tokenCount: 0,
+    };
+  }
+
+  let successCount = 0;
+  let failureCount = 0;
+  const invalidTokenDeletePromises = [];
+
+  for (let index = 0; index < tokens.length; index += 500) {
+    const tokenBatch = tokens.slice(index, index + 500);
+
+    const response = await messaging.sendEachForMulticast({
+      tokens: tokenBatch,
+      notification: {
+        title: truncateForNotification(title, 80),
+        body: truncateForNotification(body, 180),
+      },
+      data: cleanNotificationData({
+        ...(data || {}),
+        recipientUid: cleanUserId,
+      }),
+      android: {
+        priority: "high",
+        notification: {
+          channelId: NOTIFICATION_CHANNEL_ID,
+          sound: "default",
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
+    });
+
+    successCount += response.successCount;
+    failureCount += response.failureCount;
+
+    response.responses.forEach((sendResponse, responseIndex) => {
+      if (sendResponse.success) return;
+
+      const token = tokenBatch[responseIndex];
+      const errorCode = sendResponse.error && sendResponse.error.code;
+
+      logger.warn("Failed to send user notification.", {
+        ...(logContext || {}),
+        userId: cleanUserId,
+        errorCode,
+      });
+
+      if (isInvalidFcmTokenError(errorCode)) {
+        const tokenRef = tokenRefsByToken.get(token);
+
+        if (tokenRef) {
+          invalidTokenDeletePromises.push(tokenRef.delete());
+        }
+      }
+    });
+  }
+
+  await Promise.all(invalidTokenDeletePromises);
+
+  logger.info("User notification sent.", {
+    ...(logContext || {}),
+    userId: cleanUserId,
+    successCount,
+    failureCount,
+    tokenCount: tokens.length,
+  });
+
+  return {
+    successCount,
+    failureCount,
+    tokenCount: tokens.length,
+  };
+}
+
+async function sendNotificationToRecipientsOnce({
+  recipients,
+  dedupePrefix,
+  title,
+  body,
+  data,
+  logContext,
+}) {
+  const uniqueRecipients = Array.from(
+    new Set(
+      (recipients || [])
+        .map((recipient) => cleanString(recipient))
+        .filter(Boolean)
+    )
+  );
+
+  const results = [];
+
+  for (const recipientUid of uniqueRecipients) {
+    const dedupeId = `${dedupePrefix}:${recipientUid}`;
+    const shouldSend = await shouldSendNotificationOnce(dedupeId, {
+      ...(logContext || {}),
+      recipientUid,
+      type: data && data.type,
+    });
+
+    if (!shouldSend) {
+      continue;
+    }
+
+    const result = await sendPushToUser({
+      userId: recipientUid,
+      title,
+      body,
+      data: {
+        ...(data || {}),
+        recipientUid,
+      },
+      logContext: {
+        ...(logContext || {}),
+        recipientUid,
+      },
+    });
+
+    results.push({
+      recipientUid,
+      ...result,
+    });
+  }
+
+  return results;
+}
+
+function totalsFromNotificationResults(results) {
+  return (results || []).reduce(
+    (totals, result) => ({
+      successCount: totals.successCount + (result.successCount || 0),
+      failureCount: totals.failureCount + (result.failureCount || 0),
+      tokenCount: totals.tokenCount + (result.tokenCount || 0),
+      recipientCount: totals.recipientCount + 1,
+    }),
+    {
+      successCount: 0,
+      failureCount: 0,
+      tokenCount: 0,
+      recipientCount: 0,
+    }
+  );
+}
+
+function otherParticipants(participants, senderId) {
+  const cleanSenderId = cleanString(senderId);
+
+  if (!Array.isArray(participants)) {
+    return [];
+  }
+
+  return participants
+    .map((participant) => cleanString(participant))
+    .filter(
+      (participant) =>
+        participant.length > 0 && participant !== cleanSenderId
+    );
+}
+
 
 async function getMatchingUserTokens(product) {
   const enabledUsersSnapshot = await db
@@ -915,5 +1206,590 @@ exports.sendRestockAlertNotifications = onDocumentCreated(
       },
       { merge: true }
     );
+  }
+);
+
+exports.sendFriendRequestNotification = onDocumentCreated(
+  {
+    document: "friend_requests/{requestId}",
+    region: REGION,
+  },
+  async (event) => {
+    const snapshot = event.data;
+
+    if (!snapshot) {
+      logger.warn("No friend request snapshot found.");
+      return;
+    }
+
+    const requestId = event.params.requestId;
+    const friendRequest = snapshot.data() || {};
+    const toUid = cleanString(friendRequest.toUid);
+    const fromUid = cleanString(friendRequest.fromUid);
+    const status = cleanString(friendRequest.status);
+
+    if (!toUid || !fromUid || toUid === fromUid) {
+      logger.warn("Friend request is missing sender or recipient.", {
+        requestId,
+        toUid,
+        fromUid,
+      });
+      return;
+    }
+
+    if (status && status !== "pending") {
+      logger.info("Friend request is not pending. Skipping notification.", {
+        requestId,
+        status,
+      });
+      return;
+    }
+
+    const fromName =
+      cleanString(friendRequest.fromName) || (await getUserDisplayName(fromUid));
+
+    const shouldSend = await shouldSendNotificationOnce(
+      `friend_request:${requestId}:${toUid}`,
+      {
+        type: "friend_request",
+        requestId,
+        fromUid,
+        toUid,
+      }
+    );
+
+    if (!shouldSend) return;
+
+    const result = await sendPushToUser({
+      userId: toUid,
+      title: "New friend request",
+      body: `${fromName} sent you a friend request`,
+      data: {
+        type: "friend_request",
+        requestId,
+        fromUid,
+        fromName,
+        toUid,
+      },
+      logContext: {
+        type: "friend_request",
+        requestId,
+        fromUid,
+        toUid,
+      },
+    });
+
+    await snapshot.ref.set(
+      {
+        notificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        notificationSuccessCount: result.successCount,
+        notificationFailureCount: result.failureCount,
+        notificationTokenCount: result.tokenCount,
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.sendChatMessageNotification = onDocumentCreated(
+  {
+    document: "chats/{chatId}/messages/{messageId}",
+    region: REGION,
+  },
+  async (event) => {
+    const snapshot = event.data;
+
+    if (!snapshot) {
+      logger.warn("No chat message snapshot found.");
+      return;
+    }
+
+    const chatId = event.params.chatId;
+    const messageId = event.params.messageId;
+    const message = snapshot.data() || {};
+    const senderId = cleanString(message.senderId);
+    const text = cleanString(message.text);
+
+    if (!senderId) {
+      logger.warn("Chat message is missing senderId.", {
+        chatId,
+        messageId,
+      });
+      return;
+    }
+
+    const chatSnapshot = await db.collection("chats").doc(chatId).get();
+
+    if (!chatSnapshot.exists) {
+      logger.warn("Chat document does not exist for message notification.", {
+        chatId,
+        messageId,
+      });
+      return;
+    }
+
+    const chat = chatSnapshot.data() || {};
+    const recipients = otherParticipants(chat.participants, senderId);
+
+    if (recipients.length === 0) {
+      logger.info("No recipients found for chat message notification.", {
+        chatId,
+        messageId,
+        senderId,
+      });
+      return;
+    }
+
+    const senderName = await getUserDisplayName(senderId);
+    const body = text
+      ? `${senderName}: ${text}`
+      : `${senderName} sent you a message`;
+
+    const results = await sendNotificationToRecipientsOnce({
+      recipients,
+      dedupePrefix: `chat_message:${chatId}:${messageId}`,
+      title: "New message",
+      body,
+      data: {
+        type: "chat_message",
+        chatId,
+        messageId,
+        senderId,
+        senderName,
+      },
+      logContext: {
+        type: "chat_message",
+        chatId,
+        messageId,
+        senderId,
+      },
+    });
+
+    const totals = totalsFromNotificationResults(results);
+
+    await snapshot.ref.set(
+      {
+        notificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        notificationSuccessCount: totals.successCount,
+        notificationFailureCount: totals.failureCount,
+        notificationTokenCount: totals.tokenCount,
+        notificationRecipientCount: totals.recipientCount,
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.sendCommunityPrivateMessageNotification = onDocumentCreated(
+  {
+    document: "community_private_conversations/{conversationId}/messages/{messageId}",
+    region: REGION,
+  },
+  async (event) => {
+    const snapshot = event.data;
+
+    if (!snapshot) {
+      logger.warn("No private message snapshot found.");
+      return;
+    }
+
+    const conversationId = event.params.conversationId;
+    const messageId = event.params.messageId;
+    const message = snapshot.data() || {};
+    const senderId = cleanString(message.authorId);
+    const senderName =
+      cleanString(message.authorName) || (await getUserDisplayName(senderId));
+    const messageText = cleanString(message.message);
+
+    if (!senderId) {
+      logger.warn("Private message is missing authorId.", {
+        conversationId,
+        messageId,
+      });
+      return;
+    }
+
+    const conversationSnapshot = await db
+      .collection("community_private_conversations")
+      .doc(conversationId)
+      .get();
+
+    if (!conversationSnapshot.exists) {
+      logger.warn("Private conversation document does not exist.", {
+        conversationId,
+        messageId,
+      });
+      return;
+    }
+
+    const conversation = conversationSnapshot.data() || {};
+    const recipients = otherParticipants(conversation.participants, senderId);
+
+    if (recipients.length === 0) {
+      logger.info("No recipients found for private message notification.", {
+        conversationId,
+        messageId,
+        senderId,
+      });
+      return;
+    }
+
+    const body = messageText
+      ? `${senderName}: ${messageText}`
+      : `${senderName} sent you a private message`;
+
+    const results = await sendNotificationToRecipientsOnce({
+      recipients,
+      dedupePrefix: `private_message:${conversationId}:${messageId}`,
+      title: "New private message",
+      body,
+      data: {
+        type: "private_message",
+        conversationId,
+        messageId,
+        senderId,
+        senderName,
+      },
+      logContext: {
+        type: "private_message",
+        conversationId,
+        messageId,
+        senderId,
+      },
+    });
+
+    const totals = totalsFromNotificationResults(results);
+
+    await snapshot.ref.set(
+      {
+        notificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        notificationSuccessCount: totals.successCount,
+        notificationFailureCount: totals.failureCount,
+        notificationTokenCount: totals.tokenCount,
+        notificationRecipientCount: totals.recipientCount,
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.sendMirroredCommunityPrivateMessageNotification = onDocumentCreated(
+  {
+    document:
+      "users/{userId}/community_private_conversations/{conversationId}/messages/{messageId}",
+    region: REGION,
+  },
+  async (event) => {
+    const snapshot = event.data;
+
+    if (!snapshot) {
+      logger.warn("No mirrored private message snapshot found.");
+      return;
+    }
+
+    const recipientUid = cleanString(event.params.userId);
+    const conversationId = event.params.conversationId;
+    const messageId = event.params.messageId;
+    const message = snapshot.data() || {};
+    const senderId = cleanString(message.authorId);
+    const senderName =
+      cleanString(message.authorName) || (await getUserDisplayName(senderId));
+    const messageText = cleanString(message.message);
+
+    if (!recipientUid || !senderId || recipientUid === senderId) {
+      logger.info("Skipping mirrored private message notification.", {
+        recipientUid,
+        senderId,
+        conversationId,
+        messageId,
+      });
+      return;
+    }
+
+    const shouldSend = await shouldSendNotificationOnce(
+      `private_message:${conversationId}:${messageId}:${recipientUid}`,
+      {
+        type: "private_message",
+        conversationId,
+        messageId,
+        senderId,
+        recipientUid,
+      }
+    );
+
+    if (!shouldSend) return;
+
+    const body = messageText
+      ? `${senderName}: ${messageText}`
+      : `${senderName} sent you a private message`;
+
+    const result = await sendPushToUser({
+      userId: recipientUid,
+      title: "New private message",
+      body,
+      data: {
+        type: "private_message",
+        conversationId,
+        messageId,
+        senderId,
+        senderName,
+        recipientUid,
+      },
+      logContext: {
+        type: "private_message_mirror",
+        conversationId,
+        messageId,
+        senderId,
+        recipientUid,
+      },
+    });
+
+    await snapshot.ref.set(
+      {
+        notificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        notificationSuccessCount: result.successCount,
+        notificationFailureCount: result.failureCount,
+        notificationTokenCount: result.tokenCount,
+      },
+      { merge: true }
+    );
+  }
+);
+
+async function getAppRole(userId) {
+  const cleanUserId = cleanString(userId);
+
+  if (!cleanUserId) {
+    return "";
+  }
+
+  const roleSnapshot = await db.collection("app_roles").doc(cleanUserId).get();
+
+  if (!roleSnapshot.exists) {
+    return "";
+  }
+
+  return cleanLower(roleSnapshot.data().role);
+}
+
+async function isAdminOrModeratorUser(userId) {
+  const role = await getAppRole(userId);
+  return role === "admin" || role === "moderator";
+}
+
+async function userHasProAccess(userId) {
+  const cleanUserId = cleanString(userId);
+
+  if (!cleanUserId) {
+    return false;
+  }
+
+  const flagSnapshot = await db
+    .collection("user_feature_flags")
+    .doc(cleanUserId)
+    .get();
+
+  // Some Pro purchases in the app are stored locally after purchase restore.
+  // If there is no server-side flag document, the app-side ProStatusService
+  // controls whether this callable can be reached from the UI.
+  if (!flagSnapshot.exists) {
+    return true;
+  }
+
+  return flagSnapshot.data().proEnabled === true;
+}
+
+function readCallableAuthUid(request) {
+  const uid = cleanString(request.auth && request.auth.uid);
+
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Please sign in first.");
+  }
+
+  return uid;
+}
+
+function readCallablePostId(request) {
+  const postId = cleanString(request.data && request.data.postId);
+
+  if (!postId) {
+    throw new HttpsError("invalid-argument", "Missing post id.");
+  }
+
+  return postId;
+}
+
+exports.setUserFeaturedCommunityPost = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = readCallableAuthUid(request);
+    const postId = readCallablePostId(request);
+    const shouldFeature = request.data && request.data.featured !== false;
+
+    const hasProAccess = await userHasProAccess(uid);
+
+    if (!hasProAccess) {
+      throw new HttpsError(
+        "permission-denied",
+        "PocketChase Pro is required to choose a featured post."
+      );
+    }
+
+    const postRef = db.collection("community_posts").doc(postId);
+    const selectedRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("community_featured_posts")
+      .doc("current");
+
+    await db.runTransaction(async (transaction) => {
+      const postSnapshot = await transaction.get(postRef);
+
+      if (!postSnapshot.exists) {
+        throw new HttpsError("not-found", "Post not found.");
+      }
+
+      const post = postSnapshot.data() || {};
+      const authorId = cleanString(post.authorId);
+
+      if (authorId !== uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "You can only feature one of your own posts."
+        );
+      }
+
+      const selectedSnapshot = await transaction.get(selectedRef);
+      const previousPostId = selectedSnapshot.exists
+        ? cleanString(selectedSnapshot.data().postId)
+        : "";
+      const nowMs = Date.now();
+
+      if (previousPostId && previousPostId !== postId) {
+        const previousPostRef = db.collection("community_posts").doc(previousPostId);
+        transaction.set(
+          previousPostRef,
+          {
+            featuredByUser: false,
+            featuredByUserId: "",
+            featuredByUserAtMs: 0,
+            updatedAtMs: nowMs,
+          },
+          { merge: true }
+        );
+      }
+
+      if (shouldFeature) {
+        transaction.set(
+          postRef,
+          {
+            featuredByUser: true,
+            featuredByUserId: uid,
+            featuredByUserAtMs: nowMs,
+            updatedAtMs: nowMs,
+          },
+          { merge: true }
+        );
+        transaction.set(
+          selectedRef,
+          {
+            postId,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAtMs: nowMs,
+          },
+          { merge: true }
+        );
+      } else {
+        transaction.set(
+          postRef,
+          {
+            featuredByUser: false,
+            featuredByUserId: "",
+            featuredByUserAtMs: 0,
+            updatedAtMs: nowMs,
+          },
+          { merge: true }
+        );
+
+        if (previousPostId === postId) {
+          transaction.delete(selectedRef);
+        }
+      }
+    });
+
+    logger.info("User featured community post updated.", {
+      uid,
+      postId,
+      featured: shouldFeature,
+    });
+
+    return {
+      ok: true,
+      postId,
+      featured: shouldFeature,
+    };
+  }
+);
+
+exports.setAdminFeaturedCommunityPost = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = readCallableAuthUid(request);
+    const postId = readCallablePostId(request);
+    const shouldFeature = request.data && request.data.featured !== false;
+
+    const canAdminFeature = await isAdminOrModeratorUser(uid);
+
+    if (!canAdminFeature) {
+      throw new HttpsError(
+        "permission-denied",
+        "Only admins or moderators can admin-feature posts."
+      );
+    }
+
+    const postRef = db.collection("community_posts").doc(postId);
+    const nowMs = Date.now();
+
+    await db.runTransaction(async (transaction) => {
+      const postSnapshot = await transaction.get(postRef);
+
+      if (!postSnapshot.exists) {
+        throw new HttpsError("not-found", "Post not found.");
+      }
+
+      transaction.set(
+        postRef,
+        shouldFeature
+          ? {
+              featuredByAdmin: true,
+              featuredByAdminUid: uid,
+              featuredByAdminAtMs: nowMs,
+              updatedAtMs: nowMs,
+            }
+          : {
+              featuredByAdmin: false,
+              featuredByAdminUid: "",
+              featuredByAdminAtMs: 0,
+              updatedAtMs: nowMs,
+            },
+        { merge: true }
+      );
+    });
+
+    logger.info("Admin featured community post updated.", {
+      uid,
+      postId,
+      featured: shouldFeature,
+    });
+
+    return {
+      ok: true,
+      postId,
+      featured: shouldFeature,
+    };
   }
 );
