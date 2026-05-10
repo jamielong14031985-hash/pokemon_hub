@@ -28,6 +28,19 @@ class TcgShopService {
   CollectionReference<Map<String, dynamic>> get _submissions =>
       _firestore.collection('tcg_shop_submissions');
 
+  Stream<bool> watchCurrentUserIsAdminOrModerator() {
+    final user = _auth.currentUser;
+    if (user == null) return Stream<bool>.value(false);
+
+    return _firestore.collection('app_roles').doc(user.uid).snapshots().map(
+      (snapshot) {
+        final role =
+            (snapshot.data()?['role'] ?? '').toString().trim().toLowerCase();
+        return role == 'admin' || role == 'moderator';
+      },
+    );
+  }
+
   Stream<List<TcgShop>> watchApprovedShops() {
     return _shops.snapshots().map(
       (snapshot) {
@@ -143,6 +156,91 @@ class TcgShopService {
       'submittedBy': user.uid,
       'submittedByEmail': user.email ?? '',
       'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> updateShop({
+    required String shopId,
+    required String name,
+    required String address,
+    required String town,
+    required String county,
+    required String country,
+    required String postcode,
+    required double lat,
+    required double lng,
+    required List<String> games,
+    required List<String> services,
+    String website = '',
+    String phone = '',
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to edit a TCG shop.');
+    }
+
+    final cleanShopId = shopId.trim();
+    final cleanName = name.trim();
+    final cleanTown = town.trim();
+    final cleanCounty = county.trim();
+    final cleanPostcode = postcode.trim();
+    final cleanCountry = country.trim().isEmpty ? 'United Kingdom' : country.trim();
+
+    if (cleanShopId.isEmpty) {
+      throw ArgumentError('Missing shop id.');
+    }
+
+    if (cleanName.isEmpty) {
+      throw ArgumentError('Shop name is required.');
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      throw ArgumentError('Please choose a valid location on the map.');
+    }
+
+    final shopRef = _shops.doc(cleanShopId);
+    final snapshot = await shopRef.get();
+    if (!snapshot.exists) {
+      throw StateError('This shop no longer exists.');
+    }
+
+    final current = snapshot.data() ?? <String, dynamic>{};
+    final currentCreatedAt = current['createdAt'];
+    final currentApprovedAt = current['approvedAt'];
+
+    await shopRef.set({
+      'name': cleanName,
+      'nameLower': cleanName.toLowerCase(),
+      'address': address.trim(),
+      'town': cleanTown,
+      'townLower': cleanTown.toLowerCase(),
+      'county': cleanCounty,
+      'countyLower': cleanCounty.toLowerCase(),
+      'country': cleanCountry,
+      'postcode': cleanPostcode,
+      'postcodeLower': cleanPostcode.toLowerCase(),
+      'lat': lat,
+      'lng': lng,
+      'location': GeoPoint(lat, lng),
+      'games': _cleanList(games),
+      'services': _cleanList(services),
+      'website': website.trim(),
+      'phone': phone.trim(),
+      'imageUrl': (current['imageUrl'] ?? '').toString(),
+      'imagePath': (current['imagePath'] ?? '').toString(),
+      'status': (current['status'] ?? 'approved').toString().trim().isEmpty
+          ? 'approved'
+          : current['status'].toString().trim().toLowerCase(),
+      'submittedBy': (current['submittedBy'] ?? user.uid).toString(),
+      'submittedByEmail': (current['submittedByEmail'] ?? user.email ?? '').toString(),
+      'approvedBy': (current['approvedBy'] ?? user.uid).toString(),
+      'approvedAt': currentApprovedAt is Timestamp
+          ? currentApprovedAt
+          : FieldValue.serverTimestamp(),
+      'createdAt': currentCreatedAt is Timestamp
+          ? currentCreatedAt
+          : FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

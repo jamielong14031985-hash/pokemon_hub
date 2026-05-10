@@ -22,6 +22,27 @@ const int _kFastCardSearchPageSize = 100;
 const int _kFastCardSearchMaxPages = 2;
 const int _kFastSetSearchMaxPages = 2;
 
+class _ParsedCardSearchQuery {
+  const _ParsedCardSearchQuery({
+    required this.originalQuery,
+    required this.cardQuery,
+    required this.cardTerms,
+    required this.matchedSets,
+  });
+
+  final String originalQuery;
+  final String cardQuery;
+  final List<String> cardTerms;
+  final List<TcgSet> matchedSets;
+
+  bool get hasSetHints => matchedSets.isNotEmpty;
+
+  Set<String> get matchedSetIds => matchedSets
+      .map((set) => set.id.trim().toLowerCase())
+      .where((id) => id.isNotEmpty)
+      .toSet();
+}
+
 class PokemonTcgService {
   static const String _baseUrl = 'https://api.pokemontcg.io/v2';
   static final Map<String, List<TcgCard>> _cardSearchCache = <String, List<TcgCard>>{};
@@ -41,6 +62,111 @@ class PokemonTcgService {
 
   static List<TcgSet>? _allSetsCache;
   static Future<List<TcgSet>>? _allSetsInFlight;
+
+
+  static const Duration _apiDiskCacheFreshFor = Duration(days: 14);
+  static const Duration _apiDiskCacheStaleFor = Duration(days: 90);
+  static Directory? _apiDiskCacheDirectory;
+
+  static Future<Directory> _getApiDiskCacheDirectory() async {
+    final cachedDirectory = _apiDiskCacheDirectory;
+    if (cachedDirectory != null) return cachedDirectory;
+
+    final baseDirectory = await getApplicationSupportDirectory();
+    final directory = Directory('${baseDirectory.path}/pokemon_tcg_api_cache');
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+    _apiDiskCacheDirectory = directory;
+    return directory;
+  }
+
+  static String _apiCacheFileName(Uri uri) {
+    final value = uri.toString();
+    var hash = 0x811c9dc5;
+    for (final codeUnit in value.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+    return '${hash.toRadixString(16).padLeft(8, '0')}.json';
+  }
+
+  static Future<Map<String, dynamic>?> _readApiJsonFromDisk(
+    Uri uri, {
+    required Duration maxAge,
+  }) async {
+    try {
+      final directory = await _getApiDiskCacheDirectory();
+      final file = File('${directory.path}/${_apiCacheFileName(uri)}');
+      if (!await file.exists()) return null;
+
+      final decoded = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final cachedAtMs = (decoded['cachedAtMs'] as num?)?.toInt() ?? 0;
+      if (cachedAtMs <= 0) return null;
+
+      final age = DateTime.now().millisecondsSinceEpoch - cachedAtMs;
+      if (age > maxAge.inMilliseconds) return null;
+
+      final data = decoded['data'];
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+    } catch (_) {
+      // Ignore broken cache files and use the network instead.
+    }
+
+    return null;
+  }
+
+  static Future<void> _writeApiJsonToDisk(
+    Uri uri,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      final directory = await _getApiDiskCacheDirectory();
+      final file = File('${directory.path}/${_apiCacheFileName(uri)}');
+      await file.writeAsString(
+        jsonEncode(<String, dynamic>{
+          'cachedAtMs': DateTime.now().millisecondsSinceEpoch,
+          'url': uri.toString(),
+          'data': data,
+        }),
+        flush: false,
+      );
+    } catch (_) {
+      // Disk cache is only a speed boost. Never block the app if it fails.
+    }
+  }
+
+  static Future<Map<String, dynamic>> _getJsonMapWithDiskCache(
+    Uri uri, {
+    Duration freshFor = _apiDiskCacheFreshFor,
+  }) async {
+    final freshCachedData = await _readApiJsonFromDisk(uri, maxAge: freshFor);
+    if (freshCachedData != null) {
+      return freshCachedData;
+    }
+
+    try {
+      final response = await http.get(uri).timeout(const Duration(seconds: 14));
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      await _writeApiJsonToDisk(uri, data);
+      return data;
+    } catch (_) {
+      final staleCachedData = await _readApiJsonFromDisk(
+        uri,
+        maxAge: _apiDiskCacheStaleFor,
+      );
+      if (staleCachedData != null) {
+        return staleCachedData;
+      }
+      rethrow;
+    }
+  }
 
   static Future<CardSearchResult> searchCardsAndSets(String query) async {
     final results = await Future.wait<dynamic>([
@@ -65,13 +191,7 @@ class PokemonTcgService {
       final cardsUri = Uri.parse(
         '$_baseUrl/cards?q=$cardSearch&pageSize=$pageSize&page=$page&orderBy=name,set.releaseDate,number',
       );
-      final cardsResponse = await http.get(cardsUri);
-
-      if (cardsResponse.statusCode != 200) {
-        throw Exception('HTTP ${cardsResponse.statusCode}');
-      }
-
-      final cardsData = jsonDecode(cardsResponse.body) as Map<String, dynamic>;
+      final cardsData = await _getJsonMapWithDiskCache(cardsUri);
       final cardsItems = (cardsData['data'] as List<dynamic>? ?? []);
 
       if (cardsItems.isEmpty) {
@@ -134,12 +254,7 @@ class PokemonTcgService {
       final uri = Uri.parse(
         '$_baseUrl/cards?q=$numberSearch&pageSize=250&page=$page&orderBy=-set.releaseDate,number',
       );
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? const []);
       if (items.isEmpty) break;
 
@@ -246,13 +361,42 @@ class PokemonTcgService {
       return _searchExactCollectorNumber(exactCollectorNumber);
     }
 
-    final terms = cleanQuery
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .toList();
+    final parsedSearch = await _parseCardSearchQuery(cleanQuery);
+
+    if (parsedSearch.hasSetHints) {
+      final setFilteredCards = await _searchCardsOnlyFromParsedSetSearch(parsedSearch);
+      if (setFilteredCards.isNotEmpty) {
+        return setFilteredCards;
+      }
+    }
+
+    final terms = parsedSearch.cardTerms.isNotEmpty
+        ? parsedSearch.cardTerms
+        : cleanQuery
+            .split(RegExp(r'\s+'))
+            .where((part) => part.isNotEmpty)
+            .toList();
     if (terms.isEmpty) return const <TcgCard>[];
 
-    final escapedTerms = terms.map(_escapeTcgQueryValue).toList();
+    final cards = await _fetchCardSearchMatchesForNameTerms(terms);
+    cards.sort(
+      (a, b) => parsedSearch.hasSetHints
+          ? _compareCardSearchResultsForParsedQuery(a, b, parsedSearch)
+          : _compareCardSearchResults(a, b, cleanQuery),
+    );
+    return cards;
+  }
+
+  static Future<List<TcgCard>> _fetchCardSearchMatchesForNameTerms(
+    List<String> terms,
+  ) async {
+    final usefulTerms = terms
+        .map((term) => term.trim())
+        .where((term) => term.isNotEmpty)
+        .toList();
+    if (usefulTerms.isEmpty) return const <TcgCard>[];
+
+    final escapedTerms = usefulTerms.map(_escapeTcgQueryValue).toList();
     final cardSearch = escapedTerms.map((term) => 'name:*$term*').join(' AND ');
     final cardsById = <String, TcgCard>{};
     var page = 1;
@@ -261,12 +405,7 @@ class PokemonTcgService {
       final uri = Uri.parse(
         '$_baseUrl/cards?q=$cardSearch&pageSize=$_kFastCardSearchPageSize&page=$page&orderBy=name,number,set.releaseDate',
       );
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? const []);
       if (items.isEmpty) break;
 
@@ -281,9 +420,351 @@ class PokemonTcgService {
       page++;
     }
 
+    return cardsById.values.toList();
+  }
+
+  static Future<List<TcgCard>> _searchCardsOnlyFromParsedSetSearch(
+    _ParsedCardSearchQuery parsedSearch,
+  ) async {
+    final cardsById = <String, TcgCard>{};
+
+    final collectorNumber = _tryParseCollectorNumberQuery(parsedSearch.cardQuery);
+
+    for (final set in parsedSearch.matchedSets.take(4)) {
+      final setId = set.id.trim();
+      if (setId.isEmpty) continue;
+
+      try {
+        final cardsInSet = await fetchCardsBySet(setId);
+        for (final card in cardsInSet) {
+          if (!_doesCardMatchParsedCardSearch(
+            card: card,
+            parsedSearch: parsedSearch,
+            collectorNumber: collectorNumber,
+          )) {
+            continue;
+          }
+
+          cardsById.putIfAbsent(card.id, () => card);
+        }
+      } catch (_) {
+        // Keep searching from the public cards endpoint if a full-set load fails.
+      }
+    }
+
+    if (parsedSearch.cardTerms.isNotEmpty) {
+      try {
+        final apiCards = await _fetchCardSearchMatchesForNameTerms(parsedSearch.cardTerms);
+        for (final card in apiCards) {
+          if (_cardBelongsToAnyParsedSet(card, parsedSearch)) {
+            cardsById.putIfAbsent(card.id, () => card);
+          }
+        }
+      } catch (_) {
+        // Set results above are normally enough for a set-code search.
+      }
+    }
+
     final cards = cardsById.values.toList()
-      ..sort((a, b) => _compareCardSearchResults(a, b, cleanQuery));
-    return cards;
+      ..sort((a, b) => _compareCardSearchResultsForParsedQuery(a, b, parsedSearch));
+
+    return cards.take(160).toList();
+  }
+
+  static bool _doesCardMatchParsedCardSearch({
+    required TcgCard card,
+    required _ParsedCardSearchQuery parsedSearch,
+    required CollectorNumberQuery? collectorNumber,
+  }) {
+    if (!_cardBelongsToAnyParsedSet(card, parsedSearch)) {
+      return false;
+    }
+
+    if (collectorNumber != null) {
+      return _normalizeCollectorCardNumber(card.number) ==
+          _normalizeCollectorCardNumber(collectorNumber.cardNumber);
+    }
+
+    if (parsedSearch.cardTerms.isEmpty) {
+      return true;
+    }
+
+    final normalizedName = _normalizeSearchMatchText(card.name);
+    final normalizedCardQuery = _normalizeSearchMatchText(parsedSearch.cardQuery);
+    if (normalizedName.isEmpty || normalizedCardQuery.isEmpty) return false;
+
+    if (normalizedName == normalizedCardQuery) return true;
+    if (normalizedName.contains(normalizedCardQuery)) return true;
+
+    final nameWords = normalizedName.split(' ').where((word) => word.isNotEmpty).toList();
+
+    return parsedSearch.cardTerms.every((term) {
+      final normalizedTerm = _normalizeSearchMatchText(term);
+      if (normalizedTerm.isEmpty) return true;
+
+      return nameWords.any((word) => word == normalizedTerm || word.startsWith(normalizedTerm)) ||
+          normalizedName.contains(normalizedTerm);
+    });
+  }
+
+  static bool _cardBelongsToAnyParsedSet(
+    TcgCard card,
+    _ParsedCardSearchQuery parsedSearch,
+  ) {
+    if (!parsedSearch.hasSetHints) return true;
+
+    final cardSetId = card.setId.trim().toLowerCase();
+    if (cardSetId.isNotEmpty && parsedSearch.matchedSetIds.contains(cardSetId)) {
+      return true;
+    }
+
+    final cardSetName = _normalizeSearchMatchText(card.setName);
+    if (cardSetName.isEmpty) return false;
+
+    return parsedSearch.matchedSets.any(
+      (set) => cardSetName == _normalizeSearchMatchText(set.name),
+    );
+  }
+
+  static Future<_ParsedCardSearchQuery> _parseCardSearchQuery(String cleanQuery) async {
+    final rawParts = cleanQuery
+        .split(RegExp(r'\s+'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+
+    _ParsedCardSearchQuery fallback() => _ParsedCardSearchQuery(
+          originalQuery: cleanQuery,
+          cardQuery: cleanQuery,
+          cardTerms: rawParts,
+          matchedSets: const <TcgSet>[],
+        );
+
+    if (rawParts.length < 2) {
+      return fallback();
+    }
+
+    List<TcgSet> allSets;
+    try {
+      allSets = await fetchSets();
+    } catch (_) {
+      return fallback();
+    }
+
+    final usedIndexes = <int>{};
+    final matchedSetsById = <String, TcgSet>{};
+
+    void addMatches(List<TcgSet> sets) {
+      for (final set in sets) {
+        final id = set.id.trim();
+        if (id.isEmpty) continue;
+        matchedSetsById.putIfAbsent(id, () => set);
+      }
+    }
+
+    final maxPhraseLength = math.min(5, rawParts.length);
+    for (var phraseLength = maxPhraseLength; phraseLength >= 2; phraseLength--) {
+      for (var start = 0; start + phraseLength <= rawParts.length; start++) {
+        final indexes = [for (var i = start; i < start + phraseLength; i++) i];
+        if (indexes.any(usedIndexes.contains)) continue;
+
+        final phrase = rawParts.sublist(start, start + phraseLength).join(' ');
+        final matches = _findSetMatchesForSearchAlias(
+          phrase,
+          allSets,
+          allowLooseNameMatch: true,
+        );
+
+        if (matches.isEmpty) continue;
+
+        usedIndexes.addAll(indexes);
+        addMatches(matches);
+      }
+    }
+
+    for (var index = 0; index < rawParts.length; index++) {
+      if (usedIndexes.contains(index)) continue;
+
+      final matches = _findSetMatchesForSearchAlias(
+        rawParts[index],
+        allSets,
+        allowLooseNameMatch: false,
+      );
+
+      if (matches.isEmpty) continue;
+
+      usedIndexes.add(index);
+      addMatches(matches);
+    }
+
+    final cardTerms = <String>[
+      for (var index = 0; index < rawParts.length; index++)
+        if (!usedIndexes.contains(index)) rawParts[index],
+    ];
+
+    if (matchedSetsById.isEmpty) {
+      return fallback();
+    }
+
+    return _ParsedCardSearchQuery(
+      originalQuery: cleanQuery,
+      cardQuery: cardTerms.join(' ').trim(),
+      cardTerms: cardTerms,
+      matchedSets: matchedSetsById.values.toList(),
+    );
+  }
+
+  static const Map<String, List<String>> _cardSearchSetAliasNames = <String, List<String>>{
+    'jtg': <String>['journey together'],
+    'journeytogether': <String>['journey together'],
+    'prz': <String>['prismatic evolutions'],
+    'pre': <String>['prismatic evolutions'],
+    'ssp': <String>['surging sparks'],
+    'scr': <String>['stellar crown'],
+    'sfa': <String>['shrouded fable'],
+    'twm': <String>['twilight masquerade'],
+    'tei': <String>['temporal forces'],
+    'par': <String>['paradox rift'],
+    'obf': <String>['obsidian flames'],
+    'pal': <String>['paldea evolved'],
+    'svi': <String>['scarlet violet'],
+    'sv1': <String>['scarlet violet'],
+    'svp': <String>['scarlet violet black star promos', 'scarlet violet promo'],
+    'svpblackstar': <String>['scarlet violet black star promos'],
+    'mev': <String>['151'],
+    '151': <String>['151'],
+    'dri': <String>['destined rivals'],
+    'destinedrivals': <String>['destined rivals'],
+    'meg': <String>['mega evolution'],
+    'mega': <String>['mega evolution'],
+  };
+
+  static List<TcgSet> _findSetMatchesForSearchAlias(
+    String alias,
+    List<TcgSet> allSets, {
+    required bool allowLooseNameMatch,
+  }) {
+    final normalizedAlias = _normalizeSearchMatchText(alias);
+    final compactAlias = _compactSearchMatchText(alias);
+    if (normalizedAlias.isEmpty || compactAlias.isEmpty) return const <TcgSet>[];
+
+    final explicitNames = _cardSearchSetAliasNames[compactAlias] ??
+        _cardSearchSetAliasNames[normalizedAlias.replaceAll(' ', '')] ??
+        const <String>[];
+    final normalizedExplicitNames = explicitNames
+        .map(_normalizeSearchMatchText)
+        .where((name) => name.isNotEmpty)
+        .toList();
+
+    final scored = <MapEntry<TcgSet, int>>[];
+
+    for (final set in allSets) {
+      final normalizedSetId = _normalizeSearchMatchText(set.id);
+      final compactSetId = _compactSearchMatchText(set.id);
+      final normalizedSetName = _normalizeSearchMatchText(set.name);
+      final compactSetName = _compactSearchMatchText(set.name);
+      final initials = _setNameInitials(set.name);
+
+      var score = 0;
+
+      if (compactSetId == compactAlias) score = math.max(score, 920);
+      if (compactSetName == compactAlias) score = math.max(score, 900);
+
+      for (final explicitName in normalizedExplicitNames) {
+        if (normalizedSetName == explicitName) {
+          score = math.max(score, 1000);
+        } else if (normalizedSetName.contains(explicitName)) {
+          score = math.max(score, 940);
+        }
+      }
+
+      if (compactAlias.length >= 2 && compactAlias.length <= 6 && initials == compactAlias) {
+        score = math.max(score, 760);
+      }
+
+      if (allowLooseNameMatch) {
+        if (normalizedSetName == normalizedAlias) {
+          score = math.max(score, 880);
+        } else if (normalizedAlias.length >= 4 && normalizedSetName.startsWith(normalizedAlias)) {
+          score = math.max(score, 700);
+        } else if (normalizedAlias.length >= 4 && normalizedSetName.contains(normalizedAlias)) {
+          score = math.max(score, 640);
+        }
+      }
+
+      if (score > 0) {
+        scored.add(MapEntry(set, score));
+      }
+    }
+
+    scored.sort((a, b) {
+      final scoreCompare = b.value.compareTo(a.value);
+      if (scoreCompare != 0) return scoreCompare;
+
+      final dateA = _tryParseReleaseDate(a.key.releaseDate);
+      final dateB = _tryParseReleaseDate(b.key.releaseDate);
+      if (dateA != null && dateB != null) return dateB.compareTo(dateA);
+      if (dateA != null) return -1;
+      if (dateB != null) return 1;
+
+      return a.key.name.compareTo(b.key.name);
+    });
+
+    return scored.take(5).map((entry) => entry.key).toList();
+  }
+
+  static String _compactSearchMatchText(String value) {
+    return _normalizeSearchMatchText(value).replaceAll(' ', '');
+  }
+
+  static String _setNameInitials(String value) {
+    final ignoredWords = <String>{'and', 'the', 'of', 'a', 'an'};
+    return _normalizeSearchMatchText(value)
+        .split(' ')
+        .where((word) => word.isNotEmpty && !ignoredWords.contains(word))
+        .map((word) => word[0])
+        .join();
+  }
+
+  static int _compareCardSearchResultsForParsedQuery(
+    TcgCard a,
+    TcgCard b,
+    _ParsedCardSearchQuery parsedSearch,
+  ) {
+    final scoreA = _scoreCardSearchResultForParsedQuery(a, parsedSearch);
+    final scoreB = _scoreCardSearchResultForParsedQuery(b, parsedSearch);
+    if (scoreA != scoreB) {
+      return scoreB.compareTo(scoreA);
+    }
+
+    final nameCompare = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    if (nameCompare != 0) return nameCompare;
+
+    final setCompare = a.setName.toLowerCase().compareTo(b.setName.toLowerCase());
+    if (setCompare != 0) return setCompare;
+
+    return compareCardNumbers(a.number, b.number);
+  }
+
+  static int _scoreCardSearchResultForParsedQuery(
+    TcgCard card,
+    _ParsedCardSearchQuery parsedSearch,
+  ) {
+    var score = parsedSearch.cardQuery.isEmpty
+        ? 80
+        : _scoreCardSearchResult(card, parsedSearch.cardQuery);
+
+    if (_cardBelongsToAnyParsedSet(card, parsedSearch)) {
+      score += 1200;
+    }
+
+    final normalizedCardQuery = _normalizeSearchMatchText(parsedSearch.cardQuery);
+    final normalizedName = _normalizeSearchMatchText(card.name);
+    if (normalizedCardQuery.isNotEmpty && normalizedName == normalizedCardQuery) {
+      score += 400;
+    }
+
+    return score;
   }
 
   static Future<List<TcgSet>> searchSetsOnly(String query) async {
@@ -1319,12 +1800,7 @@ class PokemonTcgService {
       'orderBy': '-releaseDate',
     });
 
-    final response = await http.get(uri);
-    if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode}');
-    }
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = await _getJsonMapWithDiskCache(uri);
     final items = (data['data'] as List<dynamic>? ?? const []);
     return items.map((item) => TcgSet.fromJson(item as Map<String, dynamic>)).toList();
   }
@@ -1384,12 +1860,7 @@ class PokemonTcgService {
         'pageSize': '40',
       });
 
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? const []);
       for (final item in items) {
         final card = TcgCard.fromJson(item as Map<String, dynamic>);
@@ -1423,12 +1894,7 @@ class PokemonTcgService {
       'orderBy': 'set.releaseDate,name',
     });
 
-    final response = await http.get(uri);
-    if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode}');
-    }
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = await _getJsonMapWithDiskCache(uri);
     final items = (data['data'] as List<dynamic>? ?? const []);
     return items.map((item) => TcgCard.fromJson(item as Map<String, dynamic>)).toList();
   }
@@ -1456,12 +1922,7 @@ class PokemonTcgService {
         'pageSize': '120',
       });
 
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? const []);
       for (final item in items) {
         final card = TcgCard.fromJson(item as Map<String, dynamic>);
@@ -1500,12 +1961,7 @@ class PokemonTcgService {
       'orderBy': 'set.releaseDate,name',
     });
 
-    final response = await http.get(uri);
-    if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode}');
-    }
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = await _getJsonMapWithDiskCache(uri);
     final items = (data['data'] as List<dynamic>? ?? const []);
     return items.map((item) => TcgCard.fromJson(item as Map<String, dynamic>)).toList();
   }
@@ -2004,6 +2460,20 @@ class PokemonTcgService {
     }
   }
 
+  static bool hasCachedCardsForSet(String setId) {
+    return _setCardsCache.containsKey(setId);
+  }
+
+  static Future<void> warmCardsBySetCache(String setId) async {
+    if (setId.trim().isEmpty || hasCachedCardsForSet(setId)) return;
+
+    try {
+      await fetchCardsBySet(setId);
+    } catch (_) {
+      // Ignore warm-up errors. The normal set page error UI will handle failures.
+    }
+  }
+
   static Future<List<TcgSet>> _fetchAllSetsFromApi() async {
     final allSets = <TcgSet>[];
     int page = 1;
@@ -2012,13 +2482,7 @@ class PokemonTcgService {
       final uri = Uri.parse(
         '$_baseUrl/sets?pageSize=250&page=$page&orderBy=-releaseDate',
       );
-      final response = await http.get(uri);
-
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? []);
 
       if (items.isEmpty) {
@@ -2064,7 +2528,13 @@ class PokemonTcgService {
 
   static Future<List<TcgCard>> _fetchAndCacheCardsBySet(String setId) async {
     final cardsByKey = <String, TcgCard>{};
-    final set = await _fetchSetById(setId);
+
+    final setRequest = _fetchSetById(setId);
+    final primaryCardsRequest = _fetchCardsForSetQuery(
+      'set.id:$setId',
+      orderBy: 'number',
+      maxPages: 4,
+    );
 
     void addCards(Iterable<TcgCard> cards) {
       for (final card in cards) {
@@ -2078,14 +2548,10 @@ class PokemonTcgService {
     }
 
     // Fast first pass: official set id. This is normally enough for the full set,
-    // including illustration rares, ultra rares, and secret rares.
-    addCards(
-      await _fetchCardsForSetQuery(
-        'set.id:$setId',
-        orderBy: 'number',
-        maxPages: 4,
-      ),
-    );
+    // including illustration rares, ultra rares, and secret rares. Run it in
+    // parallel with the set metadata request so the page opens sooner.
+    final set = await setRequest;
+    addCards(await primaryCardsRequest);
 
     final expectedTotal = set?.total ?? 0;
     final setNameFromApi = set?.name.trim() ?? '';
@@ -2183,13 +2649,13 @@ class PokemonTcgService {
 
     final request = () async {
       final uri = Uri.https('api.pokemontcg.io', '/v2/sets/$normalizedSetId');
-      final response = await http.get(uri);
-
-      if (response.statusCode != 200) {
+      Map<String, dynamic> data;
+      try {
+        data = await _getJsonMapWithDiskCache(uri);
+      } catch (_) {
         return null;
       }
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       final set = TcgSet.fromJson(data['data'] as Map<String, dynamic>);
       _setByIdCache[normalizedSetId] = set;
       return set;
@@ -2431,12 +2897,7 @@ class PokemonTcgService {
         'orderBy': orderBy,
       });
 
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? const []);
       if (items.isEmpty) break;
 
@@ -2631,13 +3092,7 @@ class PokemonTcgService {
 
     final future = () async {
       final uri = Uri.parse('$_baseUrl/cards/$normalizedId');
-      final response = await http.get(uri);
-
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = await _getJsonMapWithDiskCache(uri);
       final card = TcgCard.fromJson(data['data'] as Map<String, dynamic>);
       _cardByIdCache[normalizedId] = card;
       return card;

@@ -29,10 +29,17 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
   final Map<String, CardOwnership> _ownershipByCardId = <String, CardOwnership>{};
   bool _loadedOwned = false;
   List<TcgCard> _allCards = <TcgCard>[];
+  final Set<String> _precachedImageUrls = <String>{};
   int _currentPage = 1;
   bool _showMissingOnly = false;
   static const int _cardsPerPage = 9;
 
+  static const ColorFilter _missingCardGreyFilter = ColorFilter.matrix(<double>[
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0, 0, 0, 1, 0,
+  ]);
 
   @override
   void initState() {
@@ -56,10 +63,15 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
   }
 
   Future<void> _loadOwnership() async {
-    final loaded = await PokedexSyncService.loadCurrentUserSetOwnership(widget.set.id);
-    _ownershipByCardId
-      ..clear()
-      ..addAll(loaded);
+    try {
+      final loaded = await PokedexSyncService.loadCurrentUserSetOwnership(widget.set.id);
+      _ownershipByCardId
+        ..clear()
+        ..addAll(loaded);
+    } catch (_) {
+      // Cards should still open quickly even if ownership sync is slow or fails.
+    }
+
     if (mounted) {
       setState(() {
         _loadedOwned = true;
@@ -87,6 +99,23 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     await _saveOwnership();
   }
 
+  Widget _buildOwnedColourState({
+    required bool isOwned,
+    required Widget child,
+  }) {
+    if (isOwned) {
+      return child;
+    }
+
+    return Opacity(
+      opacity: 0.42,
+      child: ColorFiltered(
+        colorFilter: _missingCardGreyFilter,
+        child: child,
+      ),
+    );
+  }
+
   void _goToPokedexPage(int page, int totalPages) {
     final nextPage = page.clamp(1, totalPages).toInt();
     if (_currentPage != nextPage) {
@@ -112,6 +141,46 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_pokedexPageController.hasClients) return;
       _pokedexPageController.jumpToPage(0);
+    });
+  }
+
+  void _precacheVisiblePageImages({
+    required List<MasterSetCardSlot> visibleSlots,
+    required int currentPage,
+    required int totalPages,
+  }) {
+    if (visibleSlots.isEmpty) return;
+
+    final pagesToWarm = <int>{
+      currentPage,
+      if (currentPage < totalPages) currentPage + 1,
+    };
+
+    final urlsToWarm = <String>[];
+    for (final page in pagesToWarm) {
+      final pageStart = (page - 1) * _cardsPerPage;
+      if (pageStart < 0 || pageStart >= visibleSlots.length) continue;
+
+      final pageEnd = (pageStart + _cardsPerPage)
+          .clamp(0, visibleSlots.length)
+          .toInt();
+
+      for (final slot in visibleSlots.sublist(pageStart, pageEnd)) {
+        final imageUrl = slot.card.imageUrl?.trim();
+        if (imageUrl == null || imageUrl.isEmpty) continue;
+        if (_precachedImageUrls.add(imageUrl)) {
+          urlsToWarm.add(imageUrl);
+        }
+      }
+    }
+
+    if (urlsToWarm.isEmpty) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final imageUrl in urlsToWarm) {
+        precacheImage(NetworkImage(imageUrl), context).catchError((_) {});
+      }
     });
   }
 
@@ -321,7 +390,7 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
       body: FutureBuilder<List<TcgCard>>(
         future: _futureCards,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting || !_loadedOwned) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
@@ -361,6 +430,12 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
             });
           }
 
+          _precacheVisiblePageImages(
+            visibleSlots: visibleSlots,
+            currentPage: safePage,
+            totalPages: totalPages,
+          );
+
           return SafeArea(
             bottom: true,
             child: Padding(
@@ -391,14 +466,14 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                               Expanded(
                                 child: CollectionStatCard(
                                   label: 'Owned',
-                                  value: '$ownedCount/$total',
+                                  value: _loadedOwned ? '$ownedCount/$total' : '...',
                                 ),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: CollectionStatCard(
                                   label: 'Complete',
-                                  value: '$percent%',
+                                  value: _loadedOwned ? '$percent%' : '...',
                                 ),
                               ),
                             ],
@@ -416,9 +491,11 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  _showMissingOnly
-                                      ? '$missingCount missing slots shown'
-                                      : '$missingCount missing • $ownedCount owned',
+                                  !_loadedOwned
+                                      ? 'Cards loaded • loading your collection...'
+                                      : _showMissingOnly
+                                          ? '$missingCount missing slots shown'
+                                          : '$missingCount missing • $ownedCount owned',
                                   style: const TextStyle(
                                     color: Color(0xFFC8D4F0),
                                     fontSize: 12,
@@ -429,12 +506,14 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                               SizedBox(
                                 height: 34,
                                 child: FilledButton.tonalIcon(
-                                  onPressed: () {
-                                    setState(() {
-                                      _showMissingOnly = !_showMissingOnly;
-                                    });
-                                    _resetPokedexPage();
-                                  },
+                                  onPressed: _loadedOwned
+                                      ? () {
+                                          setState(() {
+                                            _showMissingOnly = !_showMissingOnly;
+                                          });
+                                          _resetPokedexPage();
+                                        }
+                                      : null,
                                   style: FilledButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(horizontal: 10),
                                   ),
@@ -503,6 +582,8 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                                     final slot = pageSlots[index];
                                     final card = slot.card;
                                     final ownership = _ownershipFor(card);
+                                    final isOwned = slot.isOwned(ownership);
+
                                     return AnimatedScale(
                                       duration: const Duration(milliseconds: 180),
                                       curve: Curves.easeOutCubic,
@@ -521,10 +602,13 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                                             slot: slot,
                                           );
                                         },
-                                        child: MasterSetSlotTile(
-                                          slot: slot,
-                                          ownership: ownership,
-                                          greyOutWhenMissing: true,
+                                        child: _buildOwnedColourState(
+                                          isOwned: isOwned,
+                                          child: MasterSetSlotTile(
+                                            slot: slot,
+                                            ownership: ownership,
+                                            greyOutWhenMissing: false,
+                                          ),
                                         ),
                                       ),
                                     );
@@ -601,4 +685,3 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     );
   }
 }
-

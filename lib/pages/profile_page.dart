@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/app_user_profile.dart';
 import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
+import '../models/tcg_shop.dart';
 import '../models/wishlist_entry.dart';
 import '../services/account_deletion_service.dart';
 import '../services/collection_refresh_notifier.dart';
@@ -15,6 +16,7 @@ import '../services/currency_settings.dart';
 import '../services/local_image_store.dart';
 import '../services/pro_status_service.dart';
 import '../services/user_feature_flags_service.dart';
+import '../services/tcg_shop_service.dart';
 import '../services/user_profile_service.dart';
 import '../services/wishlist_service.dart';
 import '../utils/auth_input_decoration.dart';
@@ -46,6 +48,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _nameController = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
+  final TcgShopService _tcgShopService = TcgShopService();
 
   String? _profileImagePath;
   bool _loadingProfile = true;
@@ -837,51 +840,90 @@ class _ProfilePageState extends State<ProfilePage> {
         final canManageFeatures = managerSnapshot.data == true;
         final toolCount = canManageFeatures ? 5 : 2;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 16),
-            RepaintBoundary(
-              child: Card(
-                color: const Color(0xFF102754),
-                shape: RoundedRectangleBorder(
+        if (!canManageFeatures) {
+          return _buildFeatureAccessCard(
+            canManageFeatures: false,
+            toolCount: toolCount,
+            pendingSubmissionCount: 0,
+          );
+        }
+
+        return StreamBuilder<List<TcgShop>>(
+          stream: _tcgShopService.watchPendingSubmissions(),
+          builder: (context, submissionsSnapshot) {
+            final pendingSubmissionCount =
+                (submissionsSnapshot.data ?? const []).length;
+
+            return _buildFeatureAccessCard(
+              canManageFeatures: true,
+              toolCount: toolCount,
+              pendingSubmissionCount: pendingSubmissionCount,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFeatureAccessCard({
+    required bool canManageFeatures,
+    required int toolCount,
+    required int pendingSubmissionCount,
+  }) {
+    final hasPendingSubmissions = pendingSubmissionCount > 0;
+    final collapsedSubtitle = hasPendingSubmissions
+        ? '$pendingSubmissionCount shop submission${pendingSubmissionCount == 1 ? '' : 's'} waiting. Tap to show.'
+        : '$toolCount tool${toolCount == 1 ? '' : 's'} hidden. Tap to show.';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 16),
+        RepaintBoundary(
+          child: Card(
+            color: const Color(0xFF102754),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
                   borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    InkWell(
-                      borderRadius: BorderRadius.circular(24),
-                      onTap: () {
-                        setState(() {
-                          _featuresExpanded = !_featuresExpanded;
-                        });
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(18),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: const Color(0xFFF7DE77)
-                                    .withValues(alpha: 0.14),
-                                border: Border.all(
-                                  color: const Color(0xFFF7DE77)
-                                      .withValues(alpha: 0.28),
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.tune_outlined,
-                                color: Color(0xFFF7DE77),
-                              ),
+                  onTap: () {
+                    setState(() {
+                      _featuresExpanded = !_featuresExpanded;
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFFF7DE77)
+                                .withValues(alpha: 0.14),
+                            border: Border.all(
+                              color: const Color(0xFFF7DE77)
+                                  .withValues(alpha: 0.28),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          ),
+                          child: Icon(
+                            hasPendingSubmissions
+                                ? Icons.notifications_active_outlined
+                                : Icons.tune_outlined,
+                            color: const Color(0xFFF7DE77),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
                                   const Text(
                                     'Features',
@@ -891,108 +933,193 @@ class _ProfilePageState extends State<ProfilePage> {
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _featuresExpanded
-                                        ? 'Tap to hide extra PocketChase tools.'
-                                        : '$toolCount tool${toolCount == 1 ? '' : 's'} hidden. Tap to show.',
-                                    style: const TextStyle(
-                                      color: Color(0xFFD8E3FB),
-                                      height: 1.35,
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w600,
+                                  if (hasPendingSubmissions) ...[
+                                    const SizedBox(width: 8),
+                                    _buildPendingSubmissionBadge(
+                                      pendingSubmissionCount,
+                                      compact: true,
                                     ),
-                                  ),
+                                  ],
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            AnimatedRotation(
-                              turns: _featuresExpanded ? 0.5 : 0,
-                              duration: const Duration(milliseconds: 180),
-                              curve: Curves.easeOut,
-                              child: const Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: Colors.white70,
-                                size: 30,
+                              const SizedBox(height: 4),
+                              Text(
+                                _featuresExpanded
+                                    ? 'Tap to hide extra PocketChase tools.'
+                                    : collapsedSubtitle,
+                                style: const TextStyle(
+                                  color: Color(0xFFD8E3FB),
+                                  height: 1.35,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                    AnimatedCrossFade(
-                      firstChild: const SizedBox.shrink(),
-                      secondChild: Padding(
-                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Manage extra PocketChase tools and account features.',
-                              style: TextStyle(
-                                color: Color(0xFFD8E3FB),
-                                height: 1.35,
-                              ),
-                            ),
-                            _buildFeatureTile(
-                              icon: Icons.add_alert_outlined,
-                              iconColor: const Color(0xFFF7DE77),
-                              title: 'My Restock Tracker',
-                              subtitle: 'Add product pages you want to track yourself',
-                              onTap: _openMyRestockTracker,
-                            ),
-                            _buildFeatureTile(
-                              icon: Icons.notifications_active_outlined,
-                              iconColor: const Color(0xFFF7DE77),
-                              title: 'Alert Preferences',
-                              subtitle: 'Choose shops, regions, and stores to get notifications from',
-                              onTap: _openRestockAlertPreferences,
-                            ),
-                            if (canManageFeatures)
-                              _buildFeatureTile(
-                                icon: Icons.manage_search_outlined,
-                                iconColor: const Color(0xFFF7DE77),
-                                title: 'Tracked Products',
-                                subtitle: 'Add shop pages for automatic checking',
-                                onTap: _openTrackedRestockProducts,
-                              ),
-                            if (canManageFeatures)
-                              _buildFeatureTile(
-                                icon: Icons.storefront_outlined,
-                                iconColor: const Color(0xFF54D39A),
-                                title: 'TCG Shop Submissions',
-                                subtitle: 'Approve or reject user-submitted card shops',
-                                onTap: _openTcgShopSubmissions,
-                              ),
-                            if (canManageFeatures)
-                              _buildFeatureTile(
-                                icon: Icons.admin_panel_settings_outlined,
-                                iconColor: const Color(0xFF54D39A),
-                                title: 'User Features',
-                                subtitle: 'Turn PocketChase Pro and admin permissions on or off for users',
-                                onTap: _openUserFeatures,
-                              ),
-                          ],
+                        const SizedBox(width: 8),
+                        AnimatedRotation(
+                          turns: _featuresExpanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          child: const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Colors.white70,
+                            size: 30,
+                          ),
                         ),
-                      ),
-                      crossFadeState: _featuresExpanded
-                          ? CrossFadeState.showSecond
-                          : CrossFadeState.showFirst,
-                      duration: const Duration(milliseconds: 220),
-                      reverseDuration: const Duration(milliseconds: 160),
-                      firstCurve: Curves.easeOut,
-                      secondCurve: Curves.easeOut,
-                      sizeCurve: Curves.easeOut,
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox.shrink(),
+                  secondChild: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Manage extra PocketChase tools and account features.',
+                          style: TextStyle(
+                            color: Color(0xFFD8E3FB),
+                            height: 1.35,
+                          ),
+                        ),
+                        if (hasPendingSubmissions) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF7DE77)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFF7DE77)
+                                    .withValues(alpha: 0.40),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.storefront_outlined,
+                                  color: Color(0xFFF7DE77),
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    pendingSubmissionCount == 1
+                                        ? '1 TCG shop submission needs review.'
+                                        : '$pendingSubmissionCount TCG shop submissions need review.',
+                                    style: const TextStyle(
+                                      color: Color(0xFFF7DE77),
+                                      fontWeight: FontWeight.w900,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        _buildFeatureTile(
+                          icon: Icons.add_alert_outlined,
+                          iconColor: const Color(0xFFF7DE77),
+                          title: 'My Restock Tracker',
+                          subtitle: 'Add product pages you want to track yourself',
+                          onTap: _openMyRestockTracker,
+                        ),
+                        _buildFeatureTile(
+                          icon: Icons.notifications_active_outlined,
+                          iconColor: const Color(0xFFF7DE77),
+                          title: 'Alert Preferences',
+                          subtitle: 'Choose shops, regions, and stores to get notifications from',
+                          onTap: _openRestockAlertPreferences,
+                        ),
+                        if (canManageFeatures)
+                          _buildFeatureTile(
+                            icon: Icons.manage_search_outlined,
+                            iconColor: const Color(0xFFF7DE77),
+                            title: 'Tracked Products',
+                            subtitle: 'Add shop pages for automatic checking',
+                            onTap: _openTrackedRestockProducts,
+                          ),
+                        if (canManageFeatures)
+                          _buildFeatureTile(
+                            icon: hasPendingSubmissions
+                                ? Icons.mark_email_unread_outlined
+                                : Icons.storefront_outlined,
+                            iconColor: hasPendingSubmissions
+                                ? const Color(0xFFF7DE77)
+                                : const Color(0xFF54D39A),
+                            title: 'TCG Shop Submissions',
+                            subtitle: hasPendingSubmissions
+                                ? 'Review $pendingSubmissionCount pending shop submission${pendingSubmissionCount == 1 ? '' : 's'}'
+                                : 'Approve or reject user-submitted card shops',
+                            notificationCount: pendingSubmissionCount,
+                            onTap: _openTcgShopSubmissions,
+                          ),
+                        if (canManageFeatures)
+                          _buildFeatureTile(
+                            icon: Icons.admin_panel_settings_outlined,
+                            iconColor: const Color(0xFF54D39A),
+                            title: 'User Features',
+                            subtitle: 'Turn PocketChase Pro and admin permissions on or off for users',
+                            onTap: _openUserFeatures,
+                          ),
+                      ],
+                    ),
+                  ),
+                  crossFadeState: _featuresExpanded
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 220),
+                  reverseDuration: const Duration(milliseconds: 160),
+                  firstCurve: Curves.easeOut,
+                  secondCurve: Curves.easeOut,
+                  sizeCurve: Curves.easeOut,
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-          ],
-        );
-      },
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _buildPendingSubmissionBadge(
+    int count, {
+    bool compact = false,
+  }) {
+    if (count <= 0) return const SizedBox.shrink();
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 7 : 9,
+        vertical: compact ? 3 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7DE77),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: TextStyle(
+          color: Colors.black,
+          fontSize: compact ? 10 : 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
     );
   }
 
@@ -1002,6 +1129,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    int notificationCount = 0,
   }) {
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -1040,6 +1168,11 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
                 ),
+                if (notificationCount > 0) ...[
+                  const SizedBox(width: 8),
+                  _buildPendingSubmissionBadge(notificationCount),
+                ],
+                const SizedBox(width: 8),
                 const Icon(Icons.chevron_right, color: Colors.white54),
               ],
             ),

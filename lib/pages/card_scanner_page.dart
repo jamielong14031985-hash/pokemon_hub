@@ -49,6 +49,7 @@ class _CardScannerPageState extends State<CardScannerPage>
   bool _autoScanBusy = false;
   bool _scanning = false;
   bool _scanSaveBusy = false;
+  int? _lastScanDurationMs;
   bool _showExtractedTextDetails = false;
   String? _cameraErrorMessage;
   String? _focusMessage;
@@ -123,7 +124,7 @@ class _CardScannerPageState extends State<CardScannerPage>
 
       final controller = camera.CameraController(
         selectedCamera,
-        camera.ResolutionPreset.high,
+        camera.ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: camera.ImageFormatGroup.jpeg,
       );
@@ -843,18 +844,18 @@ class _CardScannerPageState extends State<CardScannerPage>
 
       var oriented = img.bakeOrientation(decoded);
       final longestSide = math.max(oriented.width, oriented.height);
-      final shouldResize = longestSide > 1600;
-      final shouldCompress = sourceBytes.lengthInBytes > 700 * 1024;
+      final shouldResize = longestSide > 1200;
+      final shouldCompress = sourceBytes.lengthInBytes > 420 * 1024;
 
       if (!shouldResize && !shouldCompress) return null;
 
       if (shouldResize) {
         oriented = oriented.width >= oriented.height
-            ? img.copyResize(oriented, width: 1600)
-            : img.copyResize(oriented, height: 1600);
+            ? img.copyResize(oriented, width: 1200)
+            : img.copyResize(oriented, height: 1200);
       }
 
-      final outputBytes = img.encodeJpg(oriented, quality: 86);
+      final outputBytes = img.encodeJpg(oriented, quality: 74);
       if (!shouldResize && outputBytes.length >= sourceBytes.lengthInBytes) {
         return null;
       }
@@ -947,17 +948,22 @@ class _CardScannerPageState extends State<CardScannerPage>
       _quickScanVariant = QuickScanVariant.normal;
       _scanSaveBusy = false;
       _showExtractedTextDetails = false;
+      _lastScanDurationMs = null;
       _scanning = true;
     });
+
+    final scanStartedAt = DateTime.now();
 
     try {
       final analysis = await _buildPreparedVisionAnalysis(picked.path);
       if (!mounted) return;
 
       final hasMatches = analysis.matches.isNotEmpty;
+      final scanDurationMs = DateTime.now().difference(scanStartedAt).inMilliseconds;
 
       setState(() {
         _analysis = analysis;
+        _lastScanDurationMs = scanDurationMs;
         _scanning = false;
 
         if (hasMatches) {
@@ -1002,6 +1008,7 @@ class _CardScannerPageState extends State<CardScannerPage>
       _showExtractedTextDetails = false;
       _quickScanVariant = QuickScanVariant.normal;
       _autoScanEnabled = false;
+      _lastScanDurationMs = null;
     });
     // Keep manual capture mode after reset.
   }
@@ -1079,7 +1086,7 @@ class _CardScannerPageState extends State<CardScannerPage>
             ),
             const SizedBox(height: 10),
             const Text(
-              'Manual card scanner',
+              'Scan Card',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -1089,7 +1096,7 @@ class _CardScannerPageState extends State<CardScannerPage>
             ),
             const SizedBox(height: 4),
             const Text(
-              'Put one full card inside the guide, tap to focus, then press Scan Now when you are steady.',
+              'Line up one card, tap to focus, then scan for a quick price.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white54,
@@ -1218,7 +1225,7 @@ class _CardScannerPageState extends State<CardScannerPage>
                           _focusMessage ??
                               (_scanning
                                   ? 'Checking card...'
-                                  : 'Tap to focus, then press Scan Now'),
+                                  : 'Tap to focus, then scan price'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -1283,8 +1290,8 @@ class _CardScannerPageState extends State<CardScannerPage>
                 children: [
                   Text(
                     previewFile == null
-                        ? 'Live camera mode'
-                        : 'Captured scan image',
+                        ? 'Live scanner'
+                        : 'Last scanned image',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -1294,8 +1301,8 @@ class _CardScannerPageState extends State<CardScannerPage>
                   const SizedBox(height: 8),
                   Text(
                     previewFile == null
-                        ? 'Hold one full card inside the guide. Press Scan Now only when the card looks clear.'
-                        : 'This is the image currently being checked by the scanner.',
+                        ? 'Hold one full card in the guide. Scan when the name and number are clear.'
+                        : 'This is the image used for the latest scan.',
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 13,
@@ -1352,7 +1359,7 @@ class _CardScannerPageState extends State<CardScannerPage>
               SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Line up the card, tap to focus, then press Scan Now when ready.',
+                  'At a show: scan, check the price, then tap Scan next card.',
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
@@ -1378,7 +1385,11 @@ class _CardScannerPageState extends State<CardScannerPage>
                   ),
                 ),
                 icon: const Icon(Icons.center_focus_strong_rounded),
-                label: const Text('Scan Now'),
+                label: Text(
+                  _analysis != null || _capturedImage != null
+                      ? 'Scan next card'
+                      : 'Scan price',
+                ),
               ),
             ),
             const SizedBox(width: 10),
@@ -1446,7 +1457,7 @@ class _CardScannerPageState extends State<CardScannerPage>
               child: Text(
                 _autoScanBusy
                     ? 'Auto scan is checking this card...'
-                    : 'Reading the card and finding the best match...',
+                    : 'Reading the card and getting the price...',
                 style: const TextStyle(color: Colors.white),
               ),
             ),
@@ -1467,6 +1478,188 @@ class _CardScannerPageState extends State<CardScannerPage>
         child: Text(
           _errorMessage!,
           style: const TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFastPriceResultCard(TcgCard card) {
+    final priceText = formatCardPrice(
+      card.rawPrice,
+      fromCurrency: card.rawPriceCurrency,
+    );
+    final scanTime = _lastScanDurationMs == null
+        ? ''
+        : 'Found in ${(_lastScanDurationMs! / 1000).toStringAsFixed(1)}s';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF102754),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: const Color(0xFFF7DE77).withValues(alpha: 0.40),
+          width: 1.4,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFF7DE77).withValues(alpha: 0.12),
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF7DE77),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.price_check_rounded,
+                    color: Colors.black,
+                    size: 27,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Quick price result',
+                        style: TextStyle(
+                          color: Color(0xFFF7DE77),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        scanTime.isEmpty ? 'Ready for the next card' : scanTime,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              card.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                height: 1.1,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${card.setName} • #${card.number}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFFD8E3FB),
+                fontSize: 13,
+                height: 1.25,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF071B3F),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.20),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Market price',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    priceText,
+                    style: const TextStyle(
+                      color: Color(0xFFF7DE77),
+                      fontSize: 30,
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _scanning ? null : _captureAndScanFromLivePreview,
+                    icon: const Icon(Icons.center_focus_strong_rounded),
+                    label: const Text('Scan next card'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFF7DE77),
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _scanSaveBusy || _isLocalPromoFallbackCard(card)
+                        ? null
+                        : () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => CardDetailsPage(card: card),
+                              ),
+                            );
+                          },
+                    icon: const Icon(Icons.open_in_new_rounded),
+                    label: const Text('Details'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.18),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor: const Color(0xFF16366E),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -1997,11 +2190,23 @@ class _CardScannerPageState extends State<CardScannerPage>
 
     final children = <Widget>[
       _buildScannerHeader(),
-      const SizedBox(height: 14),
-      _buildPreviewCard(),
-      const SizedBox(height: 12),
-      _buildScannerActions(),
     ];
+
+    if (primaryMatch != null) {
+      children.addAll(<Widget>[
+        const SizedBox(height: 14),
+        _buildFastPriceResultCard(primaryMatch),
+        const SizedBox(height: 12),
+        _buildQuickSaveFlowCard(primaryMatch),
+      ]);
+    } else {
+      children.addAll(<Widget>[
+        const SizedBox(height: 14),
+        _buildPreviewCard(),
+        const SizedBox(height: 12),
+        _buildScannerActions(),
+      ]);
+    }
 
     if (_scanning) {
       children.addAll(<Widget>[
@@ -2019,17 +2224,6 @@ class _CardScannerPageState extends State<CardScannerPage>
 
     if (primaryMatch != null) {
       children.addAll(<Widget>[
-        const SizedBox(height: 14),
-        _buildScanSummaryCard(
-          card: primaryMatch,
-          eyebrow: _analysis?.exactConfirmed == true
-              ? 'Exact card confirmed'
-              : 'Card selected',
-          message: _analysis?.exactConfirmed == true
-              ? 'The scanner found a strong enough match to confirm this exact print automatically.'
-              : 'You selected this card from the likely matches below.',
-          confirmed: true,
-        ),
         const SizedBox(height: 18),
         Text(
           _analysis?.exactConfirmed == true
@@ -2059,8 +2253,6 @@ class _CardScannerPageState extends State<CardScannerPage>
             onTap: () => _openDetailsOrSelectMatch(primaryMatch),
           ),
         ),
-        const SizedBox(height: 12),
-        _buildQuickSaveFlowCard(primaryMatch),
       ]);
     }
 

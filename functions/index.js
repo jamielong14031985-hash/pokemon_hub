@@ -655,7 +655,6 @@ function otherParticipants(participants, senderId) {
     );
 }
 
-
 async function getMatchingUserTokens(product) {
   const enabledUsersSnapshot = await db
     .collection("user_feature_flags")
@@ -1793,3 +1792,4 @@ exports.setAdminFeaturedCommunityPost = onCall(
     };
   }
 );
+

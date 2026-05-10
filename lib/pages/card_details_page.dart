@@ -7,6 +7,7 @@ import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/wishlist_service.dart';
 import '../utils/ebay_sold_search.dart';
+import '../widgets/card_image_with_fallback.dart';
 import '../widgets/custom_binder_sheets.dart';
 import '../widgets/graded_prices_button.dart';
 import '../widgets/price_lookup_card.dart';
@@ -146,11 +147,13 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   SetLogoTile(setId: card.setId, setName: card.setName, logoUrl: card.setLogoUrl),
-                  if (card.largeImageUrl != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: Image.network(card.largeImageUrl!, height: 320),
-                    ),
+                  CardImageWithFallback(
+                    imageUrls: card.largeImageUrlCandidates,
+                    height: 320,
+                    fit: BoxFit.contain,
+                    backgroundColor: Colors.black12,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                   const SizedBox(height: 16),
                   PriceLookupCard(
                     card: card,

@@ -4,7 +4,7 @@ import '../models/card_ownership.dart';
 import '../models/tcg_card.dart';
 import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
-import 'fast_network_image.dart';
+import 'card_image_with_fallback.dart';
 
 class CardSearchResultCard extends StatefulWidget {
   const CardSearchResultCard({
@@ -31,7 +31,8 @@ class _CardSearchResultCardState extends State<CardSearchResultCard> {
     });
 
     try {
-      final ownershipByCardId = await PokedexSyncService.loadCurrentUserSetOwnership(widget.card.setId);
+      final ownershipByCardId =
+          await PokedexSyncService.loadCurrentUserSetOwnership(widget.card.setId);
       final existing = ownershipByCardId[widget.card.id] ?? const CardOwnership();
 
       ownershipByCardId[widget.card.id] = existing.copyWith(
@@ -84,17 +85,13 @@ class _CardSearchResultCardState extends State<CardSearchResultCard> {
                 SizedBox(
                   width: 110,
                   height: 150,
-                  child: card.imageUrl == null
-                      ? const ColoredBox(
-                          color: Colors.black12,
-                          child: Icon(Icons.image_not_supported, color: Colors.white),
-                        )
-                      : FastNetworkImage(
-                          imageUrl: card.imageUrl!,
-                          fit: BoxFit.cover,
-                          cacheWidth: 220,
-                          cacheHeight: 300,
-                        ),
+                  child: CardImageWithFallback(
+                    imageUrls: card.imageUrlCandidates,
+                    fit: BoxFit.cover,
+                    cacheWidth: 220,
+                    cacheHeight: 300,
+                    backgroundColor: Colors.black12,
+                  ),
                 ),
                 Expanded(
                   child: Padding(

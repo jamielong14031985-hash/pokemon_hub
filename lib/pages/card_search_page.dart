@@ -223,7 +223,7 @@ class CardSearchPageState extends State<CardSearchPage> {
               onSubmitted: (_) => _runSearchImmediately(),
               decoration: InputDecoration(
                 hintText: _searchMode == CardSearchMode.cards
-                    ? 'Search cards, e.g. Pikachu'
+                    ? 'Search cards, e.g. Maractus JTG'
                     : 'Search sets, e.g. Base Set',
                 hintStyle: const TextStyle(color: Color(0xFFB7C4E0)),
                 filled: true,
@@ -281,7 +281,7 @@ class CardSearchPageState extends State<CardSearchPage> {
             const SizedBox(height: 10),
             Text(
               _searchMode == CardSearchMode.cards
-                  ? 'Search by card name or collector number, like 4/102.'
+                  ? 'Search by name, collector number, or set code, like Maractus JTG or 4/102.'
                   : 'Set search is cached after first load, so repeat searches should feel quicker.',
               style: const TextStyle(
                 color: Color(0xFFAFC0E6),
@@ -299,7 +299,7 @@ class CardSearchPageState extends State<CardSearchPage> {
     return const _SearchInfoCard(
       icon: Icons.keyboard_alt_outlined,
       title: 'Keep typing',
-      message: 'Type at least 2 characters to search, or use a collector number like 4/102.',
+      message: 'Type at least 2 characters to search, or use a collector number like 4/102 or a set code like JTG.',
       accent: Color(0xFFF7DE77),
     );
   }
