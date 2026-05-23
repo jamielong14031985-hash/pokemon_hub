@@ -61,10 +61,14 @@ class PokemonTcgService {
       <String, Future<TcgSet?>>{};
 
   static List<TcgSet>? _allSetsCache;
+  static DateTime? _allSetsCacheLoadedAt;
   static Future<List<TcgSet>>? _allSetsInFlight;
 
 
   static const Duration _apiDiskCacheFreshFor = Duration(days: 14);
+  static const Duration _apiSetListDiskCacheFreshFor = Duration(hours: 6);
+  static const Duration _apiSetLookupDiskCacheFreshFor = Duration(hours: 12);
+  static const Duration _apiCardsBySetDiskCacheFreshFor = Duration(hours: 12);
   static const Duration _apiDiskCacheStaleFor = Duration(days: 90);
   static Directory? _apiDiskCacheDirectory;
 
@@ -635,6 +639,9 @@ class PokemonTcgService {
     '151': <String>['151'],
     'dri': <String>['destined rivals'],
     'destinedrivals': <String>['destined rivals'],
+    'me4': <String>['chaos rising'],
+    'chaos': <String>['chaos rising'],
+    'chaosrising': <String>['chaos rising'],
     'meg': <String>['mega evolution'],
     'mega': <String>['mega evolution'],
   };
@@ -985,7 +992,9 @@ class PokemonTcgService {
 
   static DateTime? _tryParseReleaseDate(String value) {
     try {
-      return DateTime.tryParse(value);
+      final cleaned = value.trim().replaceAll('/', '-');
+      if (cleaned.isEmpty) return null;
+      return DateTime.tryParse(cleaned);
     } catch (_) {
       return null;
     }
@@ -2424,7 +2433,11 @@ class PokemonTcgService {
   static Future<List<TcgSet>> fetchSets({bool forceRefresh = false}) async {
     if (!forceRefresh) {
       final cachedSets = _allSetsCache;
-      if (cachedSets != null) {
+      final loadedAt = _allSetsCacheLoadedAt;
+      final cacheIsFresh = loadedAt != null &&
+          DateTime.now().difference(loadedAt) < _apiSetListDiskCacheFreshFor;
+
+      if (cachedSets != null && cacheIsFresh) {
         return List<TcgSet>.from(cachedSets);
       }
 
@@ -2444,12 +2457,19 @@ class PokemonTcgService {
     try {
       final sets = await request;
       _allSetsCache = List<TcgSet>.from(sets);
+      _allSetsCacheLoadedAt = DateTime.now();
       return List<TcgSet>.from(sets);
     } finally {
       if (!forceRefresh) {
         _allSetsInFlight = null;
       }
     }
+  }
+
+  static Future<List<TcgSet>> refreshSets() {
+    _setSearchCache.clear();
+    _setSearchInFlight.clear();
+    return fetchSets(forceRefresh: true);
   }
 
   static Future<void> warmSetSearchCache() async {
@@ -2479,10 +2499,16 @@ class PokemonTcgService {
     int page = 1;
 
     while (true) {
-      final uri = Uri.parse(
-        '$_baseUrl/sets?pageSize=250&page=$page&orderBy=-releaseDate',
+      final uri = Uri.https('api.pokemontcg.io', '/v2/sets', {
+        'pageSize': '250',
+        'page': '$page',
+        'orderBy': '-releaseDate',
+        'select': 'id,name,series,printedTotal,total,releaseDate,images',
+      });
+      final data = await _getJsonMapWithDiskCache(
+        uri,
+        freshFor: _apiSetListDiskCacheFreshFor,
       );
-      final data = await _getJsonMapWithDiskCache(uri);
       final items = (data['data'] as List<dynamic>? ?? []);
 
       if (items.isEmpty) {
@@ -2504,25 +2530,28 @@ class PokemonTcgService {
   }
 
   static Future<List<TcgCard>> fetchCardsBySet(String setId) async {
-    final cachedCards = _setCardsCache[setId];
+    final normalizedSetId = setId.trim();
+    if (normalizedSetId.isEmpty) return const <TcgCard>[];
+
+    final cachedCards = _setCardsCache[normalizedSetId];
     if (cachedCards != null) {
       return List<TcgCard>.from(cachedCards);
     }
 
-    final inFlightRequest = _setCardsInFlight[setId];
+    final inFlightRequest = _setCardsInFlight[normalizedSetId];
     if (inFlightRequest != null) {
       final cards = await inFlightRequest;
       return List<TcgCard>.from(cards);
     }
 
-    final request = _fetchAndCacheCardsBySet(setId);
-    _setCardsInFlight[setId] = request;
+    final request = _fetchAndCacheCardsBySet(normalizedSetId);
+    _setCardsInFlight[normalizedSetId] = request;
 
     try {
       final cards = await request;
       return List<TcgCard>.from(cards);
     } finally {
-      _setCardsInFlight.remove(setId);
+      _setCardsInFlight.remove(normalizedSetId);
     }
   }
 
@@ -2651,7 +2680,10 @@ class PokemonTcgService {
       final uri = Uri.https('api.pokemontcg.io', '/v2/sets/$normalizedSetId');
       Map<String, dynamic> data;
       try {
-        data = await _getJsonMapWithDiskCache(uri);
+        data = await _getJsonMapWithDiskCache(
+          uri,
+          freshFor: _apiSetLookupDiskCacheFreshFor,
+        );
       } catch (_) {
         return null;
       }
@@ -2897,7 +2929,10 @@ class PokemonTcgService {
         'orderBy': orderBy,
       });
 
-      final data = await _getJsonMapWithDiskCache(uri);
+      final data = await _getJsonMapWithDiskCache(
+        uri,
+        freshFor: _apiCardsBySetDiskCacheFreshFor,
+      );
       final items = (data['data'] as List<dynamic>? ?? const []);
       if (items.isEmpty) break;
 
