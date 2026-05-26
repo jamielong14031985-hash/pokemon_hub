@@ -4,12 +4,15 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/app_user_profile.dart';
+import 'models/business_profile.dart';
+import 'pages/business_profile_editor_page.dart';
 import 'pages/card_scanner_page.dart';
 import 'pages/card_search_page.dart';
 import 'pages/community_page.dart';
 import 'pages/master_sets_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/tcg_shop_map_page.dart';
+import 'services/business_profile_service.dart';
 import 'services/community_unread_private_message_service.dart';
 import 'services/currency_settings.dart';
 import 'services/custom_binder_sync_service.dart';
@@ -46,6 +49,8 @@ class _AppShellState extends State<AppShell> {
       GlobalKey<CardSearchPageState>();
   final GlobalKey<MasterSetsPageState> _masterSetsKey =
       GlobalKey<MasterSetsPageState>();
+  final BusinessProfileService _businessProfileService =
+      BusinessProfileService();
 
   @override
   void initState() {
@@ -539,8 +544,7 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildMainAppShell() {
     return Scaffold(
       appBar: _currentIndex == _kMapIndex
           ? null
@@ -566,5 +570,193 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
     );
+  }
+
+  Widget _buildBusinessSetupGate(BusinessProfile? businessProfile) {
+    final missingItems = businessProfile?.setupMissingReasons ??
+        const <String>[
+          'Business name',
+          'Business description',
+          'Website',
+          'Phone number',
+          'Town',
+          'County',
+          'Shop type',
+        ];
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF041B4A),
+      appBar: AppBar(
+        title: const Text('Complete Business Setup'),
+        backgroundColor: const Color(0xFF041B4A),
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout),
+            onPressed: () => FirebaseAuth.instance.signOut(),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 120),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFF102754),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0xFFF7DE77)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.20),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.storefront_outlined,
+                    color: Color(0xFFF7DE77),
+                    size: 42,
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Finish your business profile',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Business accounts must complete all required details before using the rest of PocketChase. Physical shops must be linked to the TCG Shop Map.',
+                    style: TextStyle(
+                      color: Color(0xFFC8D4F0),
+                      height: 1.4,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF102754),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF3F5C96)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Still needed',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...missingItems.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.radio_button_unchecked,
+                            color: Color(0xFFF7DE77),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              item,
+                              style: const TextStyle(
+                                color: Color(0xFFC8D4F0),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFF7DE77),
+                foregroundColor: const Color(0xFF041B4A),
+                minimumSize: const Size.fromHeight(54),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text(
+                'Complete business profile',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => BusinessProfileEditorPage(
+                      profile: businessProfile,
+                      forceCompleteSetup: true,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBusinessSetupAwareShell() {
+    if (!widget.profile.isBusinessAccount) {
+      return _buildMainAppShell();
+    }
+
+    return StreamBuilder<BusinessProfile?>(
+      stream: _businessProfileService.watchCurrentBusinessSetupProfile(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const ColoredBox(
+            color: Color(0xFF041B4A),
+            child: Center(
+              child: CircularProgressIndicator(color: Color(0xFFF7DE77)),
+            ),
+          );
+        }
+
+        final businessProfile = snapshot.data;
+
+        if (businessProfile == null || !businessProfile.setupIsComplete) {
+          return _buildBusinessSetupGate(businessProfile);
+        }
+
+        return _buildMainAppShell();
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _buildBusinessSetupAwareShell();
   }
 }

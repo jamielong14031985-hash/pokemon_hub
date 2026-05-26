@@ -20,6 +20,12 @@ int? _readIntMs(dynamic value) {
   return int.tryParse((value ?? '').toString().trim());
 }
 
+String _readAccountType(dynamic value) {
+  final text = (value ?? '').toString().trim().toLowerCase();
+  if (text == 'business') return 'business';
+  return 'personal';
+}
+
 class UserProfileService {
   static CollectionReference<Map<String, dynamic>> get _users =>
       FirebaseFirestore.instance.collection('users');
@@ -70,6 +76,8 @@ class UserProfileService {
     required User user,
     required String username,
     int? dateOfBirthMs,
+    String? accountType,
+    bool? businessProfileCreated,
   }) async {
     final safeUid = user.uid.trim();
     if (safeUid.isEmpty) {
@@ -93,6 +101,13 @@ class UserProfileService {
     final resolvedDateOfBirthMs =
         dateOfBirthMs ?? _readIntMs(existingData?['dateOfBirthMs']);
 
+    final resolvedAccountType = _readAccountType(
+      accountType ?? existingData?['accountType'],
+    );
+
+    final resolvedBusinessProfileCreated = businessProfileCreated ??
+        (existingData?['businessProfileCreated'] == true);
+
     final existingProfileImageBase64 = _firstNonEmptyString([
       existingData?['profileImageRef'],
       existingData?['profileImageUrl'],
@@ -105,6 +120,8 @@ class UserProfileService {
       username: safeUsername,
       createdAtMs: createdAtMs,
       updatedAtMs: now,
+      accountType: resolvedAccountType,
+      businessProfileCreated: resolvedBusinessProfileCreated,
       dateOfBirthMs: resolvedDateOfBirthMs,
       profileImageBase64:
           existingProfileImageBase64.isEmpty ? null : existingProfileImageBase64,
@@ -118,7 +135,33 @@ class UserProfileService {
             _kFirebaseWriteTimeout,
           );
     } catch (_) {
-      throw Exception('Could not save your profile. Please check your connection and try again.');
+      throw Exception(
+        'Could not save your profile. Please check your connection and try again.',
+      );
+    }
+  }
+
+  static Future<void> markBusinessProfileCreated({
+    required String uid,
+    required bool created,
+  }) async {
+    final safeUid = uid.trim();
+    if (safeUid.isEmpty) {
+      throw Exception('Could not update business profile status because the user id is missing.');
+    }
+
+    try {
+      await _users.doc(safeUid).set(
+        {
+          'businessProfileCreated': created,
+          'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
+        },
+        SetOptions(merge: true),
+      ).timeout(_kFirebaseWriteTimeout);
+    } catch (_) {
+      throw Exception(
+        'Could not update your business profile status. Please check your connection and try again.',
+      );
     }
   }
 
@@ -154,7 +197,9 @@ class UserProfileService {
         SetOptions(merge: true),
       ).timeout(_kFirebaseWriteTimeout);
     } catch (_) {
-      throw Exception('Could not update your profile image. Please check your connection and try again.');
+      throw Exception(
+        'Could not update your profile image. Please check your connection and try again.',
+      );
     }
   }
 }

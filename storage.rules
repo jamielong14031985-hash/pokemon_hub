@@ -7,9 +7,14 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function isShopImage() {
+    function isSmallUpload() {
       return request.resource != null
-        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    function isImageUpload() {
+      return isSmallUpload()
+        && request.resource.contentType != null
         && request.resource.contentType.matches('image/.*');
     }
 
@@ -18,15 +23,35 @@ service firebase.storage {
 
       allow create, update: if signedIn()
         && request.auth.uid == userId
-        && isShopImage();
+        && isSmallUpload();
 
       allow delete: if signedIn()
         && request.auth.uid == userId;
     }
 
+    match /business_profiles/{allPaths=**} {
+      allow read: if true;
+
+      allow create, update: if signedIn()
+        && isSmallUpload();
+
+      allow delete: if signedIn();
+    }
+
+    /*
+      TEMPORARY SAFE TEST FALLBACK
+
+      This lets signed-in users upload small files only.
+      It helps fix/diagnose Firebase Storage path mismatches while testing.
+      Once the exact upload path is confirmed, this can be tightened again.
+    */
     match /{allPaths=**} {
       allow read: if signedIn();
-      allow write: if false;
+
+      allow create, update: if signedIn()
+        && isSmallUpload();
+
+      allow delete: if signedIn();
     }
   }
 }

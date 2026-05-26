@@ -164,8 +164,10 @@ class _WelcomeBackPageState extends State<WelcomeBackPage>
                             position: _welcomeOffset,
                             child: Column(
                               children: [
-                                const Text(
-                                  'Welcome back',
+                                Text(
+                                  widget.profile.isBusinessAccount
+                                      ? 'Welcome back, business'
+                                      : 'Welcome back',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: Colors.white,

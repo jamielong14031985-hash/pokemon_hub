@@ -2,11 +2,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../models/tcg_shop.dart';
+import '../services/tcg_shop_service.dart';
 import '../utils/date_helpers.dart';
 import '../widgets/auth_mode_chip.dart';
 import '../widgets/custom_app_logo.dart';
 
 const int _kCommunityMinimumAge = 18;
+const String _kPersonalAccountType = 'personal';
+const String _kBusinessAccountType = 'business';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key});
@@ -22,6 +26,19 @@ class _SignInPageState extends State<SignInPage> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
+  final TextEditingController _businessNameController = TextEditingController();
+  final TextEditingController _businessDescriptionController =
+      TextEditingController();
+  final TextEditingController _businessWebsiteController =
+      TextEditingController();
+  final TextEditingController _businessPhoneController = TextEditingController();
+  final TextEditingController _businessTownController = TextEditingController();
+  final TextEditingController _businessCountyController = TextEditingController();
+  final TcgShopService _shopService = TcgShopService();
+
+  bool? _businessHasPhysicalShop;
+  String _businessLinkedShopId = '';
+  String _businessLinkedShopName = '';
 
   bool _isSignUp = false;
   bool _submitting = false;
@@ -29,6 +46,7 @@ class _SignInPageState extends State<SignInPage> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _acceptedTerms = false;
+  String _selectedAccountType = _kPersonalAccountType;
   DateTime? _selectedDateOfBirth;
 
   @override
@@ -36,7 +54,17 @@ class _SignInPageState extends State<SignInPage> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _businessNameController.dispose();
+    _businessDescriptionController.dispose();
+    _businessWebsiteController.dispose();
+    _businessPhoneController.dispose();
+    _businessTownController.dispose();
+    _businessCountyController.dispose();
     super.dispose();
+  }
+
+  bool get _isBusinessSignUp {
+    return _isSignUp && _selectedAccountType == _kBusinessAccountType;
   }
 
   Future<void> _pickDateOfBirth() async {
@@ -103,6 +131,8 @@ class _SignInPageState extends State<SignInPage> {
     required User user,
     required String email,
     required int now,
+    required String username,
+    required bool businessProfileCreated,
   }) async {
     final dateOfBirth = _selectedDateOfBirth;
     if (dateOfBirth == null) {
@@ -112,14 +142,58 @@ class _SignInPageState extends State<SignInPage> {
     await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
       'uid': user.uid,
       'email': user.email ?? email,
-      'username': '',
+      'username': username.trim(),
       'createdAtMs': now,
       'updatedAtMs': now,
       'acceptedTermsVersion': _termsVersion,
       'acceptedTermsAtMs': now,
       'dateOfBirthMs': dateOfBirth.millisecondsSinceEpoch,
       'emailVerified': user.emailVerified,
+      'accountType': _selectedAccountType == _kBusinessAccountType
+          ? _kBusinessAccountType
+          : _kPersonalAccountType,
+      'businessProfileCreated': businessProfileCreated,
     }, SetOptions(merge: true));
+  }
+
+  Future<void> _createBusinessProfileForNewUser({
+    required User user,
+    required String email,
+  }) async {
+    final businessName = _businessNameController.text.trim();
+    final town = _businessTownController.text.trim();
+    final county = _businessCountyController.text.trim();
+
+    await FirebaseFirestore.instance
+        .collection('business_profiles')
+        .doc(user.uid)
+        .set({
+      'ownerUid': user.uid,
+      'ownerEmail': user.email ?? email,
+      'businessName': businessName,
+      'businessNameLower': businessName.toLowerCase(),
+      'description': _businessDescriptionController.text.trim(),
+      'linkedShopId': _businessLinkedShopId.trim(),
+      'linkedShopName': _businessLinkedShopName.trim(),
+      'hasPhysicalShop': _businessHasPhysicalShop == true,
+      'website': _businessWebsiteController.text.trim(),
+      'phone': _businessPhoneController.text.trim(),
+      'town': town,
+      'townLower': town.toLowerCase(),
+      'county': county,
+      'countyLower': county.toLowerCase(),
+      'logoUrl': '',
+      'bannerUrl': '',
+      'status': 'approved',
+      'verified': false,
+      'premiumActive': false,
+      'premiumExpiresAt': null,
+      'premiumSource': '',
+      'featuredShopEnabled': false,
+      'autoFeaturePosts': false,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> _submit() async {
@@ -157,6 +231,45 @@ class _SignInPageState extends State<SignInPage> {
       return;
     }
 
+    if (_isBusinessSignUp) {
+      final businessName = _businessNameController.text.trim();
+      final businessDescription = _businessDescriptionController.text.trim();
+      final businessWebsite = _businessWebsiteController.text.trim();
+      final businessPhone = _businessPhoneController.text.trim();
+      final businessTown = _businessTownController.text.trim();
+      final businessCounty = _businessCountyController.text.trim();
+
+      if (businessName.isEmpty) {
+        _showMessage('Enter your business name');
+        return;
+      }
+
+      if (businessDescription.isEmpty) {
+        _showMessage('Enter a short business description');
+        return;
+      }
+
+      if (businessWebsite.isEmpty) {
+        _showMessage('Enter your business website');
+        return;
+      }
+
+      if (businessPhone.isEmpty) {
+        _showMessage('Enter your business phone number');
+        return;
+      }
+
+      if (businessTown.isEmpty || businessCounty.isEmpty) {
+        _showMessage('Enter your business town and county');
+        return;
+      }
+
+      if (_businessHasPhysicalShop == null) {
+        _showMessage('Choose whether you have a physical shop or are online-only');
+        return;
+      }
+    }
+
     setState(() {
       _submitting = true;
     });
@@ -174,7 +287,20 @@ class _SignInPageState extends State<SignInPage> {
         }
 
         final now = DateTime.now().millisecondsSinceEpoch;
-        await _saveNewUserProfile(user: user, email: email, now: now);
+        final isBusinessAccount = _selectedAccountType == _kBusinessAccountType;
+        final businessName = _businessNameController.text.trim();
+
+        await _saveNewUserProfile(
+          user: user,
+          email: email,
+          now: now,
+          username: isBusinessAccount ? businessName : '',
+          businessProfileCreated: isBusinessAccount,
+        );
+
+        if (isBusinessAccount) {
+          await _createBusinessProfileForNewUser(user: user, email: email);
+        }
 
         try {
           await user.sendEmailVerification();
@@ -341,6 +467,307 @@ class _SignInPageState extends State<SignInPage> {
     });
   }
 
+
+
+
+  Widget _buildBusinessMapLinkDropdown() {
+    return StreamBuilder<List<TcgShop>>(
+      stream: _shopService.watchApprovedShops(),
+      builder: (context, snapshot) {
+        final shops = snapshot.data ?? const <TcgShop>[];
+
+        final shopIds = shops.map((shop) => shop.id).toSet();
+        final safeSelectedShopId =
+            _businessLinkedShopId.isNotEmpty &&
+                    shopIds.contains(_businessLinkedShopId)
+                ? _businessLinkedShopId
+                : '';
+
+        if (_businessLinkedShopId.isNotEmpty && safeSelectedShopId.isEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() {
+              _businessLinkedShopId = '';
+              _businessLinkedShopName = '';
+            });
+          });
+        }
+
+        return DropdownButtonFormField<String>(
+          initialValue: safeSelectedShopId,
+          isExpanded: true,
+          dropdownColor: const Color(0xFF16366E),
+          iconEnabledColor: const Color(0xFFC8D4F0),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+          decoration: _authInputDecoration('Link existing map shop'),
+          items: [
+            const DropdownMenuItem<String>(
+              value: '',
+              child: Text('I will add/link my shop after sign-up'),
+            ),
+            ...shops.map(
+              (shop) => DropdownMenuItem<String>(
+                value: shop.id,
+                child: Text(
+                  shop.name,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+          onChanged: _submitting
+              ? null
+              : (value) {
+                  final selectedShopId = value ?? '';
+                  TcgShop? selectedShop;
+
+                  for (final shop in shops) {
+                    if (shop.id == selectedShopId) {
+                      selectedShop = shop;
+                      break;
+                    }
+                  }
+
+                  setState(() {
+                    _businessLinkedShopId = selectedShopId;
+                    _businessLinkedShopName = selectedShop?.name ?? '';
+                  });
+                },
+        );
+      },
+    );
+  }
+
+  Widget _buildBusinessDetailsForm() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16366E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF3F5C96)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.storefront_outlined,
+                color: Color(0xFFF7DE77),
+                size: 22,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Business details',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'These details create your Business Profile straight away. You must complete business setup before entering the app.',
+            style: TextStyle(
+              color: Color(0xFFC8D4F0),
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _businessNameController,
+            enabled: !_submitting,
+            textInputAction: TextInputAction.next,
+            textCapitalization: TextCapitalization.words,
+            style: const TextStyle(color: Colors.white),
+            decoration: _authInputDecoration('Business name'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _businessDescriptionController,
+            enabled: !_submitting,
+            minLines: 2,
+            maxLines: 4,
+            textInputAction: TextInputAction.newline,
+            textCapitalization: TextCapitalization.sentences,
+            style: const TextStyle(color: Colors.white),
+            decoration: _authInputDecoration('Business description'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _businessWebsiteController,
+            enabled: !_submitting,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
+            style: const TextStyle(color: Colors.white),
+            decoration: _authInputDecoration('Website'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _businessPhoneController,
+            enabled: !_submitting,
+            keyboardType: TextInputType.phone,
+            textInputAction: TextInputAction.next,
+            style: const TextStyle(color: Colors.white),
+            decoration: _authInputDecoration('Phone number'),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _businessTownController,
+                  enabled: !_submitting,
+                  textInputAction: TextInputAction.next,
+                  textCapitalization: TextCapitalization.words,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _authInputDecoration('Town'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _businessCountyController,
+                  enabled: !_submitting,
+                  textInputAction: TextInputAction.next,
+                  textCapitalization: TextCapitalization.words,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _authInputDecoration('County'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Shop type',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _AccountTypeCard(
+                  title: 'Physical shop',
+                  subtitle: 'Link to a shop on the TCG Shop Map.',
+                  icon: Icons.store_mall_directory_outlined,
+                  selected: _businessHasPhysicalShop == true,
+                  onTap: _submitting
+                      ? null
+                      : () => setState(() {
+                            _businessHasPhysicalShop = true;
+                          }),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _AccountTypeCard(
+                  title: 'Online-only',
+                  subtitle: 'No map link needed.',
+                  icon: Icons.language,
+                  selected: _businessHasPhysicalShop == false,
+                  onTap: _submitting
+                      ? null
+                      : () => setState(() {
+                            _businessHasPhysicalShop = false;
+                            _businessLinkedShopId = '';
+                            _businessLinkedShopName = '';
+                          }),
+                ),
+              ),
+            ],
+          ),
+          if (_businessHasPhysicalShop == true) ...[
+            const SizedBox(height: 10),
+            _buildBusinessMapLinkDropdown(),
+          ],
+          const SizedBox(height: 10),
+          const Text(
+            'Physical shops must be linked to the TCG Shop Map before the account can continue into the app. If your shop is not listed yet, you can add it straight after sign-up.',
+            style: TextStyle(
+              color: Color(0xFFF7DE77),
+              fontSize: 12,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountTypeSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Choose account type',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _AccountTypeCard(
+                title: 'Personal',
+                subtitle: 'Collect cards, track sets, wishlist and community.',
+                icon: Icons.person_outline,
+                selected: _selectedAccountType == _kPersonalAccountType,
+                onTap: _submitting
+                    ? null
+                    : () => setState(() {
+                          _selectedAccountType = _kPersonalAccountType;
+                          _businessHasPhysicalShop = null;
+                          _businessLinkedShopId = '';
+                          _businessLinkedShopName = '';
+                        }),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _AccountTypeCard(
+                title: 'Business',
+                subtitle: 'Enter your business details during sign-up.',
+                icon: Icons.storefront_outlined,
+                selected: _selectedAccountType == _kBusinessAccountType,
+                onTap: _submitting
+                    ? null
+                    : () => setState(() {
+                          _selectedAccountType = _kBusinessAccountType;
+                        }),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _selectedAccountType == _kBusinessAccountType
+              ? 'Business accounts create their Business Profile now. You can edit it later from Profile.'
+              : 'Personal accounts can use PocketChase as a collector account.',
+          style: const TextStyle(
+            color: Color(0xFFC8D4F0),
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateOfBirth = _selectedDateOfBirth;
@@ -413,6 +840,14 @@ class _SignInPageState extends State<SignInPage> {
                         ],
                       ),
                       const SizedBox(height: 18),
+                      if (_isSignUp) ...[
+                        _buildAccountTypeSelector(),
+                        if (_selectedAccountType == _kBusinessAccountType) ...[
+                          const SizedBox(height: 14),
+                          _buildBusinessDetailsForm(),
+                        ],
+                        const SizedBox(height: 14),
+                      ],
                       TextField(
                         controller: _emailController,
                         enabled: !_submitting,
@@ -647,6 +1082,79 @@ class _SignInPageState extends State<SignInPage> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _AccountTypeCard extends StatelessWidget {
+  const _AccountTypeCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = selected ? const Color(0xFFF7DE77) : const Color(0xFF3F5C96);
+    final backgroundColor = selected
+        ? const Color(0xFFF7DE77).withValues(alpha: 0.14)
+        : const Color(0xFF16366E);
+
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor, width: selected ? 1.6 : 1),
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                color: selected ? const Color(0xFFF7DE77) : Colors.white70,
+                size: 26,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFFC8D4F0),
+                  fontSize: 11,
+                  height: 1.25,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ),

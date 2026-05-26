@@ -32,11 +32,17 @@ class WelcomePage extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                   children: [
                     const SizedBox(height: 8),
-                    _HeroCard(displayName: _displayName),
+                    _HeroCard(
+                      displayName: _displayName,
+                      isBusinessAccount: profile.isBusinessAccount,
+                    ),
                     const SizedBox(height: 16),
-                    const _FeatureGrid(),
+                    _FeatureGrid(isBusinessAccount: profile.isBusinessAccount),
                     const SizedBox(height: 18),
-                    _StartButton(onStart: onStart),
+                    _StartButton(
+                      onStart: onStart,
+                      isBusinessAccount: profile.isBusinessAccount,
+                    ),
                     const SizedBox(height: 12),
                     const Text(
                       'You can update your profile, collection, wishlist, and community settings anytime.',
@@ -120,9 +126,13 @@ class _GlowOrb extends StatelessWidget {
 }
 
 class _HeroCard extends StatelessWidget {
-  const _HeroCard({required this.displayName});
+  const _HeroCard({
+    required this.displayName,
+    required this.isBusinessAccount,
+  });
 
   final String displayName;
+  final bool isBusinessAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -155,7 +165,9 @@ class _HeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'Welcome to PocketChase, $displayName',
+            isBusinessAccount
+                ? 'Welcome to PocketChase Business, $displayName'
+                : 'Welcome to PocketChase, $displayName',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white,
@@ -165,8 +177,10 @@ class _HeroCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Your Pokémon collecting hub for searching cards, tracking master sets, scanning your collection, watching restocks, and connecting with collectors.',
+          Text(
+            isBusinessAccount
+                ? 'Set up your business account, create your business profile, and get ready for future Business Pro tools.'
+                : 'Your Pokémon collecting hub for searching cards, tracking master sets, scanning your collection, and connecting with collectors.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Color(0xFFD8E3FB),
@@ -182,11 +196,36 @@ class _HeroCard extends StatelessWidget {
 }
 
 class _FeatureGrid extends StatelessWidget {
-  const _FeatureGrid();
+  const _FeatureGrid({required this.isBusinessAccount});
+
+  final bool isBusinessAccount;
 
   @override
   Widget build(BuildContext context) {
-    const features = [
+    final features = isBusinessAccount
+        ? const [
+            _Feature(
+              Icons.storefront_outlined,
+              'Business profile',
+              'Add your shop or business details.',
+            ),
+            _Feature(
+              Icons.map_outlined,
+              'Shop map ready',
+              'Link a shop listing later if needed.',
+            ),
+            _Feature(
+              Icons.workspace_premium_outlined,
+              'Business Pro',
+              'Premium features coming soon.',
+            ),
+            _Feature(
+              Icons.forum_outlined,
+              'Community',
+              'Connect with local collectors.',
+            ),
+          ]
+        : const [
       _Feature(
         Icons.search_rounded,
         'Search cards',
@@ -344,9 +383,13 @@ class _GlassPanel extends StatelessWidget {
 }
 
 class _StartButton extends StatefulWidget {
-  const _StartButton({required this.onStart});
+  const _StartButton({
+    required this.onStart,
+    required this.isBusinessAccount,
+  });
 
   final Future<void> Function() onStart;
+  final bool isBusinessAccount;
 
   @override
   State<_StartButton> createState() => _StartButtonState();
@@ -387,7 +430,13 @@ class _StartButtonState extends State<_StartButton> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : const Icon(Icons.arrow_forward_rounded),
-      label: Text(_starting ? 'Opening PocketChase...' : 'Start collecting'),
+      label: Text(
+        _starting
+            ? 'Opening PocketChase...'
+            : widget.isBusinessAccount
+                ? 'Start business setup'
+                : 'Start collecting',
+      ),
     );
   }
 }

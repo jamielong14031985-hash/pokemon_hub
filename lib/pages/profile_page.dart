@@ -24,14 +24,14 @@ import '../utils/profile_stats_helpers.dart';
 import '../widgets/achievement_badges.dart';
 import '../widgets/profile_collection_widgets.dart';
 import '../widgets/profile_stat_card.dart';
-import 'admin_tracked_restock_products_page.dart';
+import 'admin_business_profiles_page.dart';
 import 'admin_user_feature_flags_page.dart';
+import 'business_profile_page.dart';
 import 'card_details_page.dart';
+import 'featured_online_shops_page.dart';
 import 'friend_requests_page.dart';
 import 'friends_page.dart';
 import 'pro_upgrade_page.dart';
-import 'restock_alert_preferences_page.dart';
-import 'my_restock_tracker_page.dart';
 import 'tcg_shop_submissions_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
@@ -54,7 +54,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _loadingProfile = true;
   bool _savingName = false;
   bool _savingCurrency = false;
-  bool _deletingAccount = false;
+  final bool _deletingAccount = false;
   bool _featuresExpanded = false;
   String _selectedCurrencyCode = CurrencySettings.selectedCode;
   late Future<ProfileStats> _statsFuture;
@@ -73,7 +73,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadProfile() async {
-    _nameController.text = widget.profile.displayName;
+    _nameController.text = widget.profile.username.trim();
     final imagePath = await LocalProfileImageStore.loadForUser(widget.profile.uid);
 
     if (mounted) {
@@ -92,7 +92,13 @@ class _ProfilePageState extends State<ProfilePage> {
     final newName = _nameController.text.trim();
     if (newName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a trainer name')),
+        SnackBar(
+          content: Text(
+            widget.profile.isBusinessAccount
+                ? 'Enter a business name'
+                : 'Enter a trainer name',
+          ),
+        ),
       );
       return;
     }
@@ -263,15 +269,54 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-
-  Future<void> _openMyRestockTracker() async {
+  Future<void> _openBusinessProfile() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => const MyRestockTrackerPage(),
+        builder: (_) => const BusinessProfilePage(),
       ),
     );
   }
 
+  Future<void> _openFeaturedOnlineShops() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const FeaturedOnlineShopsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openAdminBusinessProfiles() async {
+    try {
+      final canManage = await UserFeatureFlagsService
+          .watchCurrentUserCanManageFeatureFlags()
+          .first
+          .timeout(const Duration(seconds: 8));
+
+      if (!mounted) return;
+
+      if (canManage != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only admins and moderators can open Business Profiles.'),
+          ),
+        );
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const AdminBusinessProfilesPage(),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not check your staff permission right now.'),
+        ),
+      );
+    }
+  }
 
   Future<void> _openTcgShopSubmissions() async {
     await Navigator.of(context).push(
@@ -314,23 +359,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _openRestockAlertPreferences() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const RestockAlertPreferencesPage(),
-      ),
-    );
-  }
-
-  Future<void> _openTrackedRestockProducts() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const AdminTrackedRestockProductsPage(),
-      ),
-    );
-  }
-
-
   Future<void> _openCardDetails(TcgCard card) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => CardDetailsPage(card: card)),
@@ -340,32 +368,37 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _deleteAccount() async {
     final password = await _showDeleteAccountConfirmationDialog();
     if (password == null) return;
-
-    setState(() {
-      _deletingAccount = true;
-    });
+    if (!mounted) return;
 
     try {
       await AccountDeletionService.deleteCurrentAccount(password: password);
+
+      // Do nothing else after a successful delete.
+      // Firebase Auth will sign the user out and the root auth listener should
+      // move the app back to the sign-in screen. Calling setState, snackbar, or
+      // Navigator here can trigger Flutter inherited-widget assertions.
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
+
       final message = switch (e.code) {
-        'wrong-password' || 'invalid-credential' => 'Password was incorrect. Account not deleted.',
-        'requires-recent-login' => 'Please sign out, sign back in, then try deleting your account again.',
+        'wrong-password' || 'invalid-credential' =>
+          'Password was incorrect. Account not deleted.',
+        'requires-recent-login' =>
+          'Please sign out, sign back in, then try deleting your account again.',
+        'too-many-requests' =>
+          'Too many attempts. Please wait a while and try again.',
         _ => e.message ?? 'Could not delete your account.',
       };
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString().replaceFirst('Bad state: ', ''))),
       );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _deletingAccount = false;
-        });
-      }
     }
   }
 
@@ -453,7 +486,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-
   ImageProvider? _profileImageProvider() {
     final imageFile = _profileImagePath != null ? File(_profileImagePath!) : null;
     final existingImageFile =
@@ -479,7 +511,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return null;
   }
-
 
   Widget _buildProfileSettingsCard(ImageProvider? profileImageProvider) {
     return RepaintBoundary(
@@ -526,17 +557,21 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'This picture will show beside your community posts and comments.',
+              Text(
+                widget.profile.isBusinessAccount
+                    ? 'This picture will show beside your business posts and comments.'
+                    : 'This picture will show beside your community posts and comments.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54, fontSize: 12),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _nameController,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  labelText: 'Trainer Name',
+                  labelText: widget.profile.isBusinessAccount
+                      ? 'Business Name'
+                      : 'Trainer Name',
                   labelStyle: const TextStyle(color: Colors.white70),
                   filled: true,
                   fillColor: const Color(0xFF0E2A5E),
@@ -838,7 +873,10 @@ class _ProfilePageState extends State<ProfilePage> {
       stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
       builder: (context, managerSnapshot) {
         final canManageFeatures = managerSnapshot.data == true;
-        final toolCount = canManageFeatures ? 5 : 2;
+        final isBusinessAccount = widget.profile.isBusinessAccount;
+        final toolCount = 1 +
+            (isBusinessAccount ? 1 : 0) +
+            (canManageFeatures ? 3 : 0);
 
         if (!canManageFeatures) {
           return _buildFeatureAccessCard(
@@ -945,7 +983,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               const SizedBox(height: 4),
                               Text(
                                 _featuresExpanded
-                                    ? 'Tap to hide extra PocketChase tools.'
+                                    ? 'Tap to hide PocketChase tools.'
                                     : collapsedSubtitle,
                                 style: const TextStyle(
                                   color: Color(0xFFD8E3FB),
@@ -980,7 +1018,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Manage extra PocketChase tools and account features.',
+                          'Manage business and admin tools for PocketChase.',
                           style: TextStyle(
                             color: Color(0xFFD8E3FB),
                             height: 1.35,
@@ -1025,26 +1063,19 @@ class _ProfilePageState extends State<ProfilePage> {
                           ),
                         ],
                         _buildFeatureTile(
-                          icon: Icons.add_alert_outlined,
+                          icon: Icons.language,
                           iconColor: const Color(0xFFF7DE77),
-                          title: 'My Restock Tracker',
-                          subtitle: 'Add product pages you want to track yourself',
-                          onTap: _openMyRestockTracker,
+                          title: 'Featured Online Shops',
+                          subtitle: 'Browse premium online-only TCG businesses',
+                          onTap: _openFeaturedOnlineShops,
                         ),
-                        _buildFeatureTile(
-                          icon: Icons.notifications_active_outlined,
-                          iconColor: const Color(0xFFF7DE77),
-                          title: 'Alert Preferences',
-                          subtitle: 'Choose shops, regions, and stores to get notifications from',
-                          onTap: _openRestockAlertPreferences,
-                        ),
-                        if (canManageFeatures)
+                        if (widget.profile.isBusinessAccount)
                           _buildFeatureTile(
-                            icon: Icons.manage_search_outlined,
+                            icon: Icons.storefront_outlined,
                             iconColor: const Color(0xFFF7DE77),
-                            title: 'Tracked Products',
-                            subtitle: 'Add shop pages for automatic checking',
-                            onTap: _openTrackedRestockProducts,
+                            title: 'Business Profile',
+                            subtitle: 'Create, edit, or delete your business profile',
+                            onTap: _openBusinessProfile,
                           ),
                         if (canManageFeatures)
                           _buildFeatureTile(
@@ -1060,6 +1091,14 @@ class _ProfilePageState extends State<ProfilePage> {
                                 : 'Approve or reject user-submitted card shops',
                             notificationCount: pendingSubmissionCount,
                             onTap: _openTcgShopSubmissions,
+                          ),
+                        if (canManageFeatures)
+                          _buildFeatureTile(
+                            icon: Icons.business_center_outlined,
+                            iconColor: const Color(0xFF54D39A),
+                            title: 'Business Profiles',
+                            subtitle: 'Approve, edit, or delete business profiles',
+                            onTap: _openAdminBusinessProfiles,
                           ),
                         if (canManageFeatures)
                           _buildFeatureTile(
@@ -1178,6 +1217,234 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildBusinessDashboardCard() {
+    return RepaintBoundary(
+      child: Card(
+        color: const Color(0xFF102754),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(
+            color: const Color(0xFFF7DE77).withValues(alpha: 0.35),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: const Color(0xFFF7DE77).withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.storefront_outlined,
+                      color: Color(0xFFF7DE77),
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Business dashboard',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Manage your shop or business profile on PocketChase.',
+                          style: TextStyle(
+                            color: Color(0xFFC8D4F0),
+                            fontSize: 12,
+                            height: 1.35,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E2A5E),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF3F5C96)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Color(0xFFF7DE77),
+                      size: 20,
+                    ),
+                    SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        'This is a business account, so personal collection sections such as cards, sets, wishlist, and achievements are hidden.',
+                        style: TextStyle(
+                          color: Color(0xFFC8D4F0),
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _openBusinessProfile,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFF7DE77),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  icon: const Icon(Icons.business_center_outlined),
+                  label: const Text(
+                    'Open Business Profile',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _openFeaturedOnlineShops,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFF7DE77),
+                    side: const BorderSide(color: Color(0xFFF7DE77)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  icon: const Icon(Icons.language),
+                  label: const Text(
+                    'View Featured Online Shops',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBusinessProInfoCard() {
+    return Card(
+      color: const Color(0xFF102754),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(
+          color: const Color(0xFFF7DE77).withValues(alpha: 0.25),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.workspace_premium_outlined,
+                  color: Color(0xFFF7DE77),
+                  size: 28,
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Business Pro',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 9),
+            const Text(
+              'Business Pro features are controlled by admin toggles for now. Later this can connect to Apple and Google in-app purchases.',
+              style: TextStyle(
+                color: Color(0xFFC8D4F0),
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildBusinessFeatureLine(
+              icon: Icons.star_border_rounded,
+              title: 'Featured shop on map',
+            ),
+            _buildBusinessFeatureLine(
+              icon: Icons.campaign_outlined,
+              title: 'Automatically featured business posts',
+            ),
+            _buildBusinessFeatureLine(
+              icon: Icons.verified_outlined,
+              title: 'Premium business badge',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBusinessFeatureLine({
+    required IconData icon,
+    required String title,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 9),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: const Color(0xFFF7DE77),
+            size: 20,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1437,15 +1704,24 @@ class _ProfilePageState extends State<ProfilePage> {
                         children: [
                           _buildProfileSettingsCard(profileImageProvider),
                           const SizedBox(height: 16),
-                          _buildFriendsCard(),
-                          const SizedBox(height: 16),
-                          _buildWishlistCard(),
-                          const SizedBox(height: 16),
-                          _buildProUpgradeCard(),
-                          _buildFeatureAccessSection(),
-                          _buildAccountSecurityCard(),
-                          const SizedBox(height: 16),
-                          _buildStatsSection(profileImageProvider),
+                          if (widget.profile.isBusinessAccount) ...[
+                            _buildBusinessDashboardCard(),
+                            const SizedBox(height: 16),
+                            _buildBusinessProInfoCard(),
+                            const SizedBox(height: 16),
+                            _buildFeatureAccessSection(),
+                            _buildAccountSecurityCard(),
+                          ] else ...[
+                            _buildFriendsCard(),
+                            const SizedBox(height: 16),
+                            _buildWishlistCard(),
+                            const SizedBox(height: 16),
+                            _buildProUpgradeCard(),
+                            _buildFeatureAccessSection(),
+                            _buildAccountSecurityCard(),
+                            const SizedBox(height: 16),
+                            _buildStatsSection(profileImageProvider),
+                          ],
                         ],
                       ),
                     ),

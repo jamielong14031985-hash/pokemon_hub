@@ -677,6 +677,216 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function validBusinessProfileData(data) {
+      return data.keys().hasOnly([
+          'ownerUid',
+          'ownerEmail',
+          'businessName',
+          'businessNameLower',
+          'description',
+          'linkedShopId',
+          'linkedShopName',
+          'hasPhysicalShop',
+          'website',
+          'phone',
+          'town',
+          'townLower',
+          'county',
+          'countyLower',
+          'logoUrl',
+          'bannerUrl',
+          'status',
+          'verified',
+          'premiumActive',
+          'premiumExpiresAt',
+          'premiumSource',
+          'featuredShopEnabled',
+          'autoFeaturePosts',
+          'createdAt',
+          'updatedAt',
+          'updatedBy'
+        ])
+        && data.ownerUid is string
+        && data.ownerEmail is string
+        && data.businessName is string
+        && data.businessName.size() > 0
+        && data.businessName.size() <= 120
+        && data.businessNameLower is string
+        && data.description is string
+        && data.description.size() <= 500
+        && data.linkedShopId is string
+        && data.linkedShopId.size() <= 120
+        && data.linkedShopName is string
+        && data.linkedShopName.size() <= 120
+        && (!('hasPhysicalShop' in data) || data.hasPhysicalShop is bool)
+        && (
+          !('hasPhysicalShop' in data) ||
+          data.hasPhysicalShop == false ||
+          (data.linkedShopId.size() > 0 && data.linkedShopName.size() > 0)
+        )
+        && data.website is string
+        && data.website.size() <= 300
+        && data.phone is string
+        && data.phone.size() <= 40
+        && data.town is string
+        && data.town.size() <= 120
+        && data.townLower is string
+        && data.county is string
+        && data.county.size() <= 120
+        && data.countyLower is string
+        && data.logoUrl is string
+        && data.logoUrl.size() <= 1000
+        && data.bannerUrl is string
+        && data.bannerUrl.size() <= 1000
+        && data.status in ['pending', 'approved', 'rejected']
+        && data.verified is bool
+        && data.premiumActive is bool
+        && (!('premiumExpiresAt' in data) || data.premiumExpiresAt == null || data.premiumExpiresAt is timestamp)
+        && data.premiumSource is string
+        && data.featuredShopEnabled is bool
+        && data.autoFeaturePosts is bool
+        && (!('updatedBy' in data) || data.updatedBy is string);
+    }
+
+
+
+
+    function validBusinessEventData(data, businessId) {
+      return data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'ownerUid',
+          'title',
+          'description',
+          'eventType',
+          'location',
+          'onlineEvent',
+          'entryFee',
+          'bookingUrl',
+          'active',
+          'startsAt',
+          'endsAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.businessId == businessId
+        && data.businessName is string
+        && data.businessName.size() <= 120
+        && data.ownerUid is string
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 90
+        && data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 700
+        && data.eventType in ['trade_night', 'tournament', 'pre_release', 'release_day', 'giveaway', 'meetup', 'other']
+        && data.location is string
+        && data.location.size() <= 180
+        && data.onlineEvent is bool
+        && (data.onlineEvent == true || data.location.size() > 0)
+        && data.entryFee is string
+        && data.entryFee.size() <= 80
+        && data.bookingUrl is string
+        && data.bookingUrl.size() <= 300
+        && data.active is bool
+        && data.startsAt is timestamp
+        && (data.endsAt == null || data.endsAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validBusinessOfferData(data, businessId) {
+      return data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'ownerUid',
+          'title',
+          'description',
+          'category',
+          'code',
+          'websiteUrl',
+          'active',
+          'startsAt',
+          'endsAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.businessId == businessId
+        && data.businessName is string
+        && data.businessName.size() <= 120
+        && data.ownerUid is string
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 90
+        && data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 500
+        && data.category in ['discount', 'new_stock', 'event', 'announcement']
+        && data.code is string
+        && data.code.size() <= 40
+        && data.websiteUrl is string
+        && data.websiteUrl.size() <= 300
+        && data.active is bool
+        && (data.startsAt == null || data.startsAt is timestamp)
+        && (data.endsAt == null || data.endsAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validBusinessReviewData(data, businessId) {
+      return data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'reviewerUid',
+          'reviewerName',
+          'stars',
+          'comment',
+          'businessReply',
+          'businessReplyByUid',
+          'businessReplyCreatedAt',
+          'businessReplyUpdatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.businessId == businessId
+        && data.businessName is string
+        && data.businessName.size() <= 120
+        && data.reviewerUid is string
+        && data.reviewerName is string
+        && data.reviewerName.size() <= 120
+        && data.stars is int
+        && data.stars >= 1
+        && data.stars <= 5
+        && data.comment is string
+        && data.comment.size() > 0
+        && data.comment.size() <= 500
+        && (!('businessReply' in data) || data.businessReply is string)
+        && (!('businessReply' in data) || data.businessReply.size() <= 500)
+        && (!('businessReplyByUid' in data) || data.businessReplyByUid is string)
+        && (!('businessReplyCreatedAt' in data) || data.businessReplyCreatedAt == null || data.businessReplyCreatedAt is timestamp)
+        && (!('businessReplyUpdatedAt' in data) || data.businessReplyUpdatedAt == null || data.businessReplyUpdatedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function ownerBusinessFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data)
+        .affectedKeys()
+        .hasAny([
+          'ownerUid',
+          'ownerEmail',
+          'status',
+          'verified',
+          'premiumActive',
+          'premiumExpiresAt',
+          'premiumSource',
+          'featuredShopEnabled',
+          'autoFeaturePosts',
+          'createdAt',
+          'updatedBy'
+        ]);
+    }
+
     match /app_roles/{userId} {
       allow read: if isSelf(userId) || isAdminOrModerator();
 
@@ -724,6 +934,182 @@ service cloud.firestore {
       allow update, delete: if isAdminOrModerator();
     }
 
+    match /business_profiles/{businessId} {
+      // Public read allows featured shop badges/markers to load on the map.
+      allow read: if true;
+
+      // A signed-in user can create their own business profile, but cannot
+      // approve it or give themselves premium features.
+      allow create: if signedIn()
+        && (
+          isAdminOrModerator() ||
+          (
+            userExists(request.auth.uid) &&
+            userDoc(request.auth.uid).data.accountType == 'business'
+          )
+        )
+        && validBusinessProfileData(request.resource.data)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.hasPhysicalShop is bool
+        && request.resource.data.status == 'approved'
+        && request.resource.data.verified == false
+        && request.resource.data.premiumActive == false
+        && request.resource.data.premiumExpiresAt == null
+        && request.resource.data.premiumSource == ''
+        && request.resource.data.featuredShopEnabled == false
+        && request.resource.data.autoFeaturePosts == false;
+
+      // Owners can edit normal business details only.
+      // Admins/moderators can approve, verify, and switch premium flags on/off.
+      allow update: if (
+          signedIn()
+          && resource.data.ownerUid == request.auth.uid
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && validBusinessProfileData(request.resource.data)
+          && ownerBusinessFieldsUnchanged()
+        ) || (
+          isAdminOrModerator()
+          && validBusinessProfileData(request.resource.data)
+        );
+
+      // Business owners can delete their own profile. Admins/moderators can delete any business profile.
+      allow delete: if isAdminOrModerator()
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+
+
+
+      match /events/{eventId} {
+        allow read: if true;
+
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            (
+              get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.premiumActive == true
+            )
+          )
+          && request.resource.data.ownerUid == get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid
+          && validBusinessEventData(request.resource.data, businessId);
+
+        allow update: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            (
+              get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.premiumActive == true
+            )
+          )
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.businessId == resource.data.businessId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && validBusinessEventData(request.resource.data, businessId);
+
+        allow delete: if isAdminOrModerator()
+          || (
+            signedIn()
+            && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+            && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+          );
+      }
+
+      match /offers/{offerId} {
+        allow read: if true;
+
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            (
+              get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.premiumActive == true
+            )
+          )
+          && request.resource.data.ownerUid == get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid
+          && validBusinessOfferData(request.resource.data, businessId);
+
+        allow update: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            (
+              get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.premiumActive == true
+            )
+          )
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.businessId == resource.data.businessId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && validBusinessOfferData(request.resource.data, businessId);
+
+        allow delete: if isAdminOrModerator()
+          || (
+            signedIn()
+            && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+            && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+          );
+      }
+
+      match /reviews/{reviewId} {
+        allow read: if true;
+
+        allow create: if signedIn()
+          && reviewId == request.auth.uid
+          && request.resource.data.reviewerUid == request.auth.uid
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid != request.auth.uid
+          && validBusinessReviewData(request.resource.data, businessId);
+
+        // Review writers can edit their own review, but cannot edit the business reply fields.
+        allow update: if signedIn()
+          && reviewId == request.auth.uid
+          && resource.data.reviewerUid == request.auth.uid
+          && request.resource.data.reviewerUid == resource.data.reviewerUid
+          && request.resource.data.businessId == resource.data.businessId
+          && request.resource.data.businessName is string
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.businessReply == resource.data.businessReply
+          && request.resource.data.businessReplyByUid == resource.data.businessReplyByUid
+          && request.resource.data.businessReplyCreatedAt == resource.data.businessReplyCreatedAt
+          && request.resource.data.businessReplyUpdatedAt == resource.data.businessReplyUpdatedAt
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid != request.auth.uid
+          && validBusinessReviewData(request.resource.data, businessId);
+
+        // Business owners/admins can only edit the business reply fields.
+        allow update: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'businessReply',
+            'businessReplyByUid',
+            'businessReplyCreatedAt',
+            'businessReplyUpdatedAt'
+          ])
+          && request.resource.data.businessId == resource.data.businessId
+          && request.resource.data.businessName == resource.data.businessName
+          && request.resource.data.reviewerUid == resource.data.reviewerUid
+          && request.resource.data.reviewerName == resource.data.reviewerName
+          && request.resource.data.stars == resource.data.stars
+          && request.resource.data.comment == resource.data.comment
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == resource.data.updatedAt
+          && validBusinessReviewData(request.resource.data, businessId);
+
+        allow delete: if isAdminOrModerator()
+          || (
+            signedIn()
+            && reviewId == request.auth.uid
+            && resource.data.reviewerUid == request.auth.uid
+          );
+      }
+    }
+
     match /restock_alerts/{alertId} {
       allow read: if signedIn()
         && (restockAlertsEnabledFor(request.auth.uid) || isAdminOrModerator());
@@ -765,7 +1151,9 @@ service cloud.firestore {
         && request.resource.data.username is string
         && request.resource.data.createdAtMs is int
         && request.resource.data.updatedAtMs is int
-        && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int);
+        && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int)
+        && (!('accountType' in request.resource.data) || request.resource.data.accountType in ['personal', 'business'])
+        && (!('businessProfileCreated' in request.resource.data) || request.resource.data.businessProfileCreated is bool);
 
       allow update: if isSelf(userId)
         && request.resource.data.uid == userId
@@ -773,7 +1161,9 @@ service cloud.firestore {
         && request.resource.data.username is string
         && request.resource.data.createdAtMs is int
         && request.resource.data.updatedAtMs is int
-        && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int);
+        && (!('dateOfBirthMs' in request.resource.data) || request.resource.data.dateOfBirthMs is int)
+        && (!('accountType' in request.resource.data) || request.resource.data.accountType in ['personal', 'business'])
+        && (!('businessProfileCreated' in request.resource.data) || request.resource.data.businessProfileCreated is bool);
 
       allow delete: if isSelf(userId);
 
@@ -1102,6 +1492,7 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+
     /*
       PUBLIC READ FALLBACK WITH PROTECTED WRITES
 
