@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:mime/mime.dart';
 
+import '../models/business_analytics.dart';
 import '../models/business_event.dart';
 import '../models/business_offer.dart';
 import '../models/business_profile.dart';
@@ -224,6 +225,69 @@ class BusinessProfileService {
   }
 
 
+
+
+  DocumentReference<Map<String, dynamic>> _businessAnalyticsSummary(
+    String businessId,
+  ) {
+    return _businessProfiles
+        .doc(businessId)
+        .collection('analytics')
+        .doc('summary');
+  }
+
+  Stream<BusinessAnalytics> watchBusinessAnalytics(String businessId) {
+    final cleanBusinessId = businessId.trim();
+
+    if (cleanBusinessId.isEmpty) {
+      return Stream<BusinessAnalytics>.value(
+        BusinessAnalytics.empty(cleanBusinessId),
+      );
+    }
+
+    return _businessAnalyticsSummary(cleanBusinessId).snapshots().map(
+      (snapshot) {
+        if (!snapshot.exists) {
+          return BusinessAnalytics.empty(cleanBusinessId);
+        }
+
+        return BusinessAnalytics.fromDoc(snapshot, cleanBusinessId);
+      },
+    );
+  }
+
+  Future<void> incrementBusinessAnalyticsMetric({
+    required String businessId,
+    required String metric,
+  }) async {
+    final cleanBusinessId = businessId.trim();
+    final cleanMetric = metric.trim();
+
+    if (cleanBusinessId.isEmpty) return;
+
+    const allowedMetrics = <String>{
+      'profileViews',
+      'websiteClicks',
+      'phoneClicks',
+      'mapViews',
+      'offerViews',
+      'eventViews',
+    };
+
+    if (!allowedMetrics.contains(cleanMetric)) return;
+
+    try {
+      await _businessAnalyticsSummary(cleanBusinessId).set(
+        <String, Object?>{
+          cleanMetric: FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    } catch (_) {
+      // Analytics should never block the main user action.
+    }
+  }
 
   CollectionReference<Map<String, dynamic>> _businessEvents(
     String businessId,

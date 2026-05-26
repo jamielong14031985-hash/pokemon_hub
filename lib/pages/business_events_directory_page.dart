@@ -389,6 +389,11 @@ class _DirectoryEventCard extends StatelessWidget {
       return;
     }
 
+    await BusinessProfileService().incrementBusinessAnalyticsMetric(
+      businessId: event.businessId,
+      metric: 'eventViews',
+    );
+
     final launched = await launchUrl(
       uri,
       mode: LaunchMode.externalApplication,

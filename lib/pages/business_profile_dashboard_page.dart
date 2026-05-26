@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/business_analytics.dart';
 import '../models/business_profile.dart';
+import '../services/business_profile_service.dart';
 import '../widgets/business_rating_summary.dart';
 import 'business_events_page.dart';
 import 'business_offers_page.dart';
@@ -155,10 +157,10 @@ class BusinessProDashboardPage extends StatelessWidget {
           const _SectionHeader(
             icon: Icons.insights_outlined,
             title: 'Analytics',
-            subtitle: 'Placeholder for future Pro analytics.',
+            subtitle: 'Track how users interact with this business.',
           ),
           const SizedBox(height: 10),
-          const _AnalyticsPlaceholderCard(),
+          _AnalyticsCard(profile: profile),
           const SizedBox(height: 18),
           const _SectionHeader(
             icon: Icons.upgrade_outlined,
@@ -787,89 +789,164 @@ class _EventsDashboardCard extends StatelessWidget {
   }
 }
 
-class _AnalyticsPlaceholderCard extends StatelessWidget {
-  const _AnalyticsPlaceholderCard();
+class _AnalyticsCard extends StatelessWidget {
+  const _AnalyticsCard({required this.profile});
+
+  final BusinessProfile profile;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: BusinessProDashboardPage._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: BusinessProDashboardPage._borderColor),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _ComingSoonRow(
-            icon: Icons.visibility_outlined,
-            title: 'Profile views',
-            description: 'Track how many people view your business profile.',
+    return StreamBuilder<BusinessAnalytics>(
+      stream: BusinessProfileService().watchBusinessAnalytics(profile.id),
+      builder: (context, snapshot) {
+        final analytics = snapshot.data ?? BusinessAnalytics.empty(profile.id);
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: BusinessProDashboardPage._cardColor,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: BusinessProDashboardPage._borderColor),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: BusinessProDashboardPage._goldColor,
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Loading analytics...',
+                    style: TextStyle(
+                      color: BusinessProDashboardPage._softTextColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: BusinessProDashboardPage._cardColor,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: BusinessProDashboardPage._borderColor),
           ),
-          SizedBox(height: 12),
-          _ComingSoonRow(
-            icon: Icons.open_in_new,
-            title: 'Website clicks',
-            description: 'See how many users tap through to your website.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AnalyticsTotalRow(analytics: analytics),
+              const SizedBox(height: 12),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.38,
+                children: [
+                  _AnalyticsTile(
+                    icon: Icons.map_outlined,
+                    title: 'Map views',
+                    value: analytics.mapViews,
+                  ),
+                  _AnalyticsTile(
+                    icon: Icons.open_in_new,
+                    title: 'Website clicks',
+                    value: analytics.websiteClicks,
+                  ),
+                  _AnalyticsTile(
+                    icon: Icons.phone_outlined,
+                    title: 'Phone taps',
+                    value: analytics.phoneClicks,
+                  ),
+                  _AnalyticsTile(
+                    icon: Icons.local_offer_outlined,
+                    title: 'Offer opens',
+                    value: analytics.offerViews,
+                  ),
+                  _AnalyticsTile(
+                    icon: Icons.event_available_outlined,
+                    title: 'Event opens',
+                    value: analytics.eventViews,
+                  ),
+                  _AnalyticsTile(
+                    icon: Icons.visibility_outlined,
+                    title: 'Profile views',
+                    value: analytics.profileViews,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'These numbers are early Business Pro analytics and will grow as users interact with the shop, offers, and events.',
+                style: TextStyle(
+                  color: BusinessProDashboardPage._softTextColor,
+                  height: 1.35,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          SizedBox(height: 12),
-          _ComingSoonRow(
-            icon: Icons.campaign_outlined,
-            title: 'Featured banner views',
-            description: 'Measure exposure from the moving premium banner.',
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-class _ComingSoonRow extends StatelessWidget {
-  const _ComingSoonRow({
-    required this.icon,
-    required this.title,
-    required this.description,
-  });
+class _AnalyticsTotalRow extends StatelessWidget {
+  const _AnalyticsTotalRow({required this.analytics});
 
-  final IconData icon;
-  final String title;
-  final String description;
+  final BusinessAnalytics analytics;
 
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: BusinessProDashboardPage._goldColor, size: 23),
-        const SizedBox(width: 11),
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: BusinessProDashboardPage._fieldColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: BusinessProDashboardPage._borderColor),
+          ),
+          child: const Icon(
+            Icons.insights_outlined,
+            color: BusinessProDashboardPage._goldColor,
+          ),
+        ),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const _MiniLabel(text: 'Soon'),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                description,
-                style: const TextStyle(
+              const Text(
+                'Total engagement',
+                style: TextStyle(
                   color: BusinessProDashboardPage._softTextColor,
                   fontSize: 12,
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                analytics.totalEngagement.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
@@ -880,27 +957,55 @@ class _ComingSoonRow extends StatelessWidget {
   }
 }
 
-class _MiniLabel extends StatelessWidget {
-  const _MiniLabel({required this.text});
+class _AnalyticsTile extends StatelessWidget {
+  const _AnalyticsTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
 
-  final String text;
+  final IconData icon;
+  final String title;
+  final int value;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: BusinessProDashboardPage._fieldColor,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: BusinessProDashboardPage._borderColor),
       ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: BusinessProDashboardPage._softTextColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            color: BusinessProDashboardPage._goldColor,
+            size: 22,
+          ),
+          const Spacer(),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: BusinessProDashboardPage._softTextColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value.toString(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 19,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }

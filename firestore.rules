@@ -751,6 +751,26 @@ service cloud.firestore {
 
 
 
+
+    function validBusinessAnalyticsSummaryData(data) {
+      return data.keys().hasOnly([
+          'profileViews',
+          'websiteClicks',
+          'phoneClicks',
+          'mapViews',
+          'offerViews',
+          'eventViews',
+          'updatedAt'
+        ])
+        && (!('profileViews' in data) || data.profileViews is int)
+        && (!('websiteClicks' in data) || data.websiteClicks is int)
+        && (!('phoneClicks' in data) || data.phoneClicks is int)
+        && (!('mapViews' in data) || data.mapViews is int)
+        && (!('offerViews' in data) || data.offerViews is int)
+        && (!('eventViews' in data) || data.eventViews is int)
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
     function validBusinessEventData(data, businessId) {
       return data.keys().hasOnly([
           'businessId',
@@ -977,6 +997,25 @@ service cloud.firestore {
         || (signedIn() && resource.data.ownerUid == request.auth.uid);
 
 
+
+
+      match /analytics/{analyticsId} {
+        allow read: if analyticsId == 'summary'
+          && (
+            isAdminOrModerator() ||
+            (
+              signedIn()
+              && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+            )
+          );
+
+        allow create, update: if analyticsId == 'summary'
+          && signedIn()
+          && validBusinessAnalyticsSummaryData(request.resource.data);
+
+        allow delete: if analyticsId == 'summary' && isAdminOrModerator();
+      }
 
       match /events/{eventId} {
         allow read: if true;

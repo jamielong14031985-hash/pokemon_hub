@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -439,6 +441,11 @@ class _OnlineShopCard extends StatelessWidget {
       return;
     }
 
+    await BusinessProfileService().incrementBusinessAnalyticsMetric(
+      businessId: profile.id,
+      metric: 'websiteClicks',
+    );
+
     final launched = await launchUrl(
       uri,
       mode: LaunchMode.externalApplication,
@@ -452,6 +459,13 @@ class _OnlineShopCard extends StatelessWidget {
   }
 
   void _showContact(BuildContext context, String phone) {
+    unawaited(
+      BusinessProfileService().incrementBusinessAnalyticsMetric(
+        businessId: profile.id,
+        metric: 'phoneClicks',
+      ),
+    );
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,

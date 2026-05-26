@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -874,6 +876,13 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
 
 
   void _showOnlineBusinessDetails(BusinessProfile profile) {
+    unawaited(
+      _businessProfileService.incrementBusinessAnalyticsMetric(
+        businessId: profile.id,
+        metric: 'mapViews',
+      ),
+    );
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1009,7 +1018,14 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                           'Open website',
                           style: TextStyle(fontWeight: FontWeight.w900),
                         ),
-                        onPressed: () => _openWebsite(website),
+                        onPressed: () async {
+                          await _businessProfileService
+                              .incrementBusinessAnalyticsMetric(
+                            businessId: profile.id,
+                            metric: 'websiteClicks',
+                          );
+                          await _openWebsite(website);
+                        },
                       ),
                     ),
                   ],
@@ -1503,6 +1519,15 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   }
 
   void _showShopDetails(TcgShop shop, BusinessProfile? featuredProfile) {
+    if (featuredProfile != null) {
+      unawaited(
+        _businessProfileService.incrementBusinessAnalyticsMetric(
+          businessId: featuredProfile.id,
+          metric: 'mapViews',
+        ),
+      );
+    }
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,

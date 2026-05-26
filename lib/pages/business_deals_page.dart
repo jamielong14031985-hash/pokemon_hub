@@ -369,6 +369,11 @@ class _DealCard extends StatelessWidget {
       return;
     }
 
+    await BusinessProfileService().incrementBusinessAnalyticsMetric(
+      businessId: offer.businessId,
+      metric: 'offerViews',
+    );
+
     final launched = await launchUrl(
       uri,
       mode: LaunchMode.externalApplication,
