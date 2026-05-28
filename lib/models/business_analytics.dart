@@ -9,6 +9,7 @@ class BusinessAnalytics {
     required this.mapViews,
     required this.offerViews,
     required this.eventViews,
+    required this.productViews,
     this.updatedAt,
   });
 
@@ -19,6 +20,7 @@ class BusinessAnalytics {
   final int mapViews;
   final int offerViews;
   final int eventViews;
+  final int productViews;
   final Timestamp? updatedAt;
 
   static int cleanInt(dynamic value) {
@@ -41,6 +43,7 @@ class BusinessAnalytics {
       mapViews: 0,
       offerViews: 0,
       eventViews: 0,
+      productViews: 0,
     );
   }
 
@@ -58,6 +61,7 @@ class BusinessAnalytics {
       mapViews: cleanInt(data['mapViews']),
       offerViews: cleanInt(data['offerViews']),
       eventViews: cleanInt(data['eventViews']),
+      productViews: cleanInt(data['productViews']),
       updatedAt: cleanTimestamp(data['updatedAt']),
     );
   }
@@ -68,6 +72,7 @@ class BusinessAnalytics {
         phoneClicks +
         mapViews +
         offerViews +
-        eventViews;
+        eventViews +
+        productViews;
   }
 }

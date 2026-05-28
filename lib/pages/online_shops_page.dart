@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
 import '../widgets/business_offers_preview.dart';
+import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
 import 'business_reviews_page.dart';
 
@@ -343,6 +344,11 @@ class _OnlineShopCard extends StatelessWidget {
           BusinessOffersPreview(
             profile: profile,
             maxItems: 2,
+          ),
+          const SizedBox(height: 12),
+          BusinessProductsPreview(
+            profile: profile,
+            maxItems: 3,
           ),
           const SizedBox(height: 12),
           SizedBox(

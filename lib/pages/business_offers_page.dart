@@ -26,13 +26,6 @@ class _BusinessOffersPageState extends State<BusinessOffersPage> {
   static const Color _goldColor = Color(0xFFF7DE77);
   static const Color _softTextColor = Color(0xFFC8D4F0);
 
-  static const Map<String, String> _categoryLabels = <String, String>{
-    'discount': 'Discount code',
-    'new_stock': 'New stock',
-    'event': 'Event',
-    'announcement': 'Announcement',
-  };
-
   final BusinessProfileService _service = BusinessProfileService();
 
   String get _currentUid => FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -55,260 +48,20 @@ class _BusinessOffersPageState extends State<BusinessOffersPage> {
       return;
     }
 
-    final titleController = TextEditingController(
-      text: existingOffer?.title ?? '',
-    );
-    final descriptionController = TextEditingController(
-      text: existingOffer?.description ?? '',
-    );
-    final codeController = TextEditingController(
-      text: existingOffer?.code ?? '',
-    );
-    final websiteController = TextEditingController(
-      text: existingOffer?.websiteUrl ?? widget.profile.website,
+    final savedMessage = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => _BusinessOfferEditorPage(
+          profile: widget.profile,
+          existingOffer: existingOffer,
+        ),
+      ),
     );
 
-    var selectedCategory = existingOffer?.category ?? 'discount';
-    if (!_categoryLabels.containsKey(selectedCategory)) {
-      selectedCategory = 'discount';
-    }
+    if (!mounted || savedMessage == null) return;
 
-    var active = existingOffer?.active ?? true;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      backgroundColor: _cardColor,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      builder: (bottomSheetContext) {
-        var saving = false;
-
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            Future<void> saveOffer() async {
-              final title = titleController.text.trim();
-              final description = descriptionController.text.trim();
-
-              if (title.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Offer title is required.')),
-                );
-                return;
-              }
-
-              if (description.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Offer description is required.'),
-                  ),
-                );
-                return;
-              }
-
-              setModalState(() => saving = true);
-
-              try {
-                await _service.saveBusinessOffer(
-                  profile: widget.profile,
-                  offerId: existingOffer?.id,
-                  title: title,
-                  description: description,
-                  category: selectedCategory,
-                  code: codeController.text.trim(),
-                  websiteUrl: websiteController.text.trim(),
-                  active: active,
-                );
-
-                if (!bottomSheetContext.mounted) return;
-                Navigator.of(bottomSheetContext).pop();
-
-                if (!mounted) return;
-                ScaffoldMessenger.of(this.context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      existingOffer == null ? 'Offer added.' : 'Offer saved.',
-                    ),
-                  ),
-                );
-              } catch (error) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not save offer: $error')),
-                );
-              } finally {
-                if (context.mounted) {
-                  setModalState(() => saving = false);
-                }
-              }
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 20,
-                  right: 20,
-                  top: 8,
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        existingOffer == null ? 'Add offer' : 'Edit offer',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Create a Business Pro offer for customers to see.',
-                        style: TextStyle(
-                          color: _softTextColor,
-                          height: 1.35,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedCategory,
-                        dropdownColor: _fieldColor,
-                        iconEnabledColor: _softTextColor,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        decoration: _inputDecoration('Offer type'),
-                        items: _categoryLabels.entries
-                            .map(
-                              (entry) => DropdownMenuItem<String>(
-                                value: entry.key,
-                                child: Text(entry.value),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: saving
-                            ? null
-                            : (value) {
-                                if (value == null) return;
-                                setModalState(() => selectedCategory = value);
-                              },
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: titleController,
-                        enabled: !saving,
-                        maxLength: 90,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration('Title'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: descriptionController,
-                        enabled: !saving,
-                        minLines: 3,
-                        maxLines: 5,
-                        maxLength: 500,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration('Description'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: codeController,
-                        enabled: !saving,
-                        maxLength: 40,
-                        textCapitalization: TextCapitalization.characters,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration(
-                          'Discount code / promo code',
-                          hintText: 'Optional',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: websiteController,
-                        enabled: !saving,
-                        maxLength: 300,
-                        keyboardType: TextInputType.url,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration(
-                          'Offer website link',
-                          hintText: 'Optional',
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        activeThumbColor: _goldColor,
-                        activeTrackColor: _goldColor.withValues(alpha: 0.35),
-                        title: const Text(
-                          'Show this offer',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        subtitle: const Text(
-                          'Turn this off to hide the offer without deleting it.',
-                          style: TextStyle(color: _softTextColor),
-                        ),
-                        value: active,
-                        onChanged: saving
-                            ? null
-                            : (value) {
-                                setModalState(() => active = value);
-                              },
-                      ),
-                      const SizedBox(height: 14),
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _goldColor,
-                          foregroundColor: _backgroundColor,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        icon: saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: _backgroundColor,
-                                ),
-                              )
-                            : const Icon(Icons.save_outlined),
-                        label: Text(
-                          saving ? 'Saving...' : 'Save offer',
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        onPressed: saving ? null : saveOffer,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(savedMessage)),
     );
-
-    titleController.dispose();
-    descriptionController.dispose();
-    codeController.dispose();
-    websiteController.dispose();
   }
 
   Future<void> _deleteOffer(BusinessOffer offer) async {
@@ -367,33 +120,6 @@ class _BusinessOffersPageState extends State<BusinessOffersPage> {
         SnackBar(content: Text('Could not delete offer: $error')),
       );
     }
-  }
-
-  InputDecoration _inputDecoration(String labelText, {String? hintText}) {
-    return InputDecoration(
-      labelText: labelText,
-      hintText: hintText,
-      labelStyle: const TextStyle(color: _softTextColor),
-      hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
-      floatingLabelStyle: const TextStyle(
-        color: _goldColor,
-        fontWeight: FontWeight.w900,
-      ),
-      filled: true,
-      fillColor: _fieldColor,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: _borderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: _borderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: _goldColor, width: 1.6),
-      ),
-    );
   }
 
   @override
@@ -866,3 +592,310 @@ class _OfferBadge extends StatelessWidget {
     );
   }
 }
+
+
+class _BusinessOfferEditorPage extends StatefulWidget {
+  const _BusinessOfferEditorPage({
+    required this.profile,
+    this.existingOffer,
+  });
+
+  final BusinessProfile profile;
+  final BusinessOffer? existingOffer;
+
+  @override
+  State<_BusinessOfferEditorPage> createState() =>
+      _BusinessOfferEditorPageState();
+}
+
+class _BusinessOfferEditorPageState extends State<_BusinessOfferEditorPage> {
+  static const Map<String, String> _categoryLabels = <String, String>{
+    'discount': 'Discount code',
+    'new_stock': 'New stock',
+    'event': 'Event',
+    'announcement': 'Announcement',
+  };
+
+  final BusinessProfileService _service = BusinessProfileService();
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _codeController;
+  late final TextEditingController _websiteController;
+
+  late String _selectedCategory;
+  late bool _active;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final existingOffer = widget.existingOffer;
+
+    _titleController = TextEditingController(text: existingOffer?.title ?? '');
+    _descriptionController = TextEditingController(
+      text: existingOffer?.description ?? '',
+    );
+    _codeController = TextEditingController(text: existingOffer?.code ?? '');
+    _websiteController = TextEditingController(
+      text: existingOffer?.websiteUrl ?? widget.profile.website,
+    );
+
+    _selectedCategory = existingOffer?.category ?? 'discount';
+    if (!_categoryLabels.containsKey(_selectedCategory)) {
+      _selectedCategory = 'discount';
+    }
+
+    _active = existingOffer?.active ?? true;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _codeController.dispose();
+    _websiteController.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _inputDecoration(String labelText, {String? hintText}) {
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      labelStyle: const TextStyle(
+        color: _BusinessOffersPageState._softTextColor,
+      ),
+      hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
+      floatingLabelStyle: const TextStyle(
+        color: _BusinessOffersPageState._goldColor,
+        fontWeight: FontWeight.w900,
+      ),
+      filled: true,
+      fillColor: _BusinessOffersPageState._fieldColor,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(
+          color: _BusinessOffersPageState._borderColor,
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(
+          color: _BusinessOffersPageState._borderColor,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(
+          color: _BusinessOffersPageState._goldColor,
+          width: 1.6,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveOffer() async {
+    final title = _titleController.text.trim();
+    final description = _descriptionController.text.trim();
+
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Offer title is required.')),
+      );
+      return;
+    }
+
+    if (description.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Offer description is required.')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+
+    try {
+      await _service.saveBusinessOffer(
+        profile: widget.profile,
+        offerId: widget.existingOffer?.id,
+        title: title,
+        description: description,
+        category: _selectedCategory,
+        code: _codeController.text.trim(),
+        websiteUrl: _websiteController.text.trim(),
+        active: _active,
+      );
+
+      if (!mounted) return;
+
+      Navigator.of(context).pop(
+        widget.existingOffer == null ? 'Offer added.' : 'Offer saved.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() => _saving = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save offer: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final existingOffer = widget.existingOffer;
+
+    return Scaffold(
+      backgroundColor: _BusinessOffersPageState._backgroundColor,
+      appBar: AppBar(
+        title: Text(existingOffer == null ? 'Add offer' : 'Edit offer'),
+        backgroundColor: _BusinessOffersPageState._backgroundColor,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
+          children: [
+            const Text(
+              'Create a Business Pro offer for customers to see.',
+              style: TextStyle(
+                color: _BusinessOffersPageState._softTextColor,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedCategory,
+              dropdownColor: _BusinessOffersPageState._fieldColor,
+              iconEnabledColor: _BusinessOffersPageState._softTextColor,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: _inputDecoration('Offer type'),
+              items: _categoryLabels.entries
+                  .map(
+                    (entry) => DropdownMenuItem<String>(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() => _selectedCategory = value);
+                    },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _titleController,
+              enabled: !_saving,
+              maxLength: 90,
+              textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessOffersPageState._goldColor,
+              decoration: _inputDecoration('Title'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _descriptionController,
+              enabled: !_saving,
+              minLines: 3,
+              maxLines: 5,
+              maxLength: 500,
+              textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessOffersPageState._goldColor,
+              decoration: _inputDecoration('Description'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _codeController,
+              enabled: !_saving,
+              maxLength: 40,
+              textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessOffersPageState._goldColor,
+              decoration: _inputDecoration(
+                'Discount code / promo code',
+                hintText: 'Optional',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _websiteController,
+              enabled: !_saving,
+              maxLength: 300,
+              keyboardType: TextInputType.url,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessOffersPageState._goldColor,
+              decoration: _inputDecoration(
+                'Offer website link',
+                hintText: 'Optional',
+              ),
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              activeThumbColor: _BusinessOffersPageState._goldColor,
+              activeTrackColor:
+                  _BusinessOffersPageState._goldColor.withValues(alpha: 0.35),
+              title: const Text(
+                'Show this offer',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: const Text(
+                'Turn this off to hide the offer without deleting it.',
+                style: TextStyle(
+                  color: _BusinessOffersPageState._softTextColor,
+                ),
+              ),
+              value: _active,
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      setState(() => _active = value);
+                    },
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: _BusinessOffersPageState._goldColor,
+                foregroundColor: _BusinessOffersPageState._backgroundColor,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _BusinessOffersPageState._backgroundColor,
+                      ),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(
+                _saving ? 'Saving...' : 'Save offer',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              onPressed: _saving ? null : _saveOffer,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

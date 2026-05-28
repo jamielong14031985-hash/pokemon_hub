@@ -26,16 +26,6 @@ class _BusinessEventsPageState extends State<BusinessEventsPage> {
   static const Color _goldColor = Color(0xFFF7DE77);
   static const Color _softTextColor = Color(0xFFC8D4F0);
 
-  static const Map<String, String> _eventTypeLabels = <String, String>{
-    'trade_night': 'Trade night',
-    'tournament': 'Tournament',
-    'pre_release': 'Pre-release',
-    'release_day': 'Release day',
-    'giveaway': 'Giveaway',
-    'meetup': 'Meetup',
-    'other': 'Other event',
-  };
-
   final BusinessProfileService _service = BusinessProfileService();
 
   String get _currentUid => FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -59,35 +49,6 @@ class _BusinessEventsPageState extends State<BusinessEventsPage> {
     return '$day/$month/${value.year} at $hour:$minute';
   }
 
-  Future<DateTime?> _pickDateTime({
-    required BuildContext pickerContext,
-    required DateTime initialDateTime,
-  }) async {
-    final date = await showDatePicker(
-      context: pickerContext,
-      initialDate: initialDateTime,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 730)),
-    );
-
-    if (date == null || !pickerContext.mounted) return null;
-
-    final time = await showTimePicker(
-      context: pickerContext,
-      initialTime: TimeOfDay.fromDateTime(initialDateTime),
-    );
-
-    if (time == null) return null;
-
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      time.hour,
-      time.minute,
-    );
-  }
-
   Future<void> _openEventSheet({BusinessEvent? existingEvent}) async {
     if (!_canCreateEvents) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -98,373 +59,20 @@ class _BusinessEventsPageState extends State<BusinessEventsPage> {
       return;
     }
 
-    final titleController = TextEditingController(
-      text: existingEvent?.title ?? '',
-    );
-    final descriptionController = TextEditingController(
-      text: existingEvent?.description ?? '',
-    );
-    final locationController = TextEditingController(
-      text: existingEvent?.location ??
-          (widget.profile.hasPhysicalShop
-              ? widget.profile.linkedShopName
-              : widget.profile.displayLocation),
-    );
-    final entryFeeController = TextEditingController(
-      text: existingEvent?.entryFee ?? '',
-    );
-    final bookingUrlController = TextEditingController(
-      text: existingEvent?.bookingUrl ?? widget.profile.website,
+    final savedMessage = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => _BusinessEventEditorPage(
+          profile: widget.profile,
+          existingEvent: existingEvent,
+        ),
+      ),
     );
 
-    var selectedEventType = existingEvent?.eventType ?? 'trade_night';
-    if (!_eventTypeLabels.containsKey(selectedEventType)) {
-      selectedEventType = 'other';
-    }
+    if (!mounted || savedMessage == null) return;
 
-    var onlineEvent = existingEvent?.onlineEvent ?? false;
-    var active = existingEvent?.active ?? true;
-    var startsAt = existingEvent?.startDate ??
-        DateTime.now().add(const Duration(days: 7));
-    DateTime? endsAt = existingEvent?.endDate;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      backgroundColor: _cardColor,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      builder: (bottomSheetContext) {
-        var saving = false;
-
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            Future<void> saveEvent() async {
-              final title = titleController.text.trim();
-              final description = descriptionController.text.trim();
-
-              if (title.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Event title is required.')),
-                );
-                return;
-              }
-
-              if (description.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Event description is required.'),
-                  ),
-                );
-                return;
-              }
-
-              if (!onlineEvent && locationController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Event location is required.'),
-                  ),
-                );
-                return;
-              }
-
-              if (endsAt != null && endsAt!.isBefore(startsAt)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('End time must be after start time.'),
-                  ),
-                );
-                return;
-              }
-
-              setModalState(() => saving = true);
-
-              try {
-                await _service.saveBusinessEvent(
-                  profile: widget.profile,
-                  eventId: existingEvent?.id,
-                  title: title,
-                  description: description,
-                  eventType: selectedEventType,
-                  location: locationController.text.trim(),
-                  onlineEvent: onlineEvent,
-                  entryFee: entryFeeController.text.trim(),
-                  bookingUrl: bookingUrlController.text.trim(),
-                  startsAt: startsAt,
-                  endsAt: endsAt,
-                  active: active,
-                );
-
-                if (!bottomSheetContext.mounted) return;
-                Navigator.of(bottomSheetContext).pop();
-
-                if (!mounted) return;
-                ScaffoldMessenger.of(this.context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      existingEvent == null ? 'Event added.' : 'Event saved.',
-                    ),
-                  ),
-                );
-              } catch (error) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not save event: $error')),
-                );
-              } finally {
-                if (context.mounted) {
-                  setModalState(() => saving = false);
-                }
-              }
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 20,
-                  right: 20,
-                  top: 8,
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        existingEvent == null ? 'Add event' : 'Edit event',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Create a Business Pro shop event for customers to discover.',
-                        style: TextStyle(
-                          color: _softTextColor,
-                          height: 1.35,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedEventType,
-                        dropdownColor: _fieldColor,
-                        iconEnabledColor: _softTextColor,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        decoration: _inputDecoration('Event type'),
-                        items: _eventTypeLabels.entries
-                            .map(
-                              (entry) => DropdownMenuItem<String>(
-                                value: entry.key,
-                                child: Text(entry.value),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: saving
-                            ? null
-                            : (value) {
-                                if (value == null) return;
-                                setModalState(() => selectedEventType = value);
-                              },
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: titleController,
-                        enabled: !saving,
-                        maxLength: 90,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration('Event title'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: descriptionController,
-                        enabled: !saving,
-                        minLines: 3,
-                        maxLines: 5,
-                        maxLength: 700,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration('Description'),
-                      ),
-                      const SizedBox(height: 12),
-                      _DateTimeButton(
-                        label: 'Start time',
-                        value: _formatDateTime(startsAt),
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                final picked = await _pickDateTime(
-                                  pickerContext: context,
-                                  initialDateTime: startsAt,
-                                );
-                                if (picked == null) return;
-                                setModalState(() => startsAt = picked);
-                              },
-                      ),
-                      const SizedBox(height: 10),
-                      _DateTimeButton(
-                        label: 'End time',
-                        value: endsAt == null
-                            ? 'Optional'
-                            : _formatDateTime(endsAt),
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                final picked = await _pickDateTime(
-                                  pickerContext: context,
-                                  initialDateTime: endsAt ??
-                                      startsAt.add(const Duration(hours: 2)),
-                                );
-                                if (picked == null) return;
-                                setModalState(() => endsAt = picked);
-                              },
-                        trailing: endsAt == null
-                            ? null
-                            : IconButton(
-                                tooltip: 'Clear end time',
-                                color: _softTextColor,
-                                icon: const Icon(Icons.clear),
-                                onPressed: saving
-                                    ? null
-                                    : () => setModalState(() => endsAt = null),
-                              ),
-                      ),
-                      const SizedBox(height: 12),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        activeThumbColor: _goldColor,
-                        activeTrackColor: _goldColor.withValues(alpha: 0.35),
-                        title: const Text(
-                          'Online event',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        subtitle: const Text(
-                          'Turn this on if the event is online only.',
-                          style: TextStyle(color: _softTextColor),
-                        ),
-                        value: onlineEvent,
-                        onChanged: saving
-                            ? null
-                            : (value) {
-                                setModalState(() => onlineEvent = value);
-                              },
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: locationController,
-                        enabled: !saving,
-                        maxLength: 180,
-                        textCapitalization: TextCapitalization.words,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration(
-                          onlineEvent ? 'Online location / platform' : 'Location',
-                          hintText: onlineEvent
-                              ? 'Discord, website, livestream, etc.'
-                              : 'Shop address or venue',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: entryFeeController,
-                        enabled: !saving,
-                        maxLength: 80,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration(
-                          'Entry fee',
-                          hintText: 'Optional',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: bookingUrlController,
-                        enabled: !saving,
-                        maxLength: 300,
-                        keyboardType: TextInputType.url,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: _goldColor,
-                        decoration: _inputDecoration(
-                          'Booking / more info link',
-                          hintText: 'Optional',
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        activeThumbColor: _goldColor,
-                        activeTrackColor: _goldColor.withValues(alpha: 0.35),
-                        title: const Text(
-                          'Show this event',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        subtitle: const Text(
-                          'Turn this off to hide the event without deleting it.',
-                          style: TextStyle(color: _softTextColor),
-                        ),
-                        value: active,
-                        onChanged: saving
-                            ? null
-                            : (value) {
-                                setModalState(() => active = value);
-                              },
-                      ),
-                      const SizedBox(height: 14),
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _goldColor,
-                          foregroundColor: _backgroundColor,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        icon: saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: _backgroundColor,
-                                ),
-                              )
-                            : const Icon(Icons.save_outlined),
-                        label: Text(
-                          saving ? 'Saving...' : 'Save event',
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        onPressed: saving ? null : saveEvent,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(savedMessage)),
     );
-
-    titleController.dispose();
-    descriptionController.dispose();
-    locationController.dispose();
-    entryFeeController.dispose();
-    bookingUrlController.dispose();
   }
 
   Future<void> _deleteEvent(BusinessEvent event) async {
@@ -523,33 +131,6 @@ class _BusinessEventsPageState extends State<BusinessEventsPage> {
         SnackBar(content: Text('Could not delete event: $error')),
       );
     }
-  }
-
-  InputDecoration _inputDecoration(String labelText, {String? hintText}) {
-    return InputDecoration(
-      labelText: labelText,
-      hintText: hintText,
-      labelStyle: const TextStyle(color: _softTextColor),
-      hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
-      floatingLabelStyle: const TextStyle(
-        color: _goldColor,
-        fontWeight: FontWeight.w900,
-      ),
-      filled: true,
-      fillColor: _fieldColor,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: _borderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: _borderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: _goldColor, width: 1.6),
-      ),
-    );
   }
 
   @override
@@ -1123,3 +704,463 @@ class _EventBadge extends StatelessWidget {
     );
   }
 }
+
+
+class _BusinessEventEditorPage extends StatefulWidget {
+  const _BusinessEventEditorPage({
+    required this.profile,
+    this.existingEvent,
+  });
+
+  final BusinessProfile profile;
+  final BusinessEvent? existingEvent;
+
+  @override
+  State<_BusinessEventEditorPage> createState() =>
+      _BusinessEventEditorPageState();
+}
+
+class _BusinessEventEditorPageState extends State<_BusinessEventEditorPage> {
+  static const Map<String, String> _eventTypeLabels = <String, String>{
+    'trade_night': 'Trade night',
+    'tournament': 'Tournament',
+    'pre_release': 'Pre-release',
+    'release_day': 'Release day',
+    'giveaway': 'Giveaway',
+    'meetup': 'Meetup',
+    'other': 'Other event',
+  };
+
+  final BusinessProfileService _service = BusinessProfileService();
+
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _locationController;
+  late final TextEditingController _entryFeeController;
+  late final TextEditingController _bookingUrlController;
+
+  late String _selectedEventType;
+  late bool _onlineEvent;
+  late bool _active;
+  late DateTime _startsAt;
+  DateTime? _endsAt;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final existingEvent = widget.existingEvent;
+
+    _titleController = TextEditingController(text: existingEvent?.title ?? '');
+    _descriptionController = TextEditingController(
+      text: existingEvent?.description ?? '',
+    );
+    _locationController = TextEditingController(
+      text: existingEvent?.location ??
+          (widget.profile.hasPhysicalShop
+              ? widget.profile.linkedShopName
+              : widget.profile.displayLocation),
+    );
+    _entryFeeController = TextEditingController(
+      text: existingEvent?.entryFee ?? '',
+    );
+    _bookingUrlController = TextEditingController(
+      text: existingEvent?.bookingUrl ?? widget.profile.website,
+    );
+
+    _selectedEventType = existingEvent?.eventType ?? 'trade_night';
+    if (!_eventTypeLabels.containsKey(_selectedEventType)) {
+      _selectedEventType = 'other';
+    }
+
+    _onlineEvent = existingEvent?.onlineEvent ?? false;
+    _active = existingEvent?.active ?? true;
+    _startsAt = existingEvent?.startDate ??
+        DateTime.now().add(const Duration(days: 7));
+    _endsAt = existingEvent?.endDate;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _locationController.dispose();
+    _entryFeeController.dispose();
+    _bookingUrlController.dispose();
+    super.dispose();
+  }
+
+  String _formatDateTime(DateTime? value) {
+    if (value == null) return 'Not set';
+
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+
+    return '$day/$month/${value.year} at $hour:$minute';
+  }
+
+  Future<DateTime?> _pickDateTime({
+    required BuildContext pickerContext,
+    required DateTime initialDateTime,
+  }) async {
+    final date = await showDatePicker(
+      context: pickerContext,
+      initialDate: initialDateTime,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
+    );
+
+    if (date == null || !pickerContext.mounted) return null;
+
+    final time = await showTimePicker(
+      context: pickerContext,
+      initialTime: TimeOfDay.fromDateTime(initialDateTime),
+    );
+
+    if (time == null) return null;
+
+    return DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+  }
+
+  InputDecoration _inputDecoration(String labelText, {String? hintText}) {
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      labelStyle: const TextStyle(
+        color: _BusinessEventsPageState._softTextColor,
+      ),
+      hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
+      floatingLabelStyle: const TextStyle(
+        color: _BusinessEventsPageState._goldColor,
+        fontWeight: FontWeight.w900,
+      ),
+      filled: true,
+      fillColor: _BusinessEventsPageState._fieldColor,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(
+          color: _BusinessEventsPageState._borderColor,
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(
+          color: _BusinessEventsPageState._borderColor,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(
+          color: _BusinessEventsPageState._goldColor,
+          width: 1.6,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveEvent() async {
+    final title = _titleController.text.trim();
+    final description = _descriptionController.text.trim();
+
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event title is required.')),
+      );
+      return;
+    }
+
+    if (description.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event description is required.')),
+      );
+      return;
+    }
+
+    if (!_onlineEvent && _locationController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event location is required.')),
+      );
+      return;
+    }
+
+    if (_endsAt != null && _endsAt!.isBefore(_startsAt)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('End time must be after start time.')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+
+    try {
+      await _service.saveBusinessEvent(
+        profile: widget.profile,
+        eventId: widget.existingEvent?.id,
+        title: title,
+        description: description,
+        eventType: _selectedEventType,
+        location: _locationController.text.trim(),
+        onlineEvent: _onlineEvent,
+        entryFee: _entryFeeController.text.trim(),
+        bookingUrl: _bookingUrlController.text.trim(),
+        startsAt: _startsAt,
+        endsAt: _endsAt,
+        active: _active,
+      );
+
+      if (!mounted) return;
+
+      Navigator.of(context).pop(
+        widget.existingEvent == null ? 'Event added.' : 'Event saved.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() => _saving = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save event: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final existingEvent = widget.existingEvent;
+
+    return Scaffold(
+      backgroundColor: _BusinessEventsPageState._backgroundColor,
+      appBar: AppBar(
+        title: Text(existingEvent == null ? 'Add event' : 'Edit event'),
+        backgroundColor: _BusinessEventsPageState._backgroundColor,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
+          children: [
+            const Text(
+              'Create a Business Pro shop event for customers to discover.',
+              style: TextStyle(
+                color: _BusinessEventsPageState._softTextColor,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedEventType,
+              dropdownColor: _BusinessEventsPageState._fieldColor,
+              iconEnabledColor: _BusinessEventsPageState._softTextColor,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: _inputDecoration('Event type'),
+              items: _eventTypeLabels.entries
+                  .map(
+                    (entry) => DropdownMenuItem<String>(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() => _selectedEventType = value);
+                    },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _titleController,
+              enabled: !_saving,
+              maxLength: 90,
+              textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessEventsPageState._goldColor,
+              decoration: _inputDecoration('Event title'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _descriptionController,
+              enabled: !_saving,
+              minLines: 3,
+              maxLines: 5,
+              maxLength: 700,
+              textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessEventsPageState._goldColor,
+              decoration: _inputDecoration('Description'),
+            ),
+            const SizedBox(height: 12),
+            _DateTimeButton(
+              label: 'Start time',
+              value: _formatDateTime(_startsAt),
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      final picked = await _pickDateTime(
+                        pickerContext: context,
+                        initialDateTime: _startsAt,
+                      );
+                      if (picked == null || !mounted) return;
+                      setState(() => _startsAt = picked);
+                    },
+            ),
+            const SizedBox(height: 10),
+            _DateTimeButton(
+              label: 'End time',
+              value: _endsAt == null ? 'Optional' : _formatDateTime(_endsAt),
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      final picked = await _pickDateTime(
+                        pickerContext: context,
+                        initialDateTime:
+                            _endsAt ?? _startsAt.add(const Duration(hours: 2)),
+                      );
+                      if (picked == null || !mounted) return;
+                      setState(() => _endsAt = picked);
+                    },
+              trailing: _endsAt == null
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear end time',
+                      color: _BusinessEventsPageState._softTextColor,
+                      icon: const Icon(Icons.clear),
+                      onPressed: _saving
+                          ? null
+                          : () => setState(() => _endsAt = null),
+                    ),
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              activeThumbColor: _BusinessEventsPageState._goldColor,
+              activeTrackColor:
+                  _BusinessEventsPageState._goldColor.withValues(alpha: 0.35),
+              title: const Text(
+                'Online event',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: const Text(
+                'Turn this on if the event is online only.',
+                style: TextStyle(color: _BusinessEventsPageState._softTextColor),
+              ),
+              value: _onlineEvent,
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      setState(() => _onlineEvent = value);
+                    },
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _locationController,
+              enabled: !_saving,
+              maxLength: 180,
+              textCapitalization: TextCapitalization.words,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessEventsPageState._goldColor,
+              decoration: _inputDecoration(
+                _onlineEvent ? 'Online location / platform' : 'Location',
+                hintText: _onlineEvent
+                    ? 'Discord, website, livestream, etc.'
+                    : 'Shop address or venue',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _entryFeeController,
+              enabled: !_saving,
+              maxLength: 80,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessEventsPageState._goldColor,
+              decoration: _inputDecoration('Entry fee', hintText: 'Optional'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _bookingUrlController,
+              enabled: !_saving,
+              maxLength: 300,
+              keyboardType: TextInputType.url,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: _BusinessEventsPageState._goldColor,
+              decoration: _inputDecoration(
+                'Booking / more info link',
+                hintText: 'Optional',
+              ),
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              activeThumbColor: _BusinessEventsPageState._goldColor,
+              activeTrackColor:
+                  _BusinessEventsPageState._goldColor.withValues(alpha: 0.35),
+              title: const Text(
+                'Show this event',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: const Text(
+                'Turn this off to hide the event without deleting it.',
+                style: TextStyle(color: _BusinessEventsPageState._softTextColor),
+              ),
+              value: _active,
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      setState(() => _active = value);
+                    },
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: _BusinessEventsPageState._goldColor,
+                foregroundColor: _BusinessEventsPageState._backgroundColor,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _BusinessEventsPageState._backgroundColor,
+                      ),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(
+                _saving ? 'Saving...' : 'Save event',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              onPressed: _saving ? null : _saveEvent,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

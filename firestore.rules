@@ -760,6 +760,7 @@ service cloud.firestore {
           'mapViews',
           'offerViews',
           'eventViews',
+          'productViews',
           'updatedAt'
         ])
         && (!('profileViews' in data) || data.profileViews is int)
@@ -768,6 +769,7 @@ service cloud.firestore {
         && (!('mapViews' in data) || data.mapViews is int)
         && (!('offerViews' in data) || data.offerViews is int)
         && (!('eventViews' in data) || data.eventViews is int)
+        && (!('productViews' in data) || data.productViews is int)
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
@@ -811,6 +813,46 @@ service cloud.firestore {
         && data.active is bool
         && data.startsAt is timestamp
         && (data.endsAt == null || data.endsAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+
+    function validBusinessProductData(data, businessId) {
+      return data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'ownerUid',
+          'name',
+          'description',
+          'category',
+          'price',
+          'imageUrl',
+          'buyUrl',
+          'active',
+          'featured',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.businessId == businessId
+        && data.businessName is string
+        && data.businessName.size() <= 120
+        && data.ownerUid is string
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 120
+        && data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 700
+        && data.category in ['sealed', 'singles', 'accessories', 'pre_order', 'new_arrival', 'deal', 'other']
+        && data.price is string
+        && data.price.size() <= 40
+        && data.imageUrl is string
+        && data.imageUrl.size() <= 500
+        && data.buyUrl is string
+        && data.buyUrl.size() <= 500
+        && data.active is bool
+        && data.featured is bool
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1045,6 +1087,44 @@ service cloud.firestore {
           && request.resource.data.businessId == resource.data.businessId
           && request.resource.data.createdAt == resource.data.createdAt
           && validBusinessEventData(request.resource.data, businessId);
+
+        allow delete: if isAdminOrModerator()
+          || (
+            signedIn()
+            && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+            && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+          );
+      }
+
+
+      match /products/{productId} {
+        allow read: if true;
+
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            (
+              get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.premiumActive == true
+            )
+          )
+          && request.resource.data.ownerUid == get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid
+          && validBusinessProductData(request.resource.data, businessId);
+
+        allow update: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            (
+              get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.premiumActive == true
+            )
+          )
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.businessId == resource.data.businessId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && validBusinessProductData(request.resource.data, businessId);
 
         allow delete: if isAdminOrModerator()
           || (

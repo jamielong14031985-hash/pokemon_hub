@@ -13,6 +13,7 @@ import '../services/tcg_shop_service.dart';
 import 'add_tcg_shop_page.dart';
 import 'edit_tcg_shop_page.dart';
 import '../widgets/business_offers_preview.dart';
+import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
 import 'business_deals_page.dart';
 import 'business_events_directory_page.dart';
@@ -980,6 +981,12 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                     compact: true,
                     maxItems: 2,
                   ),
+                  const SizedBox(height: 12),
+                  BusinessProductsPreview(
+                    profile: profile,
+                    compact: true,
+                    maxItems: 3,
+                  ),
                   if (profile.description.trim().isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Text(
@@ -1669,6 +1676,12 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                       profile: featuredProfile,
                       compact: true,
                       maxItems: 2,
+                    ),
+                    const SizedBox(height: 12),
+                    BusinessProductsPreview(
+                      profile: featuredProfile,
+                      compact: true,
+                      maxItems: 3,
                     ),
                   ],
                   const SizedBox(height: 8),

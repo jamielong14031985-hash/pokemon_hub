@@ -8,6 +8,7 @@ import 'package:mime/mime.dart';
 import '../models/business_analytics.dart';
 import '../models/business_event.dart';
 import '../models/business_offer.dart';
+import '../models/business_product.dart';
 import '../models/business_profile.dart';
 import '../models/business_review.dart';
 import 'user_profile_service.dart';
@@ -272,6 +273,7 @@ class BusinessProfileService {
       'mapViews',
       'offerViews',
       'eventViews',
+      'productViews',
     };
 
     if (!allowedMetrics.contains(cleanMetric)) return;
@@ -501,6 +503,194 @@ class BusinessProfileService {
     }
 
     await _businessEvents(cleanBusinessId).doc(cleanEventId).delete();
+  }
+
+
+  CollectionReference<Map<String, dynamic>> _businessProducts(
+    String businessId,
+  ) {
+    return _businessProfiles.doc(businessId).collection('products');
+  }
+
+  Stream<List<BusinessProduct>> watchBusinessProducts(
+    String businessId, {
+    bool visibleOnly = false,
+  }) {
+    final cleanBusinessId = businessId.trim();
+    if (cleanBusinessId.isEmpty) {
+      return Stream<List<BusinessProduct>>.value(const <BusinessProduct>[]);
+    }
+
+    return _businessProducts(cleanBusinessId).snapshots().map((snapshot) {
+      final products =
+          snapshot.docs.map(BusinessProduct.fromDoc).where((product) {
+        return !visibleOnly || product.isVisible;
+      }).toList();
+
+      products.sort((a, b) {
+        if (a.isVisible != b.isVisible) return a.isVisible ? -1 : 1;
+        if (a.featured != b.featured) return a.featured ? -1 : 1;
+
+        final aTime = a.updatedAt?.millisecondsSinceEpoch ??
+            a.createdAt?.millisecondsSinceEpoch ??
+            0;
+        final bTime = b.updatedAt?.millisecondsSinceEpoch ??
+            b.createdAt?.millisecondsSinceEpoch ??
+            0;
+
+        return bTime.compareTo(aTime);
+      });
+
+      return products;
+    });
+  }
+
+  Future<void> saveBusinessProduct({
+    required BusinessProfile profile,
+    String? productId,
+    required String name,
+    required String description,
+    required String category,
+    required String price,
+    required String imageUrl,
+    required String buyUrl,
+    required bool active,
+    required bool featured,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to save a business product.');
+    }
+
+    final cleanBusinessId = profile.id.trim();
+    final cleanProductId = productId?.trim() ?? '';
+    final cleanName = name.trim();
+    final cleanDescription = description.trim();
+    final cleanCategory = category.trim();
+    final cleanPrice = price.trim();
+    final cleanImageUrl = imageUrl.trim();
+    final cleanBuyUrl = buyUrl.trim();
+
+    if (cleanBusinessId.isEmpty) {
+      throw ArgumentError('Missing business profile id.');
+    }
+
+    if (cleanName.isEmpty) {
+      throw ArgumentError('Product name is required.');
+    }
+
+    if (cleanDescription.isEmpty) {
+      throw ArgumentError('Product description is required.');
+    }
+
+    if (![
+      'sealed',
+      'singles',
+      'accessories',
+      'pre_order',
+      'new_arrival',
+      'deal',
+      'other',
+    ].contains(cleanCategory)) {
+      throw ArgumentError('Choose a valid product category.');
+    }
+
+    if (cleanName.length > 120) {
+      throw ArgumentError('Product name must be 120 characters or fewer.');
+    }
+
+    if (cleanDescription.length > 700) {
+      throw ArgumentError('Product description must be 700 characters or fewer.');
+    }
+
+    if (cleanPrice.length > 40) {
+      throw ArgumentError('Price must be 40 characters or fewer.');
+    }
+
+    if (cleanImageUrl.length > 500) {
+      throw ArgumentError('Product image URL must be 500 characters or fewer.');
+    }
+
+    if (cleanBuyUrl.length > 500) {
+      throw ArgumentError('Buy link must be 500 characters or fewer.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    if (!profileSnapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+    final ownerUid = (profileData['ownerUid'] ?? '').toString();
+    final canEditAsAdmin = await currentUserIsAdminOrModeratorOnce();
+
+    if (ownerUid != user.uid && !canEditAsAdmin) {
+      throw StateError('Only the business owner or an admin can edit products.');
+    }
+
+    final premiumActive = profileData['premiumActive'] == true;
+    if (!premiumActive && !canEditAsAdmin) {
+      throw StateError('Business Pro must be active before adding products.');
+    }
+
+    final productRef = cleanProductId.isEmpty
+        ? _businessProducts(cleanBusinessId).doc()
+        : _businessProducts(cleanBusinessId).doc(cleanProductId);
+
+    final existingProduct = await productRef.get();
+    final existingProductData = existingProduct.data() ?? <String, dynamic>{};
+
+    await productRef.set({
+      'businessId': cleanBusinessId,
+      'businessName': (profileData['businessName'] ?? profile.businessName)
+          .toString()
+          .trim(),
+      'ownerUid': ownerUid,
+      'name': cleanName,
+      'description': cleanDescription,
+      'category': cleanCategory,
+      'price': cleanPrice,
+      'imageUrl': cleanImageUrl,
+      'buyUrl': cleanBuyUrl,
+      'active': active,
+      'featured': featured,
+      'createdAt': existingProduct.exists
+          ? (existingProductData['createdAt'] ?? FieldValue.serverTimestamp())
+          : FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> deleteBusinessProduct({
+    required String businessId,
+    required String productId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to delete a business product.');
+    }
+
+    final cleanBusinessId = businessId.trim();
+    final cleanProductId = productId.trim();
+
+    if (cleanBusinessId.isEmpty || cleanProductId.isEmpty) {
+      throw ArgumentError('Missing product id.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    if (!profileSnapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+    final ownerUid = (profileData['ownerUid'] ?? '').toString();
+    final canDeleteAsAdmin = await currentUserIsAdminOrModeratorOnce();
+
+    if (ownerUid != user.uid && !canDeleteAsAdmin) {
+      throw StateError('Only the business owner or an admin can delete products.');
+    }
+
+    await _businessProducts(cleanBusinessId).doc(cleanProductId).delete();
   }
 
   CollectionReference<Map<String, dynamic>> _businessOffers(
