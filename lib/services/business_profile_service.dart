@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:mime/mime.dart';
 
 import '../models/business_analytics.dart';
+import '../models/business_enquiry.dart';
 import '../models/business_event.dart';
 import '../models/business_offer.dart';
 import '../models/business_product.dart';
@@ -505,6 +506,204 @@ class BusinessProfileService {
     await _businessEvents(cleanBusinessId).doc(cleanEventId).delete();
   }
 
+
+
+  CollectionReference<Map<String, dynamic>> _businessEnquiries(
+    String businessId,
+  ) {
+    return _businessProfiles.doc(businessId).collection('enquiries');
+  }
+
+  Stream<List<BusinessEnquiry>> watchBusinessEnquiries(String businessId) {
+    final cleanBusinessId = businessId.trim();
+    if (cleanBusinessId.isEmpty) {
+      return Stream<List<BusinessEnquiry>>.value(const <BusinessEnquiry>[]);
+    }
+
+    return _businessEnquiries(cleanBusinessId).snapshots().map((snapshot) {
+      final enquiries = snapshot.docs.map(BusinessEnquiry.fromDoc).toList();
+
+      enquiries.sort((a, b) {
+        final aOpen = a.status == 'open';
+        final bOpen = b.status == 'open';
+
+        if (aOpen != bOpen) return aOpen ? -1 : 1;
+
+        final aTime = a.updatedAt?.millisecondsSinceEpoch ??
+            a.createdAt?.millisecondsSinceEpoch ??
+            0;
+        final bTime = b.updatedAt?.millisecondsSinceEpoch ??
+            b.createdAt?.millisecondsSinceEpoch ??
+            0;
+
+        return bTime.compareTo(aTime);
+      });
+
+      return enquiries;
+    });
+  }
+
+  Future<void> submitBusinessEnquiry({
+    required BusinessProfile profile,
+    required String enquiryType,
+    required String subject,
+    required String message,
+    required String contactEmail,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to send an enquiry.');
+    }
+
+    final cleanBusinessId = profile.id.trim();
+    final cleanEnquiryType = enquiryType.trim();
+    final cleanSubject = subject.trim();
+    final cleanMessage = message.trim();
+    final cleanContactEmail = contactEmail.trim();
+
+    if (cleanBusinessId.isEmpty) {
+      throw ArgumentError('Missing business profile id.');
+    }
+
+    if (profile.ownerUid == user.uid) {
+      throw StateError('You cannot send an enquiry to your own business.');
+    }
+
+    if (!['stock', 'event', 'product', 'trade', 'general']
+        .contains(cleanEnquiryType)) {
+      throw ArgumentError('Choose a valid enquiry type.');
+    }
+
+    if (cleanSubject.isEmpty) {
+      throw ArgumentError('Subject is required.');
+    }
+
+    if (cleanMessage.isEmpty) {
+      throw ArgumentError('Message is required.');
+    }
+
+    if (cleanSubject.length > 120) {
+      throw ArgumentError('Subject must be 120 characters or fewer.');
+    }
+
+    if (cleanMessage.length > 1000) {
+      throw ArgumentError('Message must be 1000 characters or fewer.');
+    }
+
+    if (cleanContactEmail.length > 200) {
+      throw ArgumentError('Contact email must be 200 characters or fewer.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    if (!profileSnapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+    final businessOwnerUid = (profileData['ownerUid'] ?? profile.ownerUid)
+        .toString()
+        .trim();
+
+    if (businessOwnerUid == user.uid) {
+      throw StateError('You cannot send an enquiry to your own business.');
+    }
+
+    final senderName = await _reviewerDisplayName(user);
+    final fallbackEmail = user.email?.trim() ?? '';
+
+    await _businessEnquiries(cleanBusinessId).doc().set({
+      'businessId': cleanBusinessId,
+      'businessName': (profileData['businessName'] ?? profile.businessName)
+          .toString()
+          .trim(),
+      'businessOwnerUid': businessOwnerUid,
+      'senderUid': user.uid,
+      'senderName': senderName,
+      'senderEmail': cleanContactEmail.isEmpty ? fallbackEmail : cleanContactEmail,
+      'enquiryType': cleanEnquiryType,
+      'subject': cleanSubject,
+      'message': cleanMessage,
+      'status': 'open',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'closedAt': null,
+    });
+  }
+
+  Future<void> updateBusinessEnquiryStatus({
+    required String businessId,
+    required String enquiryId,
+    required String status,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to update an enquiry.');
+    }
+
+    final cleanBusinessId = businessId.trim();
+    final cleanEnquiryId = enquiryId.trim();
+    final cleanStatus = status.trim();
+
+    if (cleanBusinessId.isEmpty || cleanEnquiryId.isEmpty) {
+      throw ArgumentError('Missing enquiry id.');
+    }
+
+    if (!['open', 'replied', 'closed'].contains(cleanStatus)) {
+      throw ArgumentError('Choose a valid enquiry status.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    if (!profileSnapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+    final ownerUid = (profileData['ownerUid'] ?? '').toString();
+    final canUpdateAsAdmin = await currentUserIsAdminOrModeratorOnce();
+
+    if (ownerUid != user.uid && !canUpdateAsAdmin) {
+      throw StateError('Only the business owner or an admin can update enquiries.');
+    }
+
+    await _businessEnquiries(cleanBusinessId).doc(cleanEnquiryId).update({
+      'status': cleanStatus,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'closedAt':
+          cleanStatus == 'closed' ? FieldValue.serverTimestamp() : null,
+    });
+  }
+
+  Future<void> deleteBusinessEnquiry({
+    required String businessId,
+    required String enquiryId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to delete an enquiry.');
+    }
+
+    final cleanBusinessId = businessId.trim();
+    final cleanEnquiryId = enquiryId.trim();
+
+    if (cleanBusinessId.isEmpty || cleanEnquiryId.isEmpty) {
+      throw ArgumentError('Missing enquiry id.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    if (!profileSnapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+    final ownerUid = (profileData['ownerUid'] ?? '').toString();
+    final canDeleteAsAdmin = await currentUserIsAdminOrModeratorOnce();
+
+    if (ownerUid != user.uid && !canDeleteAsAdmin) {
+      throw StateError('Only the business owner or an admin can delete enquiries.');
+    }
+
+    await _businessEnquiries(cleanBusinessId).doc(cleanEnquiryId).delete();
+  }
 
   CollectionReference<Map<String, dynamic>> _businessProducts(
     String businessId,

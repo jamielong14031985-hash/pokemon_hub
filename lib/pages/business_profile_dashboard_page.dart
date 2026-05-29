@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../models/business_analytics.dart';
+import '../models/business_enquiry.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
 import '../widgets/business_rating_summary.dart';
+import 'business_enquiries_page.dart';
 import 'business_events_page.dart';
 import 'business_offers_page.dart';
+import 'business_products_page.dart';
 import 'business_profile_editor_page.dart';
 import 'business_reviews_page.dart';
 
@@ -153,6 +156,22 @@ class BusinessProDashboardPage extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _EventsDashboardCard(profile: profile),
+          const SizedBox(height: 18),
+          const _SectionHeader(
+            icon: Icons.inventory_2_outlined,
+            title: 'Product showcase',
+            subtitle: 'Promote products, pre-orders, singles and new arrivals.',
+          ),
+          const SizedBox(height: 10),
+          _ProductsDashboardCard(profile: profile),
+          const SizedBox(height: 18),
+          const _SectionHeader(
+            icon: Icons.mark_email_unread_outlined,
+            title: 'Customer enquiries',
+            subtitle: 'View messages and questions sent by users.',
+          ),
+          const SizedBox(height: 10),
+          _EnquiriesDashboardCard(profile: profile),
           const SizedBox(height: 18),
           const _SectionHeader(
             icon: Icons.insights_outlined,
@@ -789,6 +808,164 @@ class _EventsDashboardCard extends StatelessWidget {
   }
 }
 
+
+class _ProductsDashboardCard extends StatelessWidget {
+  const _ProductsDashboardCard({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final premiumActive = profile.premiumIsActive;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: BusinessProDashboardPage._cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: premiumActive
+              ? BusinessProDashboardPage._goldColor
+              : BusinessProDashboardPage._borderColor,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            color: premiumActive
+                ? BusinessProDashboardPage._goldColor
+                : BusinessProDashboardPage._softTextColor,
+            size: 30,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  premiumActive
+                      ? 'Manage product showcase'
+                      : 'Product showcase unlocks with Business Pro',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  premiumActive
+                      ? 'Promote products, prices, pre-orders, singles and buy links.'
+                      : 'Once Pro is active, this business can show products to users.',
+                  style: const TextStyle(
+                    color: BusinessProDashboardPage._softTextColor,
+                    height: 1.35,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Open product showcase',
+            color: BusinessProDashboardPage._goldColor,
+            icon: const Icon(Icons.chevron_right),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => BusinessProductsPage(profile: profile),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _EnquiriesDashboardCard extends StatelessWidget {
+  const _EnquiriesDashboardCard({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<BusinessEnquiry>>(
+      stream: BusinessProfileService().watchBusinessEnquiries(profile.id),
+      builder: (context, snapshot) {
+        final enquiries = snapshot.data ?? const <BusinessEnquiry>[];
+        final openCount = enquiries.where((item) => item.status == 'open').length;
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: BusinessProDashboardPage._cardColor,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: BusinessProDashboardPage._borderColor),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.mark_email_unread_outlined,
+                color: BusinessProDashboardPage._goldColor,
+                size: 30,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Manage customer enquiries',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      enquiries.isEmpty
+                          ? 'Users can send questions about stock, events, products and trades.'
+                          : '${enquiries.length} total enquiry${enquiries.length == 1 ? '' : 's'} • $openCount open',
+                      style: const TextStyle(
+                        color: BusinessProDashboardPage._softTextColor,
+                        height: 1.35,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Open enquiries',
+                color: BusinessProDashboardPage._goldColor,
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => BusinessEnquiriesPage(profile: profile),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _AnalyticsCard extends StatelessWidget {
   const _AnalyticsCard({required this.profile});
 
@@ -879,6 +1056,11 @@ class _AnalyticsCard extends StatelessWidget {
                     icon: Icons.event_available_outlined,
                     title: 'Event opens',
                     value: analytics.eventViews,
+                  ),
+                  _AnalyticsTile(
+                    icon: Icons.inventory_2_outlined,
+                    title: 'Product opens',
+                    value: analytics.productViews,
                   ),
                   _AnalyticsTile(
                     icon: Icons.visibility_outlined,

@@ -12,6 +12,7 @@ import '../services/business_profile_service.dart';
 import '../services/tcg_shop_service.dart';
 import 'add_tcg_shop_page.dart';
 import 'edit_tcg_shop_page.dart';
+import '../widgets/business_enquiry_button.dart';
 import '../widgets/business_offers_preview.dart';
 import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
@@ -975,6 +976,10 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                           _openBusinessReviews(bottomSheetContext, profile),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  BusinessEnquiryButton(
+                    profile: profile,
+                  ),
                   const SizedBox(height: 12),
                   BusinessOffersPreview(
                     profile: profile,
@@ -1670,6 +1675,10 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                       ),
                       onPressed: () =>
                           _openBusinessReviews(bottomSheetContext, featuredProfile),
+                    ),
+                    const SizedBox(height: 10),
+                    BusinessEnquiryButton(
+                      profile: featuredProfile,
                     ),
                     const SizedBox(height: 12),
                     BusinessOffersPreview(

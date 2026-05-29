@@ -818,6 +818,45 @@ service cloud.firestore {
     }
 
 
+
+    function validBusinessEnquiryData(data, businessId) {
+      return data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'businessOwnerUid',
+          'senderUid',
+          'senderName',
+          'senderEmail',
+          'enquiryType',
+          'subject',
+          'message',
+          'status',
+          'createdAt',
+          'updatedAt',
+          'closedAt'
+        ])
+        && data.businessId == businessId
+        && data.businessName is string
+        && data.businessName.size() <= 120
+        && data.businessOwnerUid is string
+        && data.senderUid is string
+        && data.senderName is string
+        && data.senderName.size() <= 120
+        && data.senderEmail is string
+        && data.senderEmail.size() <= 200
+        && data.enquiryType in ['stock', 'event', 'product', 'trade', 'general']
+        && data.subject is string
+        && data.subject.size() > 0
+        && data.subject.size() <= 120
+        && data.message is string
+        && data.message.size() > 0
+        && data.message.size() <= 1000
+        && data.status in ['open', 'replied', 'closed']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (data.closedAt == null || data.closedAt is timestamp);
+    }
+
     function validBusinessProductData(data, businessId) {
       return data.keys().hasOnly([
           'businessId',
@@ -1096,6 +1135,59 @@ service cloud.firestore {
           );
       }
 
+
+
+      match /enquiries/{enquiryId} {
+        allow read: if isAdminOrModerator()
+          || (
+            signedIn()
+            && (
+              resource.data.senderUid == request.auth.uid ||
+              (
+                exists(/databases/$(database)/documents/business_profiles/$(businessId))
+                && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+              )
+            )
+          );
+
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid != request.auth.uid
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.businessOwnerUid == get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid
+          && request.resource.data.status == 'open'
+          && request.resource.data.closedAt == null
+          && validBusinessEnquiryData(request.resource.data, businessId);
+
+        allow update: if signedIn()
+          && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+          && (
+            isAdminOrModerator() ||
+            get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt',
+            'closedAt'
+          ])
+          && request.resource.data.businessId == resource.data.businessId
+          && request.resource.data.businessName == resource.data.businessName
+          && request.resource.data.businessOwnerUid == resource.data.businessOwnerUid
+          && request.resource.data.senderUid == resource.data.senderUid
+          && request.resource.data.senderName == resource.data.senderName
+          && request.resource.data.senderEmail == resource.data.senderEmail
+          && request.resource.data.enquiryType == resource.data.enquiryType
+          && request.resource.data.subject == resource.data.subject
+          && request.resource.data.message == resource.data.message
+          && validBusinessEnquiryData(request.resource.data, businessId);
+
+        allow delete: if isAdminOrModerator()
+          || (
+            signedIn()
+            && exists(/databases/$(database)/documents/business_profiles/$(businessId))
+            && get(/databases/$(database)/documents/business_profiles/$(businessId)).data.ownerUid == request.auth.uid
+          );
+      }
 
       match /products/{productId} {
         allow read: if true;

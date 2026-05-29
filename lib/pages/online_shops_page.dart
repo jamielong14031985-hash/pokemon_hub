@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
+import '../widgets/business_enquiry_button.dart';
 import '../widgets/business_offers_preview.dart';
 import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
@@ -370,6 +371,8 @@ class _OnlineShopCard extends StatelessWidget {
               onPressed: () => _openReviews(context),
             ),
           ),
+          const SizedBox(height: 10),
+          BusinessEnquiryButton(profile: profile),
           if (website.isNotEmpty || phone.isNotEmpty) ...[
             const SizedBox(height: 14),
             Row(
