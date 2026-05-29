@@ -10,6 +10,7 @@ import '../models/business_enquiry.dart';
 import '../models/business_event.dart';
 import '../models/business_offer.dart';
 import '../models/business_product.dart';
+import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../models/business_review.dart';
 import 'user_profile_service.dart';
@@ -507,6 +508,195 @@ class BusinessProfileService {
   }
 
 
+
+
+  CollectionReference<Map<String, dynamic>> get _businessProRequests =>
+      _firestore.collection('business_pro_requests');
+
+  Stream<List<BusinessProRequest>> watchBusinessProRequestsForBusiness(
+    String businessId,
+  ) {
+    final cleanBusinessId = businessId.trim();
+    if (cleanBusinessId.isEmpty) {
+      return Stream<List<BusinessProRequest>>.value(
+        const <BusinessProRequest>[],
+      );
+    }
+
+    return _businessProRequests
+        .where('businessId', isEqualTo: cleanBusinessId)
+        .snapshots()
+        .map((snapshot) {
+      final requests =
+          snapshot.docs.map(BusinessProRequest.fromDoc).toList();
+
+      requests.sort((a, b) {
+        final aPending = a.status == 'pending';
+        final bPending = b.status == 'pending';
+
+        if (aPending != bPending) return aPending ? -1 : 1;
+
+        final aTime = a.updatedAt?.millisecondsSinceEpoch ??
+            a.createdAt?.millisecondsSinceEpoch ??
+            0;
+        final bTime = b.updatedAt?.millisecondsSinceEpoch ??
+            b.createdAt?.millisecondsSinceEpoch ??
+            0;
+
+        return bTime.compareTo(aTime);
+      });
+
+      return requests;
+    });
+  }
+
+  Stream<List<BusinessProRequest>> watchAllBusinessProRequests() {
+    return _businessProRequests.snapshots().map((snapshot) {
+      final requests =
+          snapshot.docs.map(BusinessProRequest.fromDoc).toList();
+
+      requests.sort((a, b) {
+        final aPending = a.status == 'pending';
+        final bPending = b.status == 'pending';
+
+        if (aPending != bPending) return aPending ? -1 : 1;
+
+        final aTime = a.updatedAt?.millisecondsSinceEpoch ??
+            a.createdAt?.millisecondsSinceEpoch ??
+            0;
+        final bTime = b.updatedAt?.millisecondsSinceEpoch ??
+            b.createdAt?.millisecondsSinceEpoch ??
+            0;
+
+        return bTime.compareTo(aTime);
+      });
+
+      return requests;
+    });
+  }
+
+  Future<void> submitBusinessProRequest({
+    required BusinessProfile profile,
+    required String requestType,
+    required String message,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to request Business Pro.');
+    }
+
+    final cleanBusinessId = profile.id.trim();
+    final cleanRequestType = requestType.trim();
+    final cleanMessage = message.trim();
+
+    if (cleanBusinessId.isEmpty) {
+      throw ArgumentError('Missing business profile id.');
+    }
+
+    if (!['new', 'renewal', 'upgrade', 'question']
+        .contains(cleanRequestType)) {
+      throw ArgumentError('Choose a valid request type.');
+    }
+
+    if (cleanMessage.isEmpty) {
+      throw ArgumentError('Please add a short message.');
+    }
+
+    if (cleanMessage.length > 800) {
+      throw ArgumentError('Message must be 800 characters or fewer.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    if (!profileSnapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+    final ownerUid = (profileData['ownerUid'] ?? profile.ownerUid)
+        .toString()
+        .trim();
+
+    if (ownerUid != user.uid) {
+      throw StateError('Only the business owner can send this request.');
+    }
+
+    await _businessProRequests.doc().set({
+      'businessId': cleanBusinessId,
+      'businessName': (profileData['businessName'] ?? profile.businessName)
+          .toString()
+          .trim(),
+      'ownerUid': ownerUid,
+      'ownerEmail': user.email?.trim() ?? '',
+      'requestType': cleanRequestType,
+      'message': cleanMessage,
+      'status': 'pending',
+      'adminResponse': '',
+      'reviewedBy': '',
+      'reviewedAt': null,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> adminUpdateBusinessProRequestStatus({
+    required String requestId,
+    required String status,
+    required String adminResponse,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in.');
+    }
+
+    final isAdminOrModerator = await currentUserIsAdminOrModeratorOnce();
+    if (!isAdminOrModerator) {
+      throw StateError('Only admins and moderators can update Pro requests.');
+    }
+
+    final cleanRequestId = requestId.trim();
+    final cleanStatus = status.trim();
+    final cleanAdminResponse = adminResponse.trim();
+
+    if (cleanRequestId.isEmpty) {
+      throw ArgumentError('Missing request id.');
+    }
+
+    if (!['pending', 'approved', 'rejected'].contains(cleanStatus)) {
+      throw ArgumentError('Choose a valid request status.');
+    }
+
+    if (cleanAdminResponse.length > 500) {
+      throw ArgumentError('Admin response must be 500 characters or fewer.');
+    }
+
+    await _businessProRequests.doc(cleanRequestId).update({
+      'status': cleanStatus,
+      'adminResponse': cleanAdminResponse,
+      'reviewedBy': cleanStatus == 'pending' ? '' : user.uid,
+      'reviewedAt':
+          cleanStatus == 'pending' ? null : FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> adminDeleteBusinessProRequest(String requestId) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in.');
+    }
+
+    final isAdminOrModerator = await currentUserIsAdminOrModeratorOnce();
+    if (!isAdminOrModerator) {
+      throw StateError('Only admins and moderators can delete Pro requests.');
+    }
+
+    final cleanRequestId = requestId.trim();
+    if (cleanRequestId.isEmpty) {
+      throw ArgumentError('Missing request id.');
+    }
+
+    await _businessProRequests.doc(cleanRequestId).delete();
+  }
 
   CollectionReference<Map<String, dynamic>> _businessEnquiries(
     String businessId,

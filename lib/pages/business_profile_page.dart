@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
-import '../widgets/business_rating_summary.dart';
+import 'business_pro_request_page.dart';
 import 'business_profile_dashboard_page.dart';
 import 'business_profile_editor_page.dart';
-import 'business_reviews_page.dart';
 
 class BusinessProfilePage extends StatelessWidget {
   const BusinessProfilePage({super.key});
@@ -110,30 +109,40 @@ class _BusinessProfileMenu extends StatelessWidget {
             _MenuTile(
               icon: Icons.dashboard_customize_outlined,
               iconColor: BusinessProfilePage.goldColor,
-              title: 'Business Pro Dashboard',
-              subtitle: 'View premium status, placements, reviews and future analytics.',
+              title: 'Business Pro dashboard',
+              subtitle: profile.premiumIsActive
+                  ? 'Manage offers, events, products, enquiries, analytics and Pro tools.'
+                  : 'View Pro tools and request access from the app admin.',
+              trailing: _SmallPill(
+                text: profile.premiumIsActive ? 'Active' : 'Pro',
+                color: profile.premiumIsActive
+                    ? BusinessProfilePage.successColor
+                    : BusinessProfilePage.goldColor,
+                textColor: BusinessProfilePage.backgroundColor,
+              ),
               onTap: () => _openBusinessProDashboard(context),
             ),
             const _MenuDivider(),
             _MenuTile(
-              icon: Icons.workspace_premium_outlined,
+              icon: Icons.contact_support_outlined,
               iconColor: BusinessProfilePage.goldColor,
-              title: 'Business Pro',
-              subtitle: 'See what Business Pro includes and how activation works.',
-              trailing: const _SmallPill(
-                text: 'Info',
+              title: profile.premiumIsActive
+                  ? 'Request Pro renewal'
+                  : 'Request Business Pro',
+              subtitle: 'Send a request or message to the app admin about Business Pro.',
+              trailing: const Icon(
+                Icons.chevron_right,
                 color: BusinessProfilePage.goldColor,
-                textColor: BusinessProfilePage.backgroundColor,
               ),
-              onTap: () => _showBusinessProInfo(context),
+              onTap: () => _openBusinessProRequest(context),
             ),
             const _MenuDivider(),
             _MenuTile(
-              icon: Icons.star_rate_rounded,
-              iconColor: BusinessProfilePage.goldColor,
-              title: 'Reviews & ratings',
-              subtitle: 'View ratings and reviews left by PocketChase users.',
-              onTap: () => _openReviews(context),
+              icon: Icons.info_outline,
+              iconColor: BusinessProfilePage.softTextColor,
+              title: 'What Business Pro includes',
+              subtitle: 'Featured placements, offers, events, products, reviews and enquiries.',
+              onTap: () => _showBusinessProInfo(context),
             ),
           ],
         ),
@@ -210,46 +219,24 @@ class _BusinessProfileMenu extends StatelessWidget {
     );
 
     if (shouldDelete != true) return;
-    if (!context.mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
 
     try {
       await BusinessProfileService().deleteBusinessProfile(profile.id);
 
       if (!context.mounted) return;
 
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Business profile deleted.')),
       );
 
-      // Do not pop this page after deletion.
-      // The profile stream updates automatically and shows the empty/create state.
-      // Popping while Firestore is rebuilding this page can cause Flutter's
-      // _dependents.isEmpty assertion on some devices.
+      Navigator.of(context).pop();
     } catch (error) {
       if (!context.mounted) return;
 
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not delete profile: $error')),
       );
     }
-  }
-
-  void _openBusinessProDashboard(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BusinessProDashboardPage(profile: profile),
-      ),
-    );
-  }
-
-  void _openReviews(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BusinessReviewsPage(profile: profile),
-      ),
-    );
   }
 
   void _openEditor(BuildContext context) {
@@ -260,374 +247,118 @@ class _BusinessProfileMenu extends StatelessWidget {
     );
   }
 
+  void _openBusinessProDashboard(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessProDashboardPage(profile: profile),
+      ),
+    );
+  }
+
+  void _openBusinessProRequest(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessProRequestPage(profile: profile),
+      ),
+    );
+  }
+
   void _showBusinessProInfo(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      isScrollControlled: true,
       backgroundColor: BusinessProfilePage.cardColor,
       barrierColor: Colors.black.withValues(alpha: 0.55),
       builder: (bottomSheetContext) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.88,
-          minChildSize: 0.45,
-          maxChildSize: 0.95,
-          builder: (sheetContext, scrollController) {
-            return SafeArea(
-              child: ListView(
-                controller: scrollController,
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: BusinessProfilePage.goldColor.withValues(
-                        alpha: 0.14,
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: BusinessProfilePage.goldColor),
-                    ),
-                    child: const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.workspace_premium,
-                          color: BusinessProfilePage.goldColor,
-                          size: 34,
-                        ),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'PocketChase Business Pro',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              SizedBox(height: 6),
-                              Text(
-                                'Promote your TCG business across PocketChase and help collectors find your shop faster.',
-                                style: TextStyle(
-                                  color: BusinessProfilePage.softTextColor,
-                                  height: 1.35,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const _BusinessProInfoHeading(
-                    icon: Icons.check_circle_outline,
-                    title: 'What Business Pro includes',
-                  ),
-                  const SizedBox(height: 10),
-                  const _BusinessProInfoCard(
-                    icon: Icons.view_carousel_outlined,
-                    title: 'Featured moving banner',
-                    description:
-                        'Your business can appear in the moving featured banner at the top of the TCG Shop Map page.',
-                  ),
-                  const SizedBox(height: 10),
-                  const _BusinessProInfoCard(
-                    icon: Icons.storefront_outlined,
-                    title: 'Featured map shop',
-                    description:
-                        'Physical shops can be highlighted on the map with premium placement and a featured marker.',
-                  ),
-                  const SizedBox(height: 10),
-                  const _BusinessProInfoCard(
-                    icon: Icons.language,
-                    title: 'Featured online shop placement',
-                    description:
-                        'Online-only businesses can appear in the Online Shops directory and premium featured areas.',
-                  ),
-                  const SizedBox(height: 10),
-                  const _BusinessProInfoCard(
-                    icon: Icons.forum_outlined,
-                    title: 'Featured community posts',
-                    description:
-                        'Your business posts can be promoted so collectors see them more easily in the community area.',
-                  ),
-                  const SizedBox(height: 10),
-                  const _BusinessProInfoCard(
-                    icon: Icons.image_outlined,
-                    title: 'Premium business profile',
-                    description:
-                        'Show your business name, description, website, contact details, area, and featured banner image.',
-                  ),
-                  const SizedBox(height: 16),
-                  const _BusinessProInfoHeading(
-                    icon: Icons.sell_outlined,
-                    title: 'Pricing',
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: BusinessProfilePage.fieldColor,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: BusinessProfilePage.goldColor),
-                    ),
-                    child: const Text(
-                      'Business Pro pricing is coming soon. For now, this feature is being tested and can be activated by a PocketChase admin.',
-                      style: TextStyle(
-                        color: BusinessProfilePage.softTextColor,
-                        height: 1.35,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const _BusinessProInfoHeading(
-                    icon: Icons.admin_panel_settings_outlined,
-                    title: 'Contact/admin approval for now',
-                  ),
-                  const SizedBox(height: 10),
-                  const _BusinessProStep(
-                    number: '1',
-                    title: 'Create your business profile',
-                    description:
-                        'Business users create and complete their business profile first.',
-                  ),
-                  const _BusinessProStepDivider(),
-                  const _BusinessProStep(
-                    number: '2',
-                    title: 'Contact admin to activate Business Pro',
-                    description:
-                        'Business Pro access is currently controlled from the admin Business Profiles area.',
-                  ),
-                  const _BusinessProStepDivider(),
-                  const _BusinessProStep(
-                    number: '3',
-                    title: 'Admin turns premium on',
-                    description:
-                        'Admins can enable premium, featured map shop, and featured post options.',
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.orangeAccent.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: Colors.orangeAccent.withValues(alpha: 0.55),
-                      ),
-                    ),
-                    child: const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.security_outlined,
-                          color: Colors.orangeAccent,
-                          size: 24,
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'When payments are added later, Apple and Google purchase verification should activate premium securely. The app should not directly set premiumActive after payment without backend verification.',
-                            style: TextStyle(
-                              color: BusinessProfilePage.softTextColor,
-                              height: 1.35,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: BusinessProfilePage.goldColor,
-                        foregroundColor: BusinessProfilePage.backgroundColor,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      onPressed: () => Navigator.of(bottomSheetContext).pop(),
-                      child: const Text(
-                        'Close',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-}
-
-
-class _BusinessProInfoHeading extends StatelessWidget {
-  const _BusinessProInfoHeading({
-    required this.icon,
-    required this.title,
-  });
-
-  final IconData icon;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: BusinessProfilePage.goldColor),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _BusinessProInfoCard extends StatelessWidget {
-  const _BusinessProInfoCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: BusinessProfilePage.fieldColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: BusinessProfilePage.borderColor),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: BusinessProfilePage.goldColor, size: 24),
-          const SizedBox(width: 11),
-          Expanded(
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
-                  ),
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.workspace_premium,
+                      color: BusinessProfilePage.goldColor,
+                      size: 30,
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'PocketChase Business Pro',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  description,
-                  style: const TextStyle(
+                const SizedBox(height: 12),
+                const Text(
+                  'Business Pro gives shop owners extra visibility and tools inside PocketChase.',
+                  style: TextStyle(
                     color: BusinessProfilePage.softTextColor,
                     height: 1.35,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const _FeatureLine(
+                  enabled: true,
+                  text: 'Featured moving banner and featured map/online shop placements',
+                ),
+                const _FeatureLine(
+                  enabled: true,
+                  text: 'Offers, shop events, product showcase and customer enquiries',
+                ),
+                const _FeatureLine(
+                  enabled: true,
+                  text: 'Reviews, replies, analytics and Pro request/renewal support',
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: BusinessProfilePage.fieldColor,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: BusinessProfilePage.borderColor),
+                  ),
+                  child: const Text(
+                    'Use Request Business Pro or Request Pro renewal to contact the app admin. Admin can then activate or renew Pro access.',
+                    style: TextStyle(
+                      color: BusinessProfilePage.softTextColor,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: BusinessProfilePage.goldColor,
+                      foregroundColor: BusinessProfilePage.backgroundColor,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: () => Navigator.of(bottomSheetContext).pop(),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BusinessProStep extends StatelessWidget {
-  const _BusinessProStep({
-    required this.number,
-    required this.title,
-    required this.description,
-  });
-
-  final String number;
-  final String title;
-  final String description;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        CircleAvatar(
-          radius: 15,
-          backgroundColor: BusinessProfilePage.goldColor,
-          child: Text(
-            number,
-            style: const TextStyle(
-              color: BusinessProfilePage.backgroundColor,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: const TextStyle(
-                  color: BusinessProfilePage.softTextColor,
-                  height: 1.35,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _BusinessProStepDivider extends StatelessWidget {
-  const _BusinessProStepDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(left: 15, top: 8, bottom: 8),
-      height: 18,
-      width: 1.5,
-      color: BusinessProfilePage.goldColor.withValues(alpha: 0.45),
+        );
+      },
     );
   }
 }
@@ -741,20 +472,6 @@ class _ProfileHeroCard extends StatelessWidget {
                             textColor: Colors.white,
                           ),
                       ],
-                    ),
-                    const SizedBox(height: 8),
-                    BusinessRatingSummary(
-                      businessId: profile.id,
-                      starColor: BusinessProfilePage.goldColor,
-                      textColor: Colors.white,
-                      mutedTextColor: BusinessProfilePage.softTextColor,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => BusinessReviewsPage(profile: profile),
-                          ),
-                        );
-                      },
                     ),
                   ],
                 ),
@@ -1164,7 +881,7 @@ class _BusinessProCard extends StatelessWidget {
           ),
           _FeatureLine(
             enabled: premiumActive,
-            text: 'Premium business badge',
+            text: 'Reviews, replies, analytics and Pro request/renewal support',
           ),
         ],
       ),

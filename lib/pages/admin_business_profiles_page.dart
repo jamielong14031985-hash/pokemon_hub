@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
+import 'admin_business_pro_requests_page.dart';
 import 'business_profile_editor_page.dart';
 
 class AdminBusinessProfilesPage extends StatefulWidget {
@@ -32,6 +34,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
   static const Color _borderColor = AdminBusinessProfilesPage._borderColor;
   static const Color _goldColor = AdminBusinessProfilesPage._goldColor;
   static const Color _softTextColor = AdminBusinessProfilesPage._softTextColor;
+  static const Color _dangerColor = AdminBusinessProfilesPage._dangerColor;
 
   @override
   void dispose() {
@@ -59,6 +62,128 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
     return profiles.where((profile) {
       return _searchTextForProfile(profile).contains(query);
     }).toList();
+  }
+
+
+  Widget _buildProRequestsCard(BusinessProfileService service) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: StreamBuilder<List<BusinessProRequest>>(
+        stream: service.watchAllBusinessProRequests(),
+        builder: (context, snapshot) {
+          final requests = snapshot.data ?? const <BusinessProRequest>[];
+          final pendingCount =
+              requests.where((request) => request.isPending).length;
+
+          final subtitle = snapshot.hasError
+              ? 'Could not load requests: ${snapshot.error}'
+              : requests.isEmpty
+                  ? 'No Business Pro requests yet. Tap to open the inbox.'
+                  : '${requests.length} total request${requests.length == 1 ? '' : 's'} • $pendingCount pending';
+
+          return Material(
+            color: _cardColor,
+            borderRadius: BorderRadius.circular(20),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const AdminBusinessProRequestsPage(),
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: pendingCount > 0 ? _goldColor : _borderColor,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: _fieldColor,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: _borderColor),
+                          ),
+                          child: const Icon(
+                            Icons.mark_email_unread_outlined,
+                            color: _goldColor,
+                            size: 27,
+                          ),
+                        ),
+                        if (pendingCount > 0)
+                          Positioned(
+                            right: -5,
+                            top: -5,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _dangerColor,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                pendingCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Business Pro Requests',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(
+                              color: _softTextColor,
+                              height: 1.35,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(
+                      Icons.chevron_right,
+                      color: _goldColor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildSearchBox() {
@@ -132,6 +257,19 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Business Pro requests',
+            icon: const Icon(Icons.mark_email_unread_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const AdminBusinessProRequestsPage(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: StreamBuilder<bool>(
         stream: service.watchCurrentUserIsAdminOrModerator(),
@@ -169,13 +307,17 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
 
               return ListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 120),
-                itemCount: profiles.length + 2,
+                itemCount: profiles.length + 3,
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     return _buildSearchBox();
                   }
 
                   if (index == 1) {
+                    return _buildProRequestsCard(service);
+                  }
+
+                  if (index == 2) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Container(
@@ -203,7 +345,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
                     return const _NoSearchResultsState();
                   }
 
-                  final profile = profiles[index - 2];
+                  final profile = profiles[index - 3];
                   return _BusinessAdminCard(profile: profile);
                 },
               );

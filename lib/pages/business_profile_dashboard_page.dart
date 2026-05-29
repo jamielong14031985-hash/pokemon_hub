@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/business_analytics.dart';
 import '../models/business_enquiry.dart';
+import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
 import '../widgets/business_rating_summary.dart';
@@ -9,6 +10,7 @@ import 'business_enquiries_page.dart';
 import 'business_events_page.dart';
 import 'business_offers_page.dart';
 import 'business_products_page.dart';
+import 'business_pro_request_page.dart';
 import 'business_profile_editor_page.dart';
 import 'business_reviews_page.dart';
 
@@ -112,6 +114,14 @@ class BusinessProDashboardPage extends StatelessWidget {
             const SizedBox(height: 12),
             _PremiumExpiryWarningCard(profile: profile),
           ],
+          const SizedBox(height: 18),
+          const _SectionHeader(
+            icon: Icons.contact_support_outlined,
+            title: 'Pro requests',
+            subtitle: 'Request Pro, renewal or contact the app admin.',
+          ),
+          const SizedBox(height: 10),
+          _BusinessProRequestDashboardCard(profile: profile),
           const SizedBox(height: 18),
           const _SectionHeader(
             icon: Icons.campaign_outlined,
@@ -526,6 +536,121 @@ class _StatusTile extends StatelessWidget {
   }
 }
 
+
+
+class _BusinessProRequestDashboardCard extends StatelessWidget {
+  const _BusinessProRequestDashboardCard({required this.profile});
+
+  final BusinessProfile profile;
+
+  Color _statusColor(BusinessProRequest request) {
+    if (request.isApproved) return BusinessProDashboardPage._successColor;
+    if (request.isRejected) return Colors.redAccent;
+    return BusinessProDashboardPage._goldColor;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<BusinessProRequest>>(
+      stream: BusinessProfileService().watchBusinessProRequestsForBusiness(
+        profile.id,
+      ),
+      builder: (context, snapshot) {
+        final requests = snapshot.data ?? const <BusinessProRequest>[];
+        final latest = requests.isEmpty ? null : requests.first;
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: BusinessProDashboardPage._cardColor,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: BusinessProDashboardPage._borderColor),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.contact_support_outlined,
+                color: BusinessProDashboardPage._goldColor,
+                size: 30,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      profile.premiumIsActive
+                          ? 'Request renewal or contact admin'
+                          : 'Request Business Pro',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      latest == null
+                          ? 'Send a request to the app admin from inside PocketChase.'
+                          : 'Latest request: ${latest.statusLabel} • ${latest.requestTypeLabel}',
+                      style: const TextStyle(
+                        color: BusinessProDashboardPage._softTextColor,
+                        height: 1.35,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (latest != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.circle,
+                            color: _statusColor(latest),
+                            size: 10,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              latest.adminResponse.trim().isEmpty
+                                  ? latest.statusLabel
+                                  : latest.adminResponse.trim(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: BusinessProDashboardPage._softTextColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Open Pro requests',
+                color: BusinessProDashboardPage._goldColor,
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => BusinessProRequestPage(profile: profile),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
 
 class _PremiumExpiryWarningCard extends StatelessWidget {
   const _PremiumExpiryWarningCard({required this.profile});
