@@ -20,7 +20,9 @@ class BusinessProfile {
     required this.featuredShopEnabled,
     required this.autoFeaturePosts,
     this.hasPhysicalShop = false,
+    this.premiumStartedAt,
     this.premiumExpiresAt,
+    this.premiumAdminNotes = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -43,7 +45,9 @@ class BusinessProfile {
   final bool featuredShopEnabled;
   final bool autoFeaturePosts;
   final bool hasPhysicalShop;
+  final Timestamp? premiumStartedAt;
   final Timestamp? premiumExpiresAt;
+  final String premiumAdminNotes;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -80,7 +84,9 @@ class BusinessProfile {
       featuredShopEnabled: cleanBool(data['featuredShopEnabled']),
       autoFeaturePosts: cleanBool(data['autoFeaturePosts']),
       hasPhysicalShop: cleanBool(data['hasPhysicalShop']),
+      premiumStartedAt: cleanTimestamp(data['premiumStartedAt']),
       premiumExpiresAt: cleanTimestamp(data['premiumExpiresAt']),
+      premiumAdminNotes: cleanString(data['premiumAdminNotes']),
       createdAt: cleanTimestamp(data['createdAt']),
       updatedAt: cleanTimestamp(data['updatedAt']),
     );
@@ -96,6 +102,7 @@ class BusinessProfile {
 
   bool get physicalShopNeedsMapListing => hasPhysicalShop && !hasLinkedShop;
 
+
   bool get hasRequiredBusinessDetails {
     return businessName.trim().isNotEmpty &&
         description.trim().isNotEmpty &&
@@ -108,6 +115,8 @@ class BusinessProfile {
   bool get setupIsComplete {
     return hasRequiredBusinessDetails && (!hasPhysicalShop || hasLinkedShop);
   }
+
+  bool get setupComplete => setupIsComplete;
 
   List<String> get setupMissingReasons {
     final missing = <String>[];
@@ -144,6 +153,50 @@ class BusinessProfile {
     if (expiry == null) return true;
 
     return expiry.toDate().isAfter(DateTime.now());
+  }
+
+  bool get premiumIsExpired {
+    if (!premiumActive) return false;
+
+    final expiry = premiumExpiresAt;
+    if (expiry == null) return false;
+
+    return !expiry.toDate().isAfter(DateTime.now());
+  }
+
+  bool get premiumExpiresSoon {
+    if (!premiumIsActive) return false;
+
+    final expiry = premiumExpiresAt;
+    if (expiry == null) return false;
+
+    final now = DateTime.now();
+    final daysLeft = expiry.toDate().difference(now).inDays;
+
+    return daysLeft >= 0 && daysLeft <= 14;
+  }
+
+  int? get premiumDaysRemaining {
+    if (!premiumIsActive) return null;
+
+    final expiry = premiumExpiresAt;
+    if (expiry == null) return null;
+
+    return expiry.toDate().difference(DateTime.now()).inDays;
+  }
+
+  String get premiumStatusLabel {
+    if (premiumIsActive) {
+      if (premiumExpiresAt == null) return 'Active - no expiry';
+      final days = premiumDaysRemaining;
+      if (days == null) return 'Active';
+      if (days <= 0) return 'Expires today';
+      return 'Active - $days day${days == 1 ? '' : 's'} left';
+    }
+
+    if (premiumIsExpired) return 'Expired';
+
+    return 'Not active';
   }
 
   bool get canFeatureShop {

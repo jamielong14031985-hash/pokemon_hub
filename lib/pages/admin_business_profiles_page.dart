@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models/business_profile.dart';
@@ -514,6 +515,18 @@ class _PremiumControls extends StatelessWidget {
             color: AdminBusinessProfilesPage._borderColor,
             height: 1,
           ),
+          _PremiumDateSummaryTile(
+            title: 'Pro dates and admin notes',
+            subtitle: _expirySubtitle(),
+            startedAt: _formatDate(profile.premiumStartedAt?.toDate()),
+            expiresAt: _formatDate(profile.premiumExpiresAt?.toDate()),
+            notes: profile.premiumAdminNotes,
+            onTap: () => _openPremiumEditor(context),
+          ),
+          const Divider(
+            color: AdminBusinessProfilesPage._borderColor,
+            height: 1,
+          ),
           _AdminSwitchTile(
             icon: Icons.star_border_rounded,
             title: 'Featured shop on map',
@@ -547,6 +560,362 @@ class _PremiumControls extends StatelessWidget {
     );
   }
 
+  String _formatDate(DateTime? value) {
+    if (value == null) return 'Not set';
+
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+
+    return '$day/$month/${value.year}';
+  }
+
+  String _expirySubtitle() {
+    if (!profile.premiumActive) return 'Business Pro is currently off.';
+    if (profile.premiumExpiresAt == null) return 'No expiry date set.';
+    if (profile.premiumIsExpired) {
+      return 'Expired on ${_formatDate(profile.premiumExpiresAt?.toDate())}.';
+    }
+    if (profile.premiumExpiresSoon) {
+      return 'Expires soon: ${_formatDate(profile.premiumExpiresAt?.toDate())}.';
+    }
+    return 'Expires: ${_formatDate(profile.premiumExpiresAt?.toDate())}.';
+  }
+
+  Future<void> _openPremiumEditor(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final notesController =
+        TextEditingController(text: profile.premiumAdminNotes);
+
+    var premiumActive = profile.premiumActive;
+    var approved = profile.status == 'approved';
+    var verified = profile.verified;
+    var featuredShopEnabled = profile.featuredShopEnabled;
+    var autoFeaturePosts = profile.autoFeaturePosts;
+    var startedAt = profile.premiumStartedAt?.toDate();
+    var expiresAt = profile.premiumExpiresAt?.toDate();
+
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) {
+          return StatefulBuilder(
+            builder: (context, setState) {
+              Future<void> pickStartDate() async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: startedAt ?? DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now().add(const Duration(days: 3650)),
+                );
+
+                if (picked == null || !context.mounted) return;
+                setState(() => startedAt = picked);
+              }
+
+              Future<void> pickExpiryDate() async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate:
+                      expiresAt ?? DateTime.now().add(const Duration(days: 30)),
+                  firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                  lastDate: DateTime.now().add(const Duration(days: 3650)),
+                );
+
+                if (picked == null || !context.mounted) return;
+                setState(() => expiresAt = picked);
+              }
+
+              Future<void> save() async {
+                try {
+                  await BusinessProfileService().adminUpdateBusinessPremium(
+                    businessProfileId: profile.id,
+                    approved: approved,
+                    verified: verified,
+                    premiumActive: premiumActive,
+                    featuredShopEnabled:
+                        premiumActive ? featuredShopEnabled : false,
+                    autoFeaturePosts:
+                        premiumActive ? autoFeaturePosts : false,
+                    premiumStartedAt: startedAt == null
+                        ? null
+                        : Timestamp.fromDate(startedAt!),
+                    premiumExpiresAt: expiresAt == null
+                        ? null
+                        : Timestamp.fromDate(expiresAt!),
+                    premiumAdminNotes: notesController.text.trim(),
+                  );
+
+                  if (!context.mounted) return;
+                  Navigator.of(context).pop(true);
+                } catch (error) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Could not save Pro settings: $error'),
+                    ),
+                  );
+                }
+              }
+
+              return Scaffold(
+                backgroundColor: AdminBusinessProfilesPage._backgroundColor,
+                appBar: AppBar(
+                  title: const Text('Manage Business Pro'),
+                  backgroundColor: AdminBusinessProfilesPage._backgroundColor,
+                  foregroundColor: Colors.white,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                ),
+                body: SafeArea(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AdminBusinessProfilesPage._cardColor,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: AdminBusinessProfilesPage._borderColor,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              profile.businessName,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Set Pro status, expiry dates, featured access and internal admin notes.',
+                              style: TextStyle(
+                                color: AdminBusinessProfilesPage._softTextColor,
+                                height: 1.35,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              activeThumbColor:
+                                  AdminBusinessProfilesPage._goldColor,
+                              title: const Text(
+                                'Business Pro active',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              subtitle: const Text(
+                                'When off, Pro placements and Pro tools are disabled.',
+                                style: TextStyle(
+                                  color: AdminBusinessProfilesPage._softTextColor,
+                                ),
+                              ),
+                              value: premiumActive,
+                              onChanged: (value) {
+                                setState(() {
+                                  premiumActive = value;
+                                  if (value && startedAt == null) {
+                                    startedAt = DateTime.now();
+                                  }
+                                  if (!value) {
+                                    featuredShopEnabled = false;
+                                    autoFeaturePosts = false;
+                                  }
+                                });
+                              },
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              activeThumbColor:
+                                  AdminBusinessProfilesPage._goldColor,
+                              title: const Text(
+                                'Approved',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              value: approved,
+                              onChanged: (value) {
+                                setState(() => approved = value);
+                              },
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              activeThumbColor:
+                                  AdminBusinessProfilesPage._goldColor,
+                              title: const Text(
+                                'Verified',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              value: verified,
+                              onChanged: (value) {
+                                setState(() => verified = value);
+                              },
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              activeThumbColor:
+                                  AdminBusinessProfilesPage._goldColor,
+                              title: const Text(
+                                'Featured map shop',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              value: premiumActive && featuredShopEnabled,
+                              onChanged: premiumActive
+                                  ? (value) {
+                                      setState(
+                                        () => featuredShopEnabled = value,
+                                      );
+                                    }
+                                  : null,
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              activeThumbColor:
+                                  AdminBusinessProfilesPage._goldColor,
+                              title: const Text(
+                                'Auto-feature community posts',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              value: premiumActive && autoFeaturePosts,
+                              onChanged: premiumActive
+                                  ? (value) {
+                                      setState(
+                                        () => autoFeaturePosts = value,
+                                      );
+                                    }
+                                  : null,
+                            ),
+                            const SizedBox(height: 12),
+                            _PremiumDateButton(
+                              label: 'Start date',
+                              value: startedAt == null
+                                  ? 'Not set'
+                                  : _formatDate(startedAt),
+                              icon: Icons.play_circle_outline,
+                              onPressed: pickStartDate,
+                              onClear: startedAt == null
+                                  ? null
+                                  : () => setState(() => startedAt = null),
+                            ),
+                            const SizedBox(height: 10),
+                            _PremiumDateButton(
+                              label: 'Expiry date',
+                              value: expiresAt == null
+                                  ? 'No expiry date'
+                                  : _formatDate(expiresAt),
+                              icon: Icons.event_busy_outlined,
+                              onPressed: pickExpiryDate,
+                              onClear: expiresAt == null
+                                  ? null
+                                  : () => setState(() => expiresAt = null),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: notesController,
+                              minLines: 3,
+                              maxLines: 5,
+                              maxLength: 500,
+                              style: const TextStyle(color: Colors.white),
+                              cursorColor: AdminBusinessProfilesPage._goldColor,
+                              decoration: InputDecoration(
+                                labelText: 'Admin notes',
+                                hintText:
+                                    'Payment notes, renewal details, invoice, etc.',
+                                labelStyle: const TextStyle(
+                                  color:
+                                      AdminBusinessProfilesPage._softTextColor,
+                                ),
+                                hintStyle: const TextStyle(
+                                  color: Color(0xFFAFC0E6),
+                                ),
+                                filled: true,
+                                fillColor: AdminBusinessProfilesPage._fieldColor,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                  borderSide: const BorderSide(
+                                    color:
+                                        AdminBusinessProfilesPage._borderColor,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                  borderSide: const BorderSide(
+                                    color:
+                                        AdminBusinessProfilesPage._borderColor,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                  borderSide: const BorderSide(
+                                    color: AdminBusinessProfilesPage._goldColor,
+                                    width: 1.6,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor:
+                                      AdminBusinessProfilesPage._goldColor,
+                                  foregroundColor:
+                                      AdminBusinessProfilesPage._backgroundColor,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.save_outlined),
+                                label: const Text(
+                                  'Save Pro settings',
+                                  style: TextStyle(fontWeight: FontWeight.w900),
+                                ),
+                                onPressed: save,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+
+    notesController.dispose();
+
+    if (saved == true) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Business Pro settings saved.')),
+      );
+    }
+  }
+
   Future<void> _togglePremium(BuildContext context, bool value) async {
     final messenger = ScaffoldMessenger.of(context);
 
@@ -558,7 +927,11 @@ class _PremiumControls extends StatelessWidget {
         premiumActive: value,
         featuredShopEnabled: value ? profile.featuredShopEnabled : false,
         autoFeaturePosts: value ? profile.autoFeaturePosts : false,
+        premiumStartedAt: value
+            ? (profile.premiumStartedAt ?? Timestamp.now())
+            : profile.premiumStartedAt,
         premiumExpiresAt: profile.premiumExpiresAt,
+        premiumAdminNotes: profile.premiumAdminNotes,
       );
 
       messenger.showSnackBar(
@@ -606,7 +979,9 @@ class _PremiumControls extends StatelessWidget {
         premiumActive: profile.premiumActive,
         featuredShopEnabled: value,
         autoFeaturePosts: profile.autoFeaturePosts,
+        premiumStartedAt: profile.premiumStartedAt,
         premiumExpiresAt: profile.premiumExpiresAt,
+        premiumAdminNotes: profile.premiumAdminNotes,
       );
 
       messenger.showSnackBar(
@@ -645,7 +1020,9 @@ class _PremiumControls extends StatelessWidget {
         premiumActive: profile.premiumActive,
         featuredShopEnabled: profile.featuredShopEnabled,
         autoFeaturePosts: value,
+        premiumStartedAt: profile.premiumStartedAt,
         premiumExpiresAt: profile.premiumExpiresAt,
+        premiumAdminNotes: profile.premiumAdminNotes,
       );
 
       messenger.showSnackBar(
@@ -662,6 +1039,137 @@ class _PremiumControls extends StatelessWidget {
         SnackBar(content: Text('Could not update featured posts: $error')),
       );
     }
+  }
+}
+
+
+class _PremiumDateSummaryTile extends StatelessWidget {
+  const _PremiumDateSummaryTile({
+    required this.title,
+    required this.subtitle,
+    required this.startedAt,
+    required this.expiresAt,
+    required this.notes,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String startedAt;
+  final String expiresAt;
+  final String notes;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasNotes = notes.trim().isNotEmpty;
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(
+        Icons.event_note_outlined,
+        color: AdminBusinessProfilesPage._goldColor,
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          '$subtitle\nStarted: $startedAt\nExpires: $expiresAt${hasNotes ? '\nNotes: ${notes.trim()}' : ''}',
+          style: const TextStyle(
+            color: AdminBusinessProfilesPage._softTextColor,
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right,
+        color: AdminBusinessProfilesPage._goldColor,
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _PremiumDateButton extends StatelessWidget {
+  const _PremiumDateButton({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.onPressed,
+    required this.onClear,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AdminBusinessProfilesPage._fieldColor,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onPressed,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AdminBusinessProfilesPage._borderColor),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: AdminBusinessProfilesPage._goldColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: AdminBusinessProfilesPage._softTextColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (onClear != null)
+                IconButton(
+                  tooltip: 'Clear',
+                  color: AdminBusinessProfilesPage._softTextColor,
+                  icon: const Icon(Icons.clear),
+                  onPressed: onClear,
+                )
+              else
+                const Icon(
+                  Icons.edit_calendar_outlined,
+                  color: AdminBusinessProfilesPage._goldColor,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

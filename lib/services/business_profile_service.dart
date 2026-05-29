@@ -1500,8 +1500,10 @@ class BusinessProfileService {
       'status': 'approved',
       'verified': false,
       'premiumActive': false,
+      'premiumStartedAt': null,
       'premiumExpiresAt': null,
       'premiumSource': '',
+      'premiumAdminNotes': '',
       'featuredShopEnabled': false,
       'autoFeaturePosts': false,
       'createdAt': FieldValue.serverTimestamp(),
@@ -1572,7 +1574,9 @@ class BusinessProfileService {
     required bool premiumActive,
     required bool featuredShopEnabled,
     required bool autoFeaturePosts,
+    Timestamp? premiumStartedAt,
     Timestamp? premiumExpiresAt,
+    String premiumAdminNotes = '',
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -1584,18 +1588,49 @@ class BusinessProfileService {
       throw StateError('Only admins and moderators can change premium flags.');
     }
 
-    await _businessProfiles.doc(businessProfileId.trim()).update({
+    final cleanBusinessProfileId = businessProfileId.trim();
+    if (cleanBusinessProfileId.isEmpty) {
+      throw ArgumentError('Missing business profile id.');
+    }
+
+    final cleanNotes = premiumAdminNotes.trim();
+    if (cleanNotes.length > 500) {
+      throw ArgumentError('Admin notes must be 500 characters or fewer.');
+    }
+
+    final profileRef = _businessProfiles.doc(cleanBusinessProfileId);
+    final snapshot = await profileRef.get();
+    if (!snapshot.exists) {
+      throw StateError('This business profile no longer exists.');
+    }
+
+    final data = snapshot.data() ?? <String, dynamic>{};
+    final existingStartedAt = data['premiumStartedAt'];
+
+    final Timestamp? savedStartedAt;
+    if (!premiumActive) {
+      savedStartedAt =
+          existingStartedAt is Timestamp ? existingStartedAt : premiumStartedAt;
+    } else {
+      savedStartedAt = premiumStartedAt ??
+          (existingStartedAt is Timestamp ? existingStartedAt : Timestamp.now());
+    }
+
+    await profileRef.update({
       'status': approved ? 'approved' : 'pending',
       'verified': verified,
       'premiumActive': premiumActive,
+      'premiumStartedAt': savedStartedAt,
       'premiumExpiresAt': premiumExpiresAt,
-      'premiumSource': premiumActive ? 'manual_admin_stage_1' : '',
-      'featuredShopEnabled': featuredShopEnabled,
-      'autoFeaturePosts': autoFeaturePosts,
+      'premiumSource': premiumActive ? 'manual_admin' : '',
+      'premiumAdminNotes': cleanNotes,
+      'featuredShopEnabled': premiumActive ? featuredShopEnabled : false,
+      'autoFeaturePosts': premiumActive ? autoFeaturePosts : false,
       'updatedAt': FieldValue.serverTimestamp(),
       'updatedBy': user.uid,
     });
   }
+
   Future<String> _uploadFeaturedBannerImage({
     required String userId,
     required String businessProfileId,

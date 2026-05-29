@@ -28,6 +28,21 @@ class BusinessProDashboardPage extends StatelessWidget {
   static const Color _softTextColor = Color(0xFFC8D4F0);
   static const Color _successColor = Color(0xFF4ADE80);
 
+  static String _formatDate(DateTime? value) {
+    if (value == null) return 'Not set';
+
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+
+    return '$day/$month/${value.year}';
+  }
+
+  static String _premiumExpiryText(BusinessProfile profile) {
+    if (!profile.premiumActive) return 'Not active';
+    if (profile.premiumExpiresAt == null) return 'No expiry date';
+    return _formatDate(profile.premiumExpiresAt?.toDate());
+  }
+
   @override
   Widget build(BuildContext context) {
     final premiumActive = profile.premiumIsActive;
@@ -62,8 +77,14 @@ class BusinessProDashboardPage extends StatelessWidget {
               _StatusTile(
                 icon: Icons.workspace_premium,
                 title: 'Business Pro',
-                value: premiumActive ? 'Active' : 'Not active',
+                value: profile.premiumStatusLabel,
                 enabled: premiumActive,
+              ),
+              _StatusTile(
+                icon: Icons.calendar_today_outlined,
+                title: 'Pro expiry',
+                value: _premiumExpiryText(profile),
+                enabled: premiumActive && !profile.premiumIsExpired,
               ),
               _StatusTile(
                 icon: Icons.verified_outlined,
@@ -87,6 +108,10 @@ class BusinessProDashboardPage extends StatelessWidget {
               ),
             ],
           ),
+          if (profile.premiumExpiresSoon || profile.premiumIsExpired) ...[
+            const SizedBox(height: 12),
+            _PremiumExpiryWarningCard(profile: profile),
+          ],
           const SizedBox(height: 18),
           const _SectionHeader(
             icon: Icons.campaign_outlined,
@@ -493,6 +518,60 @@ class _StatusTile extends StatelessWidget {
               color: Colors.white,
               fontSize: 15,
               fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _PremiumExpiryWarningCard extends StatelessWidget {
+  const _PremiumExpiryWarningCard({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final expired = profile.premiumIsExpired;
+    final days = profile.premiumDaysRemaining;
+    final message = expired
+        ? 'Business Pro has expired. Premium placements and Pro tools are hidden until an admin renews the plan.'
+        : days == null
+            ? 'Business Pro is active.'
+            : 'Business Pro expires in $days day${days == 1 ? '' : 's'}. Contact the app admin to renew.';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: expired
+            ? Colors.redAccent.withValues(alpha: 0.12)
+            : BusinessProDashboardPage._goldColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: expired
+              ? Colors.redAccent
+              : BusinessProDashboardPage._goldColor,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            expired ? Icons.lock_clock_outlined : Icons.schedule_outlined,
+            color:
+                expired ? Colors.redAccent : BusinessProDashboardPage._goldColor,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: BusinessProDashboardPage._softTextColor,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],

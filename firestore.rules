@@ -698,8 +698,10 @@ service cloud.firestore {
           'status',
           'verified',
           'premiumActive',
+          'premiumStartedAt',
           'premiumExpiresAt',
           'premiumSource',
+          'premiumAdminNotes',
           'featuredShopEnabled',
           'autoFeaturePosts',
           'createdAt',
@@ -741,8 +743,11 @@ service cloud.firestore {
         && data.status in ['pending', 'approved', 'rejected']
         && data.verified is bool
         && data.premiumActive is bool
+        && (!('premiumStartedAt' in data) || data.premiumStartedAt == null || data.premiumStartedAt is timestamp)
         && (!('premiumExpiresAt' in data) || data.premiumExpiresAt == null || data.premiumExpiresAt is timestamp)
         && data.premiumSource is string
+        && (!('premiumAdminNotes' in data) || data.premiumAdminNotes is string)
+        && (!('premiumAdminNotes' in data) || data.premiumAdminNotes.size() <= 500)
         && data.featuredShopEnabled is bool
         && data.autoFeaturePosts is bool
         && (!('updatedBy' in data) || data.updatedBy is string);
@@ -979,8 +984,10 @@ service cloud.firestore {
           'status',
           'verified',
           'premiumActive',
+          'premiumStartedAt',
           'premiumExpiresAt',
           'premiumSource',
+          'premiumAdminNotes',
           'featuredShopEnabled',
           'autoFeaturePosts',
           'createdAt',
@@ -1055,8 +1062,10 @@ service cloud.firestore {
         && request.resource.data.status == 'approved'
         && request.resource.data.verified == false
         && request.resource.data.premiumActive == false
+        && request.resource.data.premiumStartedAt == null
         && request.resource.data.premiumExpiresAt == null
         && request.resource.data.premiumSource == ''
+        && request.resource.data.premiumAdminNotes == ''
         && request.resource.data.featuredShopEnabled == false
         && request.resource.data.autoFeaturePosts == false;
 
