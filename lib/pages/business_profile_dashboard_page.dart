@@ -10,6 +10,7 @@ import 'business_enquiries_page.dart';
 import 'business_events_page.dart';
 import 'business_offers_page.dart';
 import 'business_products_page.dart';
+import 'business_pro_plan_page.dart';
 import 'business_pro_request_page.dart';
 import 'business_profile_editor_page.dart';
 import 'business_reviews_page.dart';
@@ -114,6 +115,14 @@ class BusinessProDashboardPage extends StatelessWidget {
             const SizedBox(height: 12),
             _PremiumExpiryWarningCard(profile: profile),
           ],
+          const SizedBox(height: 18),
+          const _SectionHeader(
+            icon: Icons.price_change_outlined,
+            title: 'Pricing and plan',
+            subtitle: 'Show what Business Pro includes before requesting access.',
+          ),
+          const SizedBox(height: 10),
+          _BusinessProPlanDashboardCard(profile: profile),
           const SizedBox(height: 18),
           const _SectionHeader(
             icon: Icons.contact_support_outlined,
@@ -537,6 +546,74 @@ class _StatusTile extends StatelessWidget {
 }
 
 
+
+
+class _BusinessProPlanDashboardCard extends StatelessWidget {
+  const _BusinessProPlanDashboardCard({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: BusinessProDashboardPage._cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: BusinessProDashboardPage._borderColor),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.price_change_outlined,
+            color: BusinessProDashboardPage._goldColor,
+            size: 30,
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Business Pro pricing & plan',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 5),
+                Text(
+                  'View included features, price placeholders and admin approval steps.',
+                  style: TextStyle(
+                    color: BusinessProDashboardPage._softTextColor,
+                    height: 1.35,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Open pricing and plan',
+            color: BusinessProDashboardPage._goldColor,
+            icon: const Icon(Icons.chevron_right),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => BusinessProPlanPage(profile: profile),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _BusinessProRequestDashboardCard extends StatelessWidget {
   const _BusinessProRequestDashboardCard({required this.profile});

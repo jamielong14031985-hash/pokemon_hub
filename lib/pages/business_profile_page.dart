@@ -5,6 +5,7 @@ import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
 import 'business_enquiries_page.dart';
+import 'business_pro_plan_page.dart';
 import 'business_pro_request_page.dart';
 import 'business_profile_dashboard_page.dart';
 import 'business_profile_editor_page.dart';
@@ -149,10 +150,18 @@ class _BusinessProfileMenu extends StatelessWidget {
             ),
             const _MenuDivider(),
             _MenuTile(
+              icon: Icons.price_change_outlined,
+              iconColor: BusinessProfilePage.goldColor,
+              title: 'Business Pro pricing & plan',
+              subtitle: 'View included features, price placeholders and request options.',
+              onTap: () => _openBusinessProPlan(context),
+            ),
+            const _MenuDivider(),
+            _MenuTile(
               icon: Icons.info_outline,
               iconColor: BusinessProfilePage.softTextColor,
               title: 'What Business Pro includes',
-              subtitle: 'Featured placements, offers, events, products, reviews and enquiries.',
+              subtitle: 'Quick overview of featured placements, offers, events and enquiries.',
               onTap: () => _showBusinessProInfo(context),
             ),
           ],
@@ -278,6 +287,14 @@ class _BusinessProfileMenu extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => BusinessProRequestPage(profile: profile),
+      ),
+    );
+  }
+
+  void _openBusinessProPlan(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessProPlanPage(profile: profile),
       ),
     );
   }
