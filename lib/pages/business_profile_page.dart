@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../models/business_enquiry.dart';
+import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
+import 'business_enquiries_page.dart';
 import 'business_pro_request_page.dart';
 import 'business_profile_dashboard_page.dart';
 import 'business_profile_editor_page.dart';
@@ -75,6 +78,8 @@ class _BusinessProfileMenu extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 120),
       children: [
         _ProfileHeroCard(profile: profile),
+        const SizedBox(height: 12),
+        _BusinessNotificationSummary(profile: profile),
         const SizedBox(height: 16),
         const _SectionHeader(
           icon: Icons.menu_rounded,
@@ -107,6 +112,15 @@ class _BusinessProfileMenu extends StatelessWidget {
             ),
             const _MenuDivider(),
             _MenuTile(
+              icon: Icons.mark_email_unread_outlined,
+              iconColor: BusinessProfilePage.goldColor,
+              title: 'Customer enquiries',
+              subtitle: 'View messages and questions from users.',
+              trailing: _BusinessEnquiriesBadge(profile: profile),
+              onTap: () => _openCustomerEnquiries(context),
+            ),
+            const _MenuDivider(),
+            _MenuTile(
               icon: Icons.dashboard_customize_outlined,
               iconColor: BusinessProfilePage.goldColor,
               title: 'Business Pro dashboard',
@@ -130,10 +144,7 @@ class _BusinessProfileMenu extends StatelessWidget {
                   ? 'Request Pro renewal'
                   : 'Request Business Pro',
               subtitle: 'Send a request or message to the app admin about Business Pro.',
-              trailing: const Icon(
-                Icons.chevron_right,
-                color: BusinessProfilePage.goldColor,
-              ),
+              trailing: _BusinessProRequestsBadge(profile: profile),
               onTap: () => _openBusinessProRequest(context),
             ),
             const _MenuDivider(),
@@ -255,6 +266,14 @@ class _BusinessProfileMenu extends StatelessWidget {
     );
   }
 
+  void _openCustomerEnquiries(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessEnquiriesPage(profile: profile),
+      ),
+    );
+  }
+
   void _openBusinessProRequest(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -359,6 +378,309 @@ class _BusinessProfileMenu extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+
+class _BusinessNotificationSummary extends StatelessWidget {
+  const _BusinessNotificationSummary({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<BusinessEnquiry>>(
+      stream: BusinessProfileService().watchBusinessEnquiries(profile.id),
+      builder: (context, enquirySnapshot) {
+        final enquiries = enquirySnapshot.data ?? const <BusinessEnquiry>[];
+        final openEnquiries = enquiries
+            .where((enquiry) => enquiry.status == 'open')
+            .length;
+
+        return StreamBuilder<List<BusinessProRequest>>(
+          stream: BusinessProfileService().watchBusinessProRequestsForBusiness(
+            profile.id,
+          ),
+          builder: (context, requestSnapshot) {
+            final requests =
+                requestSnapshot.data ?? const <BusinessProRequest>[];
+            final pendingRequests = requests
+                .where((request) => request.status == 'pending')
+                .length;
+            final latestRequest = requests.isEmpty ? null : requests.first;
+
+            final hasExpiryAlert =
+                profile.premiumExpiresSoon || profile.premiumIsExpired;
+            final hasNotifications =
+                openEnquiries > 0 || pendingRequests > 0 || hasExpiryAlert;
+
+            final subtitle = hasNotifications
+                ? 'You have business updates to check.'
+                : 'No urgent business notifications.';
+
+            return Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: hasNotifications
+                    ? BusinessProfilePage.goldColor.withValues(alpha: 0.12)
+                    : BusinessProfilePage.cardColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: hasNotifications
+                      ? BusinessProfilePage.goldColor
+                      : BusinessProfilePage.borderColor,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: BusinessProfilePage.fieldColor,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: BusinessProfilePage.borderColor,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.notifications_active_outlined,
+                              color: BusinessProfilePage.goldColor,
+                            ),
+                          ),
+                          if (hasNotifications)
+                            Positioned(
+                              right: -4,
+                              top: -4,
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Business notifications',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle,
+                              style: const TextStyle(
+                                color: BusinessProfilePage.softTextColor,
+                                height: 1.35,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _NotificationPill(
+                        icon: Icons.mark_email_unread_outlined,
+                        text: openEnquiries == 0
+                            ? 'No open enquiries'
+                            : '$openEnquiries open enquiry${openEnquiries == 1 ? '' : 'ies'}',
+                        highlighted: openEnquiries > 0,
+                      ),
+                      _NotificationPill(
+                        icon: Icons.contact_support_outlined,
+                        text: pendingRequests == 0
+                            ? 'No pending Pro requests'
+                            : '$pendingRequests Pro request${pendingRequests == 1 ? '' : 's'} pending',
+                        highlighted: pendingRequests > 0,
+                      ),
+                      if (latestRequest != null && latestRequest.status != 'pending')
+                        _NotificationPill(
+                          icon: latestRequest.isApproved
+                              ? Icons.check_circle_outline
+                              : Icons.cancel_outlined,
+                          text: 'Latest Pro request: ${latestRequest.statusLabel}',
+                          highlighted: true,
+                        ),
+                      if (profile.premiumIsExpired)
+                        const _NotificationPill(
+                          icon: Icons.lock_clock_outlined,
+                          text: 'Business Pro expired',
+                          highlighted: true,
+                        )
+                      else if (profile.premiumExpiresSoon)
+                        const _NotificationPill(
+                          icon: Icons.schedule_outlined,
+                          text: 'Business Pro expires soon',
+                          highlighted: true,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _BusinessEnquiriesBadge extends StatelessWidget {
+  const _BusinessEnquiriesBadge({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<BusinessEnquiry>>(
+      stream: BusinessProfileService().watchBusinessEnquiries(profile.id),
+      builder: (context, snapshot) {
+        final enquiries = snapshot.data ?? const <BusinessEnquiry>[];
+        final openCount =
+            enquiries.where((enquiry) => enquiry.status == 'open').length;
+
+        if (openCount <= 0) {
+          return const Icon(
+            Icons.chevron_right,
+            color: BusinessProfilePage.goldColor,
+          );
+        }
+
+        return _CountBadge(count: openCount);
+      },
+    );
+  }
+}
+
+class _BusinessProRequestsBadge extends StatelessWidget {
+  const _BusinessProRequestsBadge({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<BusinessProRequest>>(
+      stream: BusinessProfileService().watchBusinessProRequestsForBusiness(
+        profile.id,
+      ),
+      builder: (context, snapshot) {
+        final requests = snapshot.data ?? const <BusinessProRequest>[];
+        final pendingCount =
+            requests.where((request) => request.status == 'pending').length;
+
+        if (pendingCount <= 0) {
+          return const Icon(
+            Icons.chevron_right,
+            color: BusinessProfilePage.goldColor,
+          );
+        }
+
+        return _CountBadge(count: pendingCount);
+      },
+    );
+  }
+}
+
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 26),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.redAccent,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        count > 99 ? '99+' : count.toString(),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _NotificationPill extends StatelessWidget {
+  const _NotificationPill({
+    required this.icon,
+    required this.text,
+    required this.highlighted,
+  });
+
+  final IconData icon;
+  final String text;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? BusinessProfilePage.goldColor
+            : BusinessProfilePage.fieldColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: highlighted
+              ? BusinessProfilePage.goldColor
+              : BusinessProfilePage.borderColor,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            color: highlighted
+                ? BusinessProfilePage.backgroundColor
+                : BusinessProfilePage.goldColor,
+            size: 15,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              color: highlighted
+                  ? BusinessProfilePage.backgroundColor
+                  : Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -852,7 +1174,7 @@ class _BusinessProCard extends StatelessWidget {
                 child: Text(
                   premiumActive
                       ? 'Business Pro active'
-                      : 'Business Pro coming soon',
+                      : 'Business Pro not active',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -864,7 +1186,7 @@ class _BusinessProCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           const Text(
-            'Business Pro will help shops stand out to collectors using PocketChase.',
+            'Business Pro helps shops stand out to collectors using PocketChase.',
             style: TextStyle(
               color: BusinessProfilePage.softTextColor,
               height: 1.35,

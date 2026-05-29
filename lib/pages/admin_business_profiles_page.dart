@@ -65,7 +65,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
   }
 
 
-  Widget _buildProRequestsCard(BusinessProfileService service) {
+  Widget _buildProRequestsCard(BusinessProfileService service, List<BusinessProfile> allProfiles) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: StreamBuilder<List<BusinessProRequest>>(
@@ -74,12 +74,15 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
           final requests = snapshot.data ?? const <BusinessProRequest>[];
           final pendingCount =
               requests.where((request) => request.isPending).length;
+          final pendingProfiles = allProfiles
+              .where((profile) => profile.status != 'approved')
+              .length;
 
           final subtitle = snapshot.hasError
               ? 'Could not load requests: ${snapshot.error}'
               : requests.isEmpty
-                  ? 'No Business Pro requests yet. Tap to open the inbox.'
-                  : '${requests.length} total request${requests.length == 1 ? '' : 's'} • $pendingCount pending';
+                  ? 'No Business Pro requests yet • $pendingProfiles profile${pendingProfiles == 1 ? '' : 's'} pending approval.'
+                  : '${requests.length} total request${requests.length == 1 ? '' : 's'} • $pendingCount pending • $pendingProfiles profile${pendingProfiles == 1 ? '' : 's'} pending approval';
 
           return Material(
             color: _cardColor,
@@ -120,7 +123,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
                             size: 27,
                           ),
                         ),
-                        if (pendingCount > 0)
+                        if (pendingCount > 0 || pendingProfiles > 0)
                           Positioned(
                             right: -5,
                             top: -5,
@@ -134,7 +137,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                pendingCount.toString(),
+                                (pendingCount + pendingProfiles).toString(),
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 11,
@@ -314,7 +317,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
                   }
 
                   if (index == 1) {
-                    return _buildProRequestsCard(service);
+                    return _buildProRequestsCard(service, allProfiles);
                   }
 
                   if (index == 2) {
