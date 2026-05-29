@@ -698,6 +698,31 @@ class BusinessProfileService {
     await _businessProRequests.doc(cleanRequestId).delete();
   }
 
+
+  Stream<List<BusinessEnquiry>> watchAllBusinessEnquiriesForAdmin() {
+    return _firestore.collectionGroup('enquiries').snapshots().map((snapshot) {
+      final enquiries = snapshot.docs.map(BusinessEnquiry.fromDoc).toList();
+
+      enquiries.sort((a, b) {
+        final aOpen = a.status == 'open';
+        final bOpen = b.status == 'open';
+
+        if (aOpen != bOpen) return aOpen ? -1 : 1;
+
+        final aTime = a.updatedAt?.millisecondsSinceEpoch ??
+            a.createdAt?.millisecondsSinceEpoch ??
+            0;
+        final bTime = b.updatedAt?.millisecondsSinceEpoch ??
+            b.createdAt?.millisecondsSinceEpoch ??
+            0;
+
+        return bTime.compareTo(aTime);
+      });
+
+      return enquiries;
+    });
+  }
+
   CollectionReference<Map<String, dynamic>> _businessEnquiries(
     String businessId,
   ) {

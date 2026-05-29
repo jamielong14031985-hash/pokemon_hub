@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
+import 'admin_business_dashboard_page.dart';
 import 'admin_business_pro_requests_page.dart';
 import 'business_profile_editor_page.dart';
 
@@ -64,6 +65,128 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
     }).toList();
   }
 
+
+
+  Widget _buildAdminDashboardCard(List<BusinessProfile> allProfiles) {
+    final totalProfiles = allProfiles.length;
+    final pendingProfiles = allProfiles
+        .where((profile) => profile.status != 'approved')
+        .length;
+    final activePro = allProfiles
+        .where((profile) => profile.premiumIsActive)
+        .length;
+    final expiryAlerts = allProfiles
+        .where(
+          (profile) => profile.premiumExpiresSoon || profile.premiumIsExpired,
+        )
+        .length;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const AdminBusinessDashboardPage(),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: pendingProfiles > 0 || expiryAlerts > 0
+                    ? _goldColor
+                    : _borderColor,
+              ),
+            ),
+            child: Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: _fieldColor,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      child: const Icon(
+                        Icons.dashboard_customize_outlined,
+                        color: _goldColor,
+                        size: 27,
+                      ),
+                    ),
+                    if (pendingProfiles > 0 || expiryAlerts > 0)
+                      Positioned(
+                        right: -5,
+                        top: -5,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _dangerColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            (pendingProfiles + expiryAlerts).toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Admin Business Dashboard',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$totalProfiles businesses • $activePro active Pro • $pendingProfiles pending approval • $expiryAlerts expiry alert${expiryAlerts == 1 ? '' : 's'}',
+                        style: const TextStyle(
+                          color: _softTextColor,
+                          height: 1.35,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.chevron_right,
+                  color: _goldColor,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildProRequestsCard(BusinessProfileService service, List<BusinessProfile> allProfiles) {
     return Padding(
@@ -262,6 +385,17 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
         elevation: 0,
         actions: [
           IconButton(
+            tooltip: 'Admin Business Dashboard',
+            icon: const Icon(Icons.dashboard_customize_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const AdminBusinessDashboardPage(),
+                ),
+              );
+            },
+          ),
+          IconButton(
             tooltip: 'Business Pro requests',
             icon: const Icon(Icons.mark_email_unread_outlined),
             onPressed: () {
@@ -310,17 +444,21 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
 
               return ListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 120),
-                itemCount: profiles.length + 3,
+                itemCount: profiles.length + 4,
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     return _buildSearchBox();
                   }
 
                   if (index == 1) {
-                    return _buildProRequestsCard(service, allProfiles);
+                    return _buildAdminDashboardCard(allProfiles);
                   }
 
                   if (index == 2) {
+                    return _buildProRequestsCard(service, allProfiles);
+                  }
+
+                  if (index == 3) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Container(
@@ -348,7 +486,7 @@ class _AdminBusinessProfilesPageState extends State<AdminBusinessProfilesPage> {
                     return const _NoSearchResultsState();
                   }
 
-                  final profile = profiles[index - 3];
+                  final profile = profiles[index - 4];
                   return _BusinessAdminCard(profile: profile);
                 },
               );
