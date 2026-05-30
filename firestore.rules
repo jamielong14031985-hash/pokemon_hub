@@ -1464,6 +1464,41 @@ service cloud.firestore {
       allow delete: if isSelf(userId) || isAdmin();
     }
 
+
+    function validSavedTcgShopData(data, userId, shopId) {
+      return data is map
+        && data.keys().hasOnly([
+          'userId',
+          'shopId',
+          'name',
+          'address',
+          'town',
+          'imageUrl',
+          'website',
+          'phone',
+          'lat',
+          'lng',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.userId == userId
+        && data.shopId == shopId
+        && data.name is string
+        && data.name.size() <= 160
+        && data.address is string
+        && data.address.size() <= 500
+        && data.town is string
+        && data.town.size() <= 160
+        && data.imageUrl is string
+        && data.imageUrl.size() <= 1000
+        && data.website is string
+        && data.website.size() <= 500
+        && data.phone is string
+        && data.phone.size() <= 80
+        && data.lat is number
+        && data.lng is number;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
 
@@ -1488,6 +1523,16 @@ service cloud.firestore {
         && (!('businessProfileCreated' in request.resource.data) || request.resource.data.businessProfileCreated is bool);
 
       allow delete: if isSelf(userId);
+
+
+      match /saved_tcg_shops/{shopId} {
+        allow read: if isSelf(userId);
+
+        allow create, update: if isSelf(userId)
+          && validSavedTcgShopData(request.resource.data, userId, shopId);
+
+        allow delete: if isSelf(userId);
+      }
 
       match /tracked_restock_products/{productId} {
         allow read: if isSelf(userId);

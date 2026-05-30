@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/business_profile.dart';
 import '../models/tcg_shop.dart';
 import '../services/business_profile_service.dart';
+import '../services/saved_tcg_shop_service.dart';
 import '../services/tcg_shop_service.dart';
 import 'add_tcg_shop_page.dart';
 import 'edit_tcg_shop_page.dart';
@@ -20,6 +21,7 @@ import 'business_deals_page.dart';
 import 'business_events_directory_page.dart';
 import 'business_reviews_page.dart';
 import 'public_business_profile_page.dart';
+import 'saved_tcg_shops_page.dart';
 import 'online_shops_page.dart';
 
 class TcgShopMapPage extends StatefulWidget {
@@ -46,6 +48,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   final TcgShopService _shopService = TcgShopService();
   final BusinessProfileService _businessProfileService =
       BusinessProfileService();
+  final SavedTcgShopService _savedShopService = SavedTcgShopService();
   final TextEditingController _areaController = TextEditingController();
 
   double _currentZoom = _initialZoom;
@@ -232,6 +235,14 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => const OnlineShopsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openSavedShopsPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const SavedTcgShopsPage(),
       ),
     );
   }
@@ -1065,7 +1076,12 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
         final profile = snapshot.data;
 
         if (profile == null || !profile.hasLinkedShop) {
-          return const SizedBox.shrink();
+          return IconButton(
+            tooltip: 'Saved shops',
+            icon: const Icon(Icons.bookmark_outline),
+            color: _goldColor,
+            onPressed: _openSavedShopsPage,
+          );
         }
 
         final openNow = profile.isOpenNow ?? false;
@@ -1646,6 +1662,11 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  _SavedShopButton(
+                    shop: shop,
+                    service: _savedShopService,
+                  ),
                   if (featuredProfile != null &&
                       featuredProfile.businessName != shop.name) ...[
                     const SizedBox(height: 6),
@@ -2176,6 +2197,76 @@ class _PremiumMarqueeCardBackground extends StatelessWidget {
   }
 }
 
+
+
+class _SavedShopButton extends StatelessWidget {
+  const _SavedShopButton({
+    required this.shop,
+    required this.service,
+  });
+
+  final TcgShop shop;
+  final SavedTcgShopService service;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<Set<String>>(
+      stream: service.watchSavedShopIds(),
+      builder: (context, snapshot) {
+        final savedIds = snapshot.data ?? <String>{};
+        final isSaved = savedIds.contains(shop.id);
+
+        return SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _TcgShopMapPageState._goldColor,
+              side: const BorderSide(
+                color: _TcgShopMapPageState._goldColor,
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: Icon(
+              isSaved ? Icons.bookmark : Icons.bookmark_border,
+            ),
+            label: Text(
+              isSaved ? 'Saved shop' : 'Save shop',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            onPressed: () async {
+              try {
+                await service.toggleSaved(shop);
+
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      isSaved
+                          ? '${shop.name} removed from saved shops.'
+                          : '${shop.name} saved.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Could not update saved shop: $error'),
+                  ),
+                );
+              }
+            },
+          ),
+        );
+      },
+    );
+  }
+}
 
 class _ShopMapMarkerCluster {
   const _ShopMapMarkerCluster({
