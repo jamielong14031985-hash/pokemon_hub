@@ -109,6 +109,7 @@ class BusinessProfile {
     this.premiumStartedAt,
     this.premiumExpiresAt,
     this.premiumAdminNotes = '',
+    this.openingStatus = 'auto',
     this.openingHours = const <String, BusinessOpeningHours>{},
     this.createdAt,
     this.updatedAt,
@@ -135,6 +136,7 @@ class BusinessProfile {
   final Timestamp? premiumStartedAt;
   final Timestamp? premiumExpiresAt;
   final String premiumAdminNotes;
+  final String openingStatus;
   final Map<String, BusinessOpeningHours> openingHours;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
@@ -146,6 +148,16 @@ class BusinessProfile {
   static Timestamp? cleanTimestamp(dynamic value) {
     if (value is Timestamp) return value;
     return null;
+  }
+
+  static String cleanOpeningStatus(dynamic value) {
+    final status = cleanString(value).toLowerCase();
+
+    if (status == 'open' || status == 'closed') {
+      return status;
+    }
+
+    return 'auto';
   }
 
   static Map<String, BusinessOpeningHours> cleanOpeningHours(dynamic value) {
@@ -184,6 +196,7 @@ class BusinessProfile {
       premiumStartedAt: cleanTimestamp(data['premiumStartedAt']),
       premiumExpiresAt: cleanTimestamp(data['premiumExpiresAt']),
       premiumAdminNotes: cleanString(data['premiumAdminNotes']),
+      openingStatus: cleanOpeningStatus(data['openingStatus']),
       openingHours: cleanOpeningHours(data['openingHours']),
       createdAt: cleanTimestamp(data['createdAt']),
       updatedAt: cleanTimestamp(data['updatedAt']),
@@ -303,10 +316,26 @@ class BusinessProfile {
   }
 
   bool get hasAnyOpeningHours {
+    if (openingStatus == 'open' || openingStatus == 'closed') {
+      return true;
+    }
+
     return BusinessOpeningHours.dayKeys.any((dayKey) {
       final hours = openingHoursForDay(dayKey);
       return hours.closed || hours.hasTimes;
     });
+  }
+
+  bool get hasManualOpeningStatus {
+    return openingStatus == 'open' || openingStatus == 'closed';
+  }
+
+  String get openingStatusLabel {
+    return switch (openingStatus) {
+      'open' => 'Open now',
+      'closed' => 'Closed now',
+      _ => 'Use opening hours',
+    };
   }
 
   BusinessOpeningHours get todayOpeningHours {
@@ -331,6 +360,9 @@ class BusinessProfile {
   }
 
   bool? get isOpenNow {
+    if (openingStatus == 'open') return true;
+    if (openingStatus == 'closed') return false;
+
     final hours = todayOpeningHours;
 
     if (hours.closed) return false;
@@ -354,6 +386,9 @@ class BusinessProfile {
   }
 
   String get openStatusLabel {
+    if (openingStatus == 'open') return 'Open now';
+    if (openingStatus == 'closed') return 'Closed now';
+
     final openNow = isOpenNow;
     final today = todayOpeningHours;
 

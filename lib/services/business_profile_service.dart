@@ -31,6 +31,16 @@ class BusinessProfileService {
   final FirebaseStorage _storage;
 
 
+  static String _cleanOpeningStatus(String openingStatus) {
+    final status = openingStatus.trim().toLowerCase();
+
+    if (status == 'open' || status == 'closed') {
+      return status;
+    }
+
+    return 'auto';
+  }
+
   static Map<String, Map<String, Object?>> _cleanOpeningHours(
     Map<String, Map<String, dynamic>>? openingHours,
   ) {
@@ -114,6 +124,38 @@ class BusinessProfileService {
 
     if (snapshot.docs.isEmpty) return null;
     return BusinessProfile.fromDoc(snapshot.docs.first);
+  }
+
+
+  Future<void> updateMyBusinessOpeningStatus(String openingStatus) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('You must be signed in to update your shop status.');
+    }
+
+    final cleanOpeningStatus = _cleanOpeningStatus(openingStatus);
+
+    final snapshot = await _businessProfiles
+        .where('ownerUid', isEqualTo: user.uid)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      throw StateError('Create your business profile before updating shop status.');
+    }
+
+    final profile = BusinessProfile.fromDoc(snapshot.docs.first);
+
+    if (!profile.hasPhysicalShop || profile.linkedShopId.trim().isEmpty) {
+      throw StateError(
+        'Only linked physical shop businesses can use the map quick status button.',
+      );
+    }
+
+    await _businessProfiles.doc(profile.id).update({
+      'openingStatus': cleanOpeningStatus,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Stream<List<BusinessProfile>> watchAllBusinessProfiles() {
@@ -1606,6 +1648,7 @@ class BusinessProfileService {
     String featuredImageFileName = 'featured_banner.jpg',
     bool removeFeaturedImage = false,
     Map<String, Map<String, dynamic>>? openingHours,
+    String openingStatus = 'auto',
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -1654,6 +1697,7 @@ class BusinessProfileService {
     }
 
     final cleanOpeningHours = _cleanOpeningHours(openingHours);
+    final cleanOpeningStatus = _cleanOpeningStatus(openingStatus);
 
     final existingProfile = cleanBusinessProfileId.isEmpty
         ? await getMyBusinessProfileOnce()
@@ -1689,6 +1733,7 @@ class BusinessProfileService {
         'townLower': town.trim().toLowerCase(),
         'county': county.trim(),
         'countyLower': county.trim().toLowerCase(),
+        'openingStatus': cleanOpeningStatus,
         'openingHours': cleanOpeningHours,
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -1742,6 +1787,7 @@ class BusinessProfileService {
       'townLower': town.trim().toLowerCase(),
       'county': county.trim(),
       'countyLower': county.trim().toLowerCase(),
+      'openingStatus': cleanOpeningStatus,
       'openingHours': cleanOpeningHours,
       'logoUrl': '',
       'bannerUrl': bannerUrl,

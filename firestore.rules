@@ -724,6 +724,7 @@ service cloud.firestore {
           'townLower',
           'county',
           'countyLower',
+          'openingStatus',
           'openingHours',
           'logoUrl',
           'bannerUrl',
@@ -768,6 +769,7 @@ service cloud.firestore {
         && data.county is string
         && data.county.size() <= 120
         && data.countyLower is string
+        && (!('openingStatus' in data) || data.openingStatus in ['auto', 'open', 'closed'])
         && (!('openingHours' in data) || validBusinessOpeningHours(data.openingHours))
         && data.logoUrl is string
         && data.logoUrl.size() <= 1000

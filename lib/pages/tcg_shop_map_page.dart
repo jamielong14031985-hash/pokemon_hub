@@ -37,6 +37,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   static const Color _goldColor = Color(0xFFF7DE77);
   static const Color _softTextColor = Color(0xFFC8D4F0);
   static const Color _pinRedColor = Color(0xFFD62828);
+  static const Color _successColor = Color(0xFF4ADE80);
 
   static const double _initialZoom = 5.5;
   static const double _showIndividualPinsZoom = 14.0;
@@ -50,6 +51,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   double _currentZoom = _initialZoom;
   String _selectedGame = 'all';
   String _selectedService = 'all';
+  bool _updatingBusinessOpenToggle = false;
 
   static const List<String> _games = <String>[
     'all',
@@ -234,6 +236,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     );
   }
 
+
   Widget _buildFilterPanel() {
     return Container(
       color: _backgroundColor,
@@ -334,6 +337,52 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+
+  Widget _buildOpenStatusBadge(BusinessProfile profile) {
+    if (!profile.hasAnyOpeningHours) {
+      return const SizedBox.shrink();
+    }
+
+    final openNow = profile.isOpenNow;
+    final color = openNow == true
+        ? _successColor
+        : openNow == false
+            ? Colors.redAccent
+            : _goldColor;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            openNow == true
+                ? Icons.check_circle_outline
+                : openNow == false
+                    ? Icons.cancel_outlined
+                    : Icons.schedule_outlined,
+            color: color,
+            size: 15,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            profile.openStatusLabel,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -695,141 +744,6 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   }
 
 
-  Widget _buildEventsDirectoryButton() {
-    return Container(
-      color: _backgroundColor,
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      child: Material(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: _openEventsDirectoryPage,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _borderColor),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.event_available_outlined,
-                  color: _goldColor,
-                  size: 24,
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Browse upcoming shop events',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right,
-                  color: _goldColor,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDealsDirectoryButton() {
-    return Container(
-      color: _backgroundColor,
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      child: Material(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: _openDealsPage,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _goldColor),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.local_offer_outlined,
-                  color: _goldColor,
-                  size: 24,
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Browse latest deals and offers',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right,
-                  color: _goldColor,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOnlineShopsDirectoryButton() {
-    return Container(
-      color: _backgroundColor,
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      child: Material(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: _openOnlineShopsPage,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _borderColor),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.language,
-                  color: _goldColor,
-                  size: 24,
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'View and search online shops',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right,
-                  color: _goldColor,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildPremiumBanners({
     required List<TcgShop> shops,
     required List<BusinessProfile> featuredProfiles,
@@ -967,6 +881,10 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                     mutedTextColor: _softTextColor,
                     onTap: () => _openBusinessReviews(bottomSheetContext, profile),
                   ),
+                  if (profile.hasAnyOpeningHours) ...[
+                    const SizedBox(height: 8),
+                    _buildOpenStatusBadge(profile),
+                  ],
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
@@ -1115,6 +1033,76 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     );
   }
 
+  Future<void> _toggleMyBusinessOpenClosed(bool shouldBeOpen) async {
+    if (_updatingBusinessOpenToggle) return;
+
+    setState(() {
+      _updatingBusinessOpenToggle = true;
+    });
+
+    try {
+      await _businessProfileService.updateMyBusinessOpeningStatus(
+        shouldBeOpen ? 'open' : 'closed',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update shop status: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingBusinessOpenToggle = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildBusinessOpenClosedToggleAction() {
+    return StreamBuilder<BusinessProfile?>(
+      stream: _businessProfileService.watchMyBusinessProfile(),
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+
+        if (profile == null || !profile.hasLinkedShop) {
+          return const SizedBox.shrink();
+        }
+
+        final openNow = profile.isOpenNow ?? false;
+
+        if (_updatingBusinessOpenToggle) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: _goldColor,
+              ),
+            ),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: Tooltip(
+            message: openNow ? 'Shop is open - tap to mark closed' : 'Shop is closed - tap to mark open',
+            child: Switch.adaptive(
+              value: openNow,
+              activeThumbColor: _successColor,
+              activeTrackColor: _successColor.withValues(alpha: 0.45),
+              inactiveThumbColor: Colors.redAccent,
+              inactiveTrackColor: Colors.redAccent.withValues(alpha: 0.35),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: (value) => _toggleMyBusinessOpenClosed(value),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1144,18 +1132,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
             color: _goldColor,
             onPressed: _openOnlineShopsPage,
           ),
-          IconButton(
-            tooltip: 'Add TCG shop',
-            icon: const Icon(Icons.add_location_alt_outlined),
-            color: _goldColor,
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const AddTcgShopPage(),
-                ),
-              );
-            },
-          ),
+          _buildBusinessOpenClosedToggleAction(),
         ],
       ),
       body: StreamBuilder<List<TcgShop>>(
@@ -1198,9 +1175,6 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
               return Column(
                 children: [
                   _buildFilterPanel(),
-                  _buildEventsDirectoryButton(),
-                  _buildDealsDirectoryButton(),
-                  _buildOnlineShopsDirectoryButton(),
                   _buildPremiumBanners(
                     shops: approvedShops,
                     featuredProfiles: featuredProfiles,
@@ -1693,6 +1667,10 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                       onTap: () =>
                           _openBusinessReviews(bottomSheetContext, featuredProfile),
                     ),
+                    if (featuredProfile.hasAnyOpeningHours) ...[
+                      const SizedBox(height: 8),
+                      _buildOpenStatusBadge(featuredProfile),
+                    ],
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
@@ -2197,6 +2175,7 @@ class _PremiumMarqueeCardBackground extends StatelessWidget {
     );
   }
 }
+
 
 class _ShopMapMarkerCluster {
   const _ShopMapMarkerCluster({

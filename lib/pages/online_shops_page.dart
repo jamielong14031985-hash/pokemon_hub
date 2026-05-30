@@ -18,6 +18,7 @@ const Color _onlineFieldColor = Color(0xFF16366E);
 const Color _onlineBorderColor = Color(0xFF3F5C96);
 const Color _onlineGoldColor = Color(0xFFF7DE77);
 const Color _onlineSoftTextColor = Color(0xFFC8D4F0);
+const Color _onlineSuccessColor = Color(0xFF4ADE80);
 
 class OnlineShopsPage extends StatefulWidget {
   const OnlineShopsPage({super.key});
@@ -298,6 +299,7 @@ class _OnlineShopCard extends StatelessWidget {
                             label: 'Featured posts',
                             highlighted: true,
                           ),
+                        _OnlineOpenStatusBadge(profile: profile),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -616,6 +618,59 @@ class _BannerFallback extends StatelessWidget {
           color: _onlineGoldColor,
           size: 40,
         ),
+      ),
+    );
+  }
+}
+
+
+class _OnlineOpenStatusBadge extends StatelessWidget {
+  const _OnlineOpenStatusBadge({required this.profile});
+
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!profile.hasAnyOpeningHours) {
+      return const SizedBox.shrink();
+    }
+
+    final openNow = profile.isOpenNow;
+    final color = openNow == true
+        ? _onlineSuccessColor
+        : openNow == false
+            ? Colors.redAccent
+            : _onlineGoldColor;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            openNow == true
+                ? Icons.check_circle_outline
+                : openNow == false
+                    ? Icons.cancel_outlined
+                    : Icons.schedule_outlined,
+            color: color,
+            size: 15,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            profile.openStatusLabel,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }

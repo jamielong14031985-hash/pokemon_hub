@@ -24,6 +24,21 @@ class BusinessProfileEditorPage extends StatefulWidget {
       _BusinessProfileEditorPageState();
 }
 
+
+class _OpeningStatusOption {
+  const _OpeningStatusOption({
+    required this.value,
+    required this.label,
+    required this.icon,
+    required this.description,
+  });
+
+  final String value;
+  final String label;
+  final IconData icon;
+  final String description;
+}
+
 class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
   static const Color _backgroundColor = Color(0xFF041B4A);
   static const Color _cardColor = Color(0xFF102754);
@@ -51,6 +66,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
   String _featuredImageFileName = 'featured_banner.jpg';
   bool _removeFeaturedImage = false;
   bool? _hasPhysicalShop;
+  String _openingStatus = 'auto';
   final Map<String, bool> _openingClosed = <String, bool>{};
   final Map<String, TextEditingController> _openingOpenControllers =
       <String, TextEditingController>{};
@@ -86,6 +102,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
     _linkedShopId = profile?.linkedShopId ?? '';
     _linkedShopName = profile?.linkedShopName ?? '';
     _hasPhysicalShop = profile?.hasPhysicalShop;
+    _openingStatus = profile?.openingStatus ?? 'auto';
 
     for (final dayKey in BusinessOpeningHours.dayKeys) {
       final hours = profile?.openingHoursForDay(dayKey) ??
@@ -815,6 +832,104 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
     return true;
   }
 
+
+  Widget _buildOpeningStatusSelector() {
+    const options = <_OpeningStatusOption>[
+      _OpeningStatusOption(
+        value: 'auto',
+        label: 'Use times',
+        icon: Icons.schedule_outlined,
+        description: 'Open or closed is worked out from the weekly times below.',
+      ),
+      _OpeningStatusOption(
+        value: 'open',
+        label: 'Open now',
+        icon: Icons.lock_open_outlined,
+        description: 'Show this business as open until you change it.',
+      ),
+      _OpeningStatusOption(
+        value: 'closed',
+        label: 'Closed now',
+        icon: Icons.lock_outline,
+        description: 'Show this business as closed until you change it.',
+      ),
+    ];
+
+    return Column(
+      children: options.map((option) {
+        final selected = _openingStatus == option.value;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: Material(
+            color: selected ? _goldColor : _fieldColor,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                setState(() => _openingStatus = option.value);
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: selected ? _goldColor : _borderColor,
+                    width: selected ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      option.icon,
+                      color: selected ? _backgroundColor : _goldColor,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            option.label,
+                            style: TextStyle(
+                              color:
+                                  selected ? _backgroundColor : Colors.white,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            option.description,
+                            style: TextStyle(
+                              color: selected
+                                  ? _backgroundColor.withValues(alpha: 0.82)
+                                  : _softTextColor,
+                              height: 1.3,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      selected
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color: selected ? _backgroundColor : _softTextColor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildOpeningHoursEditor() {
     return Column(
       children: BusinessOpeningHours.dayKeys.map((dayKey) {
@@ -947,6 +1062,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
         featuredImageFileName: _featuredImageFileName,
         removeFeaturedImage: _removeFeaturedImage,
         openingHours: _openingHoursPayload(),
+        openingStatus: _openingStatus,
       );
 
       if (!mounted) return;
@@ -1104,6 +1220,15 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                       ),
                     ],
                   ),
+                ],
+              ),
+              _buildSection(
+                title: 'Current open / closed status',
+                icon: Icons.storefront_outlined,
+                subtitle:
+                    'Choose whether the business should follow the weekly times or be shown as open/closed manually.',
+                children: [
+                  _buildOpeningStatusSelector(),
                 ],
               ),
               _buildSection(
