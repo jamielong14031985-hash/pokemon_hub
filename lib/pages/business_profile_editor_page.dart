@@ -713,15 +713,15 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
 
   Future<void> _pickOpeningTime({
     required TextEditingController controller,
-    required TimeOfDay fallback,
   }) async {
     FocusScope.of(context).unfocus();
 
+    final now = TimeOfDay.now();
     final picked = await showTimePicker(
       context: context,
       initialTime: _timeOfDayFromText(
         controller.text,
-        fallback: fallback,
+        fallback: now,
       ),
       initialEntryMode: TimePickerEntryMode.dial,
     );
@@ -735,10 +735,10 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
 
   Widget _buildOpeningTimePicker({
     required TextEditingController controller,
+    required TextEditingController pairedController,
     required String label,
     required String hint,
     required IconData icon,
-    required TimeOfDay fallback,
   }) {
     return TextFormField(
       controller: controller,
@@ -756,16 +756,18 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
         ),
       ),
       onTap: () {
-        _pickOpeningTime(
-          controller: controller,
-          fallback: fallback,
-        );
+        _pickOpeningTime(controller: controller);
       },
       validator: (value) {
         final cleanValue = (value ?? '').trim();
+        final pairedValue = pairedController.text.trim();
+
+        if (cleanValue.isEmpty && pairedValue.isEmpty) return null;
+
         if (!_validOpeningTime(cleanValue)) {
           return 'Tap to choose';
         }
+
         return null;
       },
     );
@@ -794,11 +796,15 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
       final close = _openingCloseControllers[dayKey]?.text.trim() ?? '';
       final label = BusinessOpeningHours.dayLabels[dayKey] ?? dayKey;
 
+      if (open.isEmpty && close.isEmpty) {
+        continue;
+      }
+
       if (!_validOpeningTime(open) || !_validOpeningTime(close)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Please use 24-hour time for $label, for example 09:00 and 17:30.',
+              'Please choose both an opening and closing time for $label, or leave both blank.',
             ),
           ),
         );
@@ -837,7 +843,12 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                     ),
                   ),
                   Text(
-                    closed ? 'Closed' : 'Open',
+                    closed
+                        ? 'Closed'
+                        : ((_openingOpenControllers[dayKey]?.text.trim().isEmpty ?? true) &&
+                                (_openingCloseControllers[dayKey]?.text.trim().isEmpty ?? true))
+                            ? 'Not set'
+                            : 'Open',
                     style: const TextStyle(
                       color: _softTextColor,
                       fontSize: 12,
@@ -851,21 +862,6 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                     onChanged: (value) {
                       setState(() {
                         _openingClosed[dayKey] = !value;
-
-                        if (value) {
-                          final openController = _openingOpenControllers[dayKey];
-                          final closeController =
-                              _openingCloseControllers[dayKey];
-
-                          if (openController != null &&
-                              openController.text.trim().isEmpty) {
-                            openController.text = '09:00';
-                          }
-                          if (closeController != null &&
-                              closeController.text.trim().isEmpty) {
-                            closeController.text = '17:00';
-                          }
-                        }
                       });
                     },
                   ),
@@ -878,20 +874,20 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                     Expanded(
                       child: _buildOpeningTimePicker(
                         controller: _openingOpenControllers[dayKey]!,
+                        pairedController: _openingCloseControllers[dayKey]!,
                         label: 'Opens',
-                        hint: '09:00',
+                        hint: 'Choose',
                         icon: Icons.access_time,
-                        fallback: const TimeOfDay(hour: 9, minute: 0),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: _buildOpeningTimePicker(
                         controller: _openingCloseControllers[dayKey]!,
+                        pairedController: _openingOpenControllers[dayKey]!,
                         label: 'Closes',
-                        hint: '17:00',
+                        hint: 'Choose',
                         icon: Icons.access_time_filled_outlined,
-                        fallback: const TimeOfDay(hour: 17, minute: 0),
                       ),
                     ),
                   ],
@@ -1114,7 +1110,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                 title: 'Opening hours',
                 icon: Icons.schedule_outlined,
                 subtitle:
-                    'Set the public opening hours that users will see on your business profile.',
+                    'Set public opening hours users will see. Leave a day blank if you do not want to show times.',
                 children: [
                   _buildOpeningHoursEditor(),
                 ],

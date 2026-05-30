@@ -38,14 +38,13 @@ class BusinessOpeningHours {
 
   static BusinessOpeningHours defaultForDay(String dayKey) {
     final cleanDayKey = dayKeys.contains(dayKey) ? dayKey : 'monday';
-    final isSunday = cleanDayKey == 'sunday';
 
     return BusinessOpeningHours(
       dayKey: cleanDayKey,
       dayLabel: dayLabels[cleanDayKey] ?? cleanDayKey,
-      closed: isSunday,
-      open: isSunday ? '' : '09:00',
-      close: isSunday ? '' : '17:00',
+      closed: false,
+      open: '',
+      close: '',
     );
   }
 
