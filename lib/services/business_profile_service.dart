@@ -30,6 +30,34 @@ class BusinessProfileService {
   final FirebaseAuth _auth;
   final FirebaseStorage _storage;
 
+
+  static Map<String, Map<String, Object?>> _cleanOpeningHours(
+    Map<String, Map<String, dynamic>>? openingHours,
+  ) {
+    final source = openingHours ?? const <String, Map<String, dynamic>>{};
+
+    return <String, Map<String, Object?>>{
+      for (final dayKey in BusinessOpeningHours.dayKeys)
+        dayKey: _cleanOpeningHoursDay(dayKey, source[dayKey]),
+    };
+  }
+
+  static Map<String, Object?> _cleanOpeningHoursDay(
+    String dayKey,
+    Map<String, dynamic>? value,
+  ) {
+    final fallback = BusinessOpeningHours.defaultForDay(dayKey);
+    final closed = value?['closed'] == true;
+    final open = (value?['open'] ?? fallback.open).toString().trim();
+    final close = (value?['close'] ?? fallback.close).toString().trim();
+
+    return <String, Object?>{
+      'closed': closed,
+      'open': closed ? '' : open,
+      'close': closed ? '' : close,
+    };
+  }
+
   CollectionReference<Map<String, dynamic>> get _businessProfiles =>
       _firestore.collection('business_profiles');
 
@@ -1577,6 +1605,7 @@ class BusinessProfileService {
     Uint8List? featuredImageBytes,
     String featuredImageFileName = 'featured_banner.jpg',
     bool removeFeaturedImage = false,
+    Map<String, Map<String, dynamic>>? openingHours,
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -1624,6 +1653,8 @@ class BusinessProfileService {
       );
     }
 
+    final cleanOpeningHours = _cleanOpeningHours(openingHours);
+
     final existingProfile = cleanBusinessProfileId.isEmpty
         ? await getMyBusinessProfileOnce()
         : null;
@@ -1658,6 +1689,7 @@ class BusinessProfileService {
         'townLower': town.trim().toLowerCase(),
         'county': county.trim(),
         'countyLower': county.trim().toLowerCase(),
+        'openingHours': cleanOpeningHours,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
@@ -1710,6 +1742,7 @@ class BusinessProfileService {
       'townLower': town.trim().toLowerCase(),
       'county': county.trim(),
       'countyLower': county.trim().toLowerCase(),
+      'openingHours': cleanOpeningHours,
       'logoUrl': '',
       'bannerUrl': bannerUrl,
       'status': 'approved',

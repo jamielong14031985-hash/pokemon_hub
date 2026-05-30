@@ -19,6 +19,7 @@ import '../widgets/business_rating_summary.dart';
 import 'business_deals_page.dart';
 import 'business_events_directory_page.dart';
 import 'business_reviews_page.dart';
+import 'public_business_profile_page.dart';
 import 'online_shops_page.dart';
 
 class TcgShopMapPage extends StatefulWidget {
@@ -185,6 +186,17 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     );
   }
 
+
+  void _openPublicBusinessProfile(
+    BuildContext pageContext,
+    BusinessProfile profile,
+  ) {
+    Navigator.of(pageContext).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PublicBusinessProfilePage(profile: profile),
+      ),
+    );
+  }
 
   void _openBusinessReviews(
     BuildContext bottomSheetContext,
@@ -958,6 +970,29 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _goldColor,
+                        foregroundColor: _backgroundColor,
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      icon: const Icon(Icons.storefront_outlined),
+                      label: const Text(
+                        'View business profile',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      onPressed: () {
+                        Navigator.of(bottomSheetContext).pop();
+                        _openPublicBusinessProfile(context, profile);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: _goldColor,
@@ -1659,6 +1694,29 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                           _openBusinessReviews(bottomSheetContext, featuredProfile),
                     ),
                     const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _goldColor,
+                          foregroundColor: _backgroundColor,
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.storefront_outlined),
+                        label: const Text(
+                          'View business profile',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        onPressed: () {
+                          Navigator.of(bottomSheetContext).pop();
+                          _openPublicBusinessProfile(context, featuredProfile);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: _goldColor,

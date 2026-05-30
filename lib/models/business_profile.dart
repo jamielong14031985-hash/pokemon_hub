@@ -1,5 +1,92 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+
+class BusinessOpeningHours {
+  const BusinessOpeningHours({
+    required this.dayKey,
+    required this.dayLabel,
+    required this.closed,
+    required this.open,
+    required this.close,
+  });
+
+  final String dayKey;
+  final String dayLabel;
+  final bool closed;
+  final String open;
+  final String close;
+
+  static const List<String> dayKeys = <String>[
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday',
+  ];
+
+  static const Map<String, String> dayLabels = <String, String>{
+    'monday': 'Monday',
+    'tuesday': 'Tuesday',
+    'wednesday': 'Wednesday',
+    'thursday': 'Thursday',
+    'friday': 'Friday',
+    'saturday': 'Saturday',
+    'sunday': 'Sunday',
+  };
+
+  static BusinessOpeningHours defaultForDay(String dayKey) {
+    final cleanDayKey = dayKeys.contains(dayKey) ? dayKey : 'monday';
+    final isSunday = cleanDayKey == 'sunday';
+
+    return BusinessOpeningHours(
+      dayKey: cleanDayKey,
+      dayLabel: dayLabels[cleanDayKey] ?? cleanDayKey,
+      closed: isSunday,
+      open: isSunday ? '' : '09:00',
+      close: isSunday ? '' : '17:00',
+    );
+  }
+
+  static BusinessOpeningHours fromData(String dayKey, dynamic value) {
+    final fallback = defaultForDay(dayKey);
+
+    if (value is! Map) return fallback;
+
+    final closed = value['closed'] == true;
+    final open = (value['open'] ?? '').toString().trim();
+    final close = (value['close'] ?? '').toString().trim();
+
+    return BusinessOpeningHours(
+      dayKey: fallback.dayKey,
+      dayLabel: fallback.dayLabel,
+      closed: closed,
+      open: closed ? '' : open,
+      close: closed ? '' : close,
+    );
+  }
+
+  Map<String, Object?> toMap() {
+    return <String, Object?>{
+      'closed': closed,
+      'open': closed ? '' : open.trim(),
+      'close': closed ? '' : close.trim(),
+    };
+  }
+
+  bool get hasTimes {
+    return !closed && open.trim().isNotEmpty && close.trim().isNotEmpty;
+  }
+
+  String get displayText {
+    if (closed) return 'Closed';
+    if (!hasTimes) return 'Hours not set';
+    return '${open.trim()} - ${close.trim()}';
+  }
+}
+
+
 class BusinessProfile {
   const BusinessProfile({
     required this.id,
@@ -23,6 +110,7 @@ class BusinessProfile {
     this.premiumStartedAt,
     this.premiumExpiresAt,
     this.premiumAdminNotes = '',
+    this.openingHours = const <String, BusinessOpeningHours>{},
     this.createdAt,
     this.updatedAt,
   });
@@ -48,6 +136,7 @@ class BusinessProfile {
   final Timestamp? premiumStartedAt;
   final Timestamp? premiumExpiresAt;
   final String premiumAdminNotes;
+  final Map<String, BusinessOpeningHours> openingHours;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -58,6 +147,15 @@ class BusinessProfile {
   static Timestamp? cleanTimestamp(dynamic value) {
     if (value is Timestamp) return value;
     return null;
+  }
+
+  static Map<String, BusinessOpeningHours> cleanOpeningHours(dynamic value) {
+    final source = value is Map ? value : const <String, dynamic>{};
+
+    return <String, BusinessOpeningHours>{
+      for (final dayKey in BusinessOpeningHours.dayKeys)
+        dayKey: BusinessOpeningHours.fromData(dayKey, source[dayKey]),
+    };
   }
 
   factory BusinessProfile.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -87,6 +185,7 @@ class BusinessProfile {
       premiumStartedAt: cleanTimestamp(data['premiumStartedAt']),
       premiumExpiresAt: cleanTimestamp(data['premiumExpiresAt']),
       premiumAdminNotes: cleanString(data['premiumAdminNotes']),
+      openingHours: cleanOpeningHours(data['openingHours']),
       createdAt: cleanTimestamp(data['createdAt']),
       updatedAt: cleanTimestamp(data['updatedAt']),
     );
@@ -197,6 +296,74 @@ class BusinessProfile {
     if (premiumIsExpired) return 'Expired';
 
     return 'Not active';
+  }
+
+
+  BusinessOpeningHours openingHoursForDay(String dayKey) {
+    return openingHours[dayKey] ?? BusinessOpeningHours.defaultForDay(dayKey);
+  }
+
+  bool get hasAnyOpeningHours {
+    return BusinessOpeningHours.dayKeys.any((dayKey) {
+      final hours = openingHoursForDay(dayKey);
+      return hours.closed || hours.hasTimes;
+    });
+  }
+
+  BusinessOpeningHours get todayOpeningHours {
+    final weekday = DateTime.now().weekday;
+    final dayKey = BusinessOpeningHours.dayKeys[weekday - 1];
+    return openingHoursForDay(dayKey);
+  }
+
+  int? _minutesFromTime(String value) {
+    final cleanValue = value.trim();
+    final parts = cleanValue.split(':');
+
+    if (parts.length != 2) return null;
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+
+    if (hour == null || minute == null) return null;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+
+    return (hour * 60) + minute;
+  }
+
+  bool? get isOpenNow {
+    final hours = todayOpeningHours;
+
+    if (hours.closed) return false;
+    if (!hours.hasTimes) return null;
+
+    final openMinutes = _minutesFromTime(hours.open);
+    final closeMinutes = _minutesFromTime(hours.close);
+
+    if (openMinutes == null || closeMinutes == null) return null;
+
+    final now = DateTime.now();
+    final nowMinutes = (now.hour * 60) + now.minute;
+
+    if (openMinutes == closeMinutes) return null;
+
+    if (openMinutes < closeMinutes) {
+      return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
+    }
+
+    return nowMinutes >= openMinutes || nowMinutes < closeMinutes;
+  }
+
+  String get openStatusLabel {
+    final openNow = isOpenNow;
+    final today = todayOpeningHours;
+
+    if (openNow == true) return 'Open now';
+    if (openNow == false) return 'Closed now';
+    if (today.closed) return 'Closed today';
+    if (today.hasTimes) return 'Hours today: ${today.displayText}';
+
+    return 'Opening hours not set';
   }
 
   bool get canFeatureShop {

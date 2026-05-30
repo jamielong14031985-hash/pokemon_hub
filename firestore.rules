@@ -677,6 +677,37 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+
+    function validBusinessOpeningHoursDay(day) {
+      return day is map
+        && day.keys().hasOnly(['closed', 'open', 'close'])
+        && day.closed is bool
+        && day.open is string
+        && day.open.size() <= 5
+        && day.close is string
+        && day.close.size() <= 5;
+    }
+
+    function validBusinessOpeningHours(hours) {
+      return hours is map
+        && hours.keys().hasOnly([
+          'monday',
+          'tuesday',
+          'wednesday',
+          'thursday',
+          'friday',
+          'saturday',
+          'sunday'
+        ])
+        && (!('monday' in hours) || validBusinessOpeningHoursDay(hours.monday))
+        && (!('tuesday' in hours) || validBusinessOpeningHoursDay(hours.tuesday))
+        && (!('wednesday' in hours) || validBusinessOpeningHoursDay(hours.wednesday))
+        && (!('thursday' in hours) || validBusinessOpeningHoursDay(hours.thursday))
+        && (!('friday' in hours) || validBusinessOpeningHoursDay(hours.friday))
+        && (!('saturday' in hours) || validBusinessOpeningHoursDay(hours.saturday))
+        && (!('sunday' in hours) || validBusinessOpeningHoursDay(hours.sunday));
+    }
+
     function validBusinessProfileData(data) {
       return data.keys().hasOnly([
           'ownerUid',
@@ -693,6 +724,7 @@ service cloud.firestore {
           'townLower',
           'county',
           'countyLower',
+          'openingHours',
           'logoUrl',
           'bannerUrl',
           'status',
@@ -736,6 +768,7 @@ service cloud.firestore {
         && data.county is string
         && data.county.size() <= 120
         && data.countyLower is string
+        && (!('openingHours' in data) || validBusinessOpeningHours(data.openingHours))
         && data.logoUrl is string
         && data.logoUrl.size() <= 1000
         && data.bannerUrl is string

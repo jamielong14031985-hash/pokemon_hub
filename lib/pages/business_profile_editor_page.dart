@@ -51,6 +51,11 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
   String _featuredImageFileName = 'featured_banner.jpg';
   bool _removeFeaturedImage = false;
   bool? _hasPhysicalShop;
+  final Map<String, bool> _openingClosed = <String, bool>{};
+  final Map<String, TextEditingController> _openingOpenControllers =
+      <String, TextEditingController>{};
+  final Map<String, TextEditingController> _openingCloseControllers =
+      <String, TextEditingController>{};
   bool _saving = false;
 
   @override
@@ -81,6 +86,19 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
     _linkedShopId = profile?.linkedShopId ?? '';
     _linkedShopName = profile?.linkedShopName ?? '';
     _hasPhysicalShop = profile?.hasPhysicalShop;
+
+    for (final dayKey in BusinessOpeningHours.dayKeys) {
+      final hours = profile?.openingHoursForDay(dayKey) ??
+          BusinessOpeningHours.defaultForDay(dayKey);
+
+      _openingClosed[dayKey] = hours.closed;
+      _openingOpenControllers[dayKey] = TextEditingController(
+        text: hours.open,
+      );
+      _openingCloseControllers[dayKey] = TextEditingController(
+        text: hours.close,
+      );
+    }
   }
 
   @override
@@ -91,6 +109,14 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
     _phoneController.dispose();
     _townController.dispose();
     _countyController.dispose();
+
+    for (final controller in _openingOpenControllers.values) {
+      controller.dispose();
+    }
+    for (final controller in _openingCloseControllers.values) {
+      controller.dispose();
+    }
+
     super.dispose();
   }
 
@@ -653,10 +679,237 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
     );
   }
 
+
+  bool _validOpeningTime(String value) {
+    final cleanValue = value.trim();
+    final match = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').firstMatch(cleanValue);
+    return match != null;
+  }
+
+  TimeOfDay _timeOfDayFromText(
+    String value, {
+    required TimeOfDay fallback,
+  }) {
+    final cleanValue = value.trim();
+    final parts = cleanValue.split(':');
+
+    if (parts.length != 2) return fallback;
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+
+    if (hour == null || minute == null) return fallback;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return fallback;
+
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  String _formatTimeOfDay(TimeOfDay value) {
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+
+    return '$hour:$minute';
+  }
+
+  Future<void> _pickOpeningTime({
+    required TextEditingController controller,
+    required TimeOfDay fallback,
+  }) async {
+    FocusScope.of(context).unfocus();
+
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _timeOfDayFromText(
+        controller.text,
+        fallback: fallback,
+      ),
+      initialEntryMode: TimePickerEntryMode.dial,
+    );
+
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      controller.text = _formatTimeOfDay(picked);
+    });
+  }
+
+  Widget _buildOpeningTimePicker({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required TimeOfDay fallback,
+  }) {
+    return TextFormField(
+      controller: controller,
+      readOnly: true,
+      showCursor: false,
+      style: const TextStyle(color: Colors.white),
+      decoration: _inputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: icon,
+      ).copyWith(
+        suffixIcon: const Icon(
+          Icons.expand_more,
+          color: _softTextColor,
+        ),
+      ),
+      onTap: () {
+        _pickOpeningTime(
+          controller: controller,
+          fallback: fallback,
+        );
+      },
+      validator: (value) {
+        final cleanValue = (value ?? '').trim();
+        if (!_validOpeningTime(cleanValue)) {
+          return 'Tap to choose';
+        }
+        return null;
+      },
+    );
+  }
+
+  Map<String, Map<String, dynamic>> _openingHoursPayload() {
+    return <String, Map<String, dynamic>>{
+      for (final dayKey in BusinessOpeningHours.dayKeys)
+        dayKey: <String, dynamic>{
+          'closed': _openingClosed[dayKey] == true,
+          'open': _openingClosed[dayKey] == true
+              ? ''
+              : (_openingOpenControllers[dayKey]?.text.trim() ?? ''),
+          'close': _openingClosed[dayKey] == true
+              ? ''
+              : (_openingCloseControllers[dayKey]?.text.trim() ?? ''),
+        },
+    };
+  }
+
+  bool _validateOpeningHours() {
+    for (final dayKey in BusinessOpeningHours.dayKeys) {
+      if (_openingClosed[dayKey] == true) continue;
+
+      final open = _openingOpenControllers[dayKey]?.text.trim() ?? '';
+      final close = _openingCloseControllers[dayKey]?.text.trim() ?? '';
+      final label = BusinessOpeningHours.dayLabels[dayKey] ?? dayKey;
+
+      if (!_validOpeningTime(open) || !_validOpeningTime(close)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Please use 24-hour time for $label, for example 09:00 and 17:30.',
+            ),
+          ),
+        );
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  Widget _buildOpeningHoursEditor() {
+    return Column(
+      children: BusinessOpeningHours.dayKeys.map((dayKey) {
+        final label = BusinessOpeningHours.dayLabels[dayKey] ?? dayKey;
+        final closed = _openingClosed[dayKey] == true;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _fieldColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _borderColor),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    closed ? 'Closed' : 'Open',
+                    style: const TextStyle(
+                      color: _softTextColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Switch(
+                    value: !closed,
+                    activeThumbColor: _goldColor,
+                    onChanged: (value) {
+                      setState(() {
+                        _openingClosed[dayKey] = !value;
+
+                        if (value) {
+                          final openController = _openingOpenControllers[dayKey];
+                          final closeController =
+                              _openingCloseControllers[dayKey];
+
+                          if (openController != null &&
+                              openController.text.trim().isEmpty) {
+                            openController.text = '09:00';
+                          }
+                          if (closeController != null &&
+                              closeController.text.trim().isEmpty) {
+                            closeController.text = '17:00';
+                          }
+                        }
+                      });
+                    },
+                  ),
+                ],
+              ),
+              if (!closed) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildOpeningTimePicker(
+                        controller: _openingOpenControllers[dayKey]!,
+                        label: 'Opens',
+                        hint: '09:00',
+                        icon: Icons.access_time,
+                        fallback: const TimeOfDay(hour: 9, minute: 0),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _buildOpeningTimePicker(
+                        controller: _openingCloseControllers[dayKey]!,
+                        label: 'Closes',
+                        hint: '17:00',
+                        icon: Icons.access_time_filled_outlined,
+                        fallback: const TimeOfDay(hour: 17, minute: 0),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Future<void> _save() async {
     FocusScope.of(context).unfocus();
 
     if (!_formKey.currentState!.validate()) return;
+
+    if (!_validateOpeningHours()) return;
 
     if (_hasPhysicalShop == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -697,6 +950,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
         featuredImageBytes: _featuredImageBytes,
         featuredImageFileName: _featuredImageFileName,
         removeFeaturedImage: _removeFeaturedImage,
+        openingHours: _openingHoursPayload(),
       );
 
       if (!mounted) return;
@@ -854,6 +1108,15 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                       ),
                     ],
                   ),
+                ],
+              ),
+              _buildSection(
+                title: 'Opening hours',
+                icon: Icons.schedule_outlined,
+                subtitle:
+                    'Set the public opening hours that users will see on your business profile.',
+                children: [
+                  _buildOpeningHoursEditor(),
                 ],
               ),
             ],

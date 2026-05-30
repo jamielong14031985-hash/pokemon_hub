@@ -10,6 +10,7 @@ import '../widgets/business_offers_preview.dart';
 import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
 import 'business_reviews_page.dart';
+import 'public_business_profile_page.dart';
 
 const Color _onlineBackgroundColor = Color(0xFF041B4A);
 const Color _onlineCardColor = Color(0xFF102754);
@@ -354,6 +355,26 @@ class _OnlineShopCard extends StatelessWidget {
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: _onlineGoldColor,
+                foregroundColor: _onlineBackgroundColor,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              icon: const Icon(Icons.storefront_outlined),
+              label: const Text(
+                'View business profile',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              onPressed: () => _openPublicProfile(context),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 foregroundColor: _onlineGoldColor,
@@ -421,6 +442,14 @@ class _OnlineShopCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  void _openPublicProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PublicBusinessProfilePage(profile: profile),
       ),
     );
   }
