@@ -1921,81 +1921,101 @@ class _CommunityPageState extends State<CommunityPage> {
             final hasNewPosts = _lastSeenAtMs != null &&
                 allPosts.any((post) => post.createdAtMs > (_lastSeenAtMs ?? 0));
 
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-              itemCount: posts.isEmpty ? 2 : posts.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(height: 14),
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return _buildHeaderCard(hasNewPosts: hasNewPosts);
-                }
+            Widget buildPostCard(CommunityPost post) {
+              final isNew =
+                  _lastSeenAtMs != null && post.createdAtMs > (_lastSeenAtMs ?? 0);
 
-                if (posts.isEmpty) {
-                  return _buildEmptyStateCard();
-                }
+              return ValueListenableBuilder<bool>(
+                valueListenable: ProStatusService.isProNotifier,
+                builder: (context, isProActive, _) {
+                  final isOwnPost = post.authorId == currentUid;
+                  final isFeatureBusy = _featureBusyPostIds.contains(post.id);
 
-                final post = posts[index - 1];
-                final isNew =
-                    _lastSeenAtMs != null && post.createdAtMs > (_lastSeenAtMs ?? 0);
-
-                return ValueListenableBuilder<bool>(
-                  valueListenable: ProStatusService.isProNotifier,
-                  builder: (context, isProActive, _) {
-                    final isOwnPost = post.authorId == currentUid;
-                    final isFeatureBusy = _featureBusyPostIds.contains(post.id);
-
-                    return CommunityPostCard(
-                      post: post,
-                      currentProfile: widget.profile,
-                      canEdit: isOwnPost || _isAdminOrModerator,
-                      canMessage:
-                          post.authorId.isNotEmpty && post.authorId != currentUid,
-                      isNew: isNew,
-                      canUserFeature: isOwnPost && isProActive && !isFeatureBusy,
-                      canAdminFeature: _isAdminOrModerator && !isFeatureBusy,
-                      onToggleUserFeatured:
-                          isOwnPost && isProActive && !isFeatureBusy
-                              ? () => _toggleUserFeaturedPost(post)
-                              : null,
-                      onToggleAdminFeatured: _isAdminOrModerator && !isFeatureBusy
-                          ? () => _toggleAdminFeaturedPost(post)
-                          : null,
-                      onEdit: () => _openEditPostSheet(post),
-                      onDelete: () => _deletePost(post),
-                      onMessage: () => _openPrivateMessageForPost(post),
-                      onReport: post.authorId == currentUid
-                          ? null
-                          : () => _reportPost(post),
-                      onBlock: post.authorId == currentUid
-                          ? null
-                          : () => _blockCommunityMember(
-                                memberId: post.authorId,
-                                memberName: post.authorName,
-                              ),
-                      onSetMarketStatus: isOwnPost
-                          ? (status) => _updateMarketStatus(post, status)
-                          : null,
-                      onBump: isOwnPost && post.isMarketplace
-                          ? () => _bumpPost(post)
-                          : null,
-                      onAuthorTap: post.authorId.trim().isEmpty ||
-                              post.authorId == currentUid
-                          ? null
-                          : () => _openCommunityMemberSheet(post),
-                      onOpen: () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => CommunityPostThreadPage(
-                              post: post,
-                              currentProfile: widget.profile,
+                  return CommunityPostCard(
+                    post: post,
+                    currentProfile: widget.profile,
+                    canEdit: isOwnPost || _isAdminOrModerator,
+                    canMessage:
+                        post.authorId.isNotEmpty && post.authorId != currentUid,
+                    isNew: isNew,
+                    compact: true,
+                    canUserFeature: isOwnPost && isProActive && !isFeatureBusy,
+                    canAdminFeature: _isAdminOrModerator && !isFeatureBusy,
+                    onToggleUserFeatured:
+                        isOwnPost && isProActive && !isFeatureBusy
+                            ? () => _toggleUserFeaturedPost(post)
+                            : null,
+                    onToggleAdminFeatured: _isAdminOrModerator && !isFeatureBusy
+                        ? () => _toggleAdminFeaturedPost(post)
+                        : null,
+                    onEdit: () => _openEditPostSheet(post),
+                    onDelete: () => _deletePost(post),
+                    onMessage: () => _openPrivateMessageForPost(post),
+                    onReport: post.authorId == currentUid
+                        ? null
+                        : () => _reportPost(post),
+                    onBlock: post.authorId == currentUid
+                        ? null
+                        : () => _blockCommunityMember(
+                              memberId: post.authorId,
+                              memberName: post.authorName,
                             ),
+                    onSetMarketStatus: isOwnPost
+                        ? (status) => _updateMarketStatus(post, status)
+                        : null,
+                    onBump: isOwnPost && post.isMarketplace
+                        ? () => _bumpPost(post)
+                        : null,
+                    onAuthorTap: post.authorId.trim().isEmpty ||
+                            post.authorId == currentUid
+                        ? null
+                        : () => _openCommunityMemberSheet(post),
+                    onOpen: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CommunityPostThreadPage(
+                            post: post,
+                            currentProfile: widget.profile,
                           ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            }
+
+            return CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: _buildHeaderCard(hasNewPosts: hasNewPosts),
+                  ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                if (posts.isEmpty)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                    sliver: SliverToBoxAdapter(child: _buildEmptyStateCard()),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                    sliver: SliverGrid(
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 0.58,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) => buildPostCard(posts[index]),
+                        childCount: posts.length,
+                      ),
+                    ),
+                  ),
+              ],
             );
           },
         ),

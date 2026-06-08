@@ -25,6 +25,7 @@ class _BusinessEnquiriesPageState extends State<BusinessEnquiriesPage> {
   static const Color _goldColor = Color(0xFFF7DE77);
   static const Color _softTextColor = Color(0xFFC8D4F0);
   static const Color _successColor = Color(0xFF4ADE80);
+  static const Color _dangerColor = Color(0xFFFB7185);
 
   final BusinessProfileService _service = BusinessProfileService();
 
@@ -171,7 +172,7 @@ class _BusinessEnquiriesPageState extends State<BusinessEnquiriesPage> {
             ),
             FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: Colors.redAccent,
+                backgroundColor: _dangerColor,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -207,13 +208,13 @@ class _BusinessEnquiriesPageState extends State<BusinessEnquiriesPage> {
   @override
   Widget build(BuildContext context) {
     final businessName = widget.profile.businessName.trim().isEmpty
-        ? 'Customer enquiries'
+        ? 'Your business'
         : widget.profile.businessName.trim();
 
     return Scaffold(
       backgroundColor: _backgroundColor,
       appBar: AppBar(
-        title: const Text('Customer Enquiries'),
+        title: const Text('Enquiries'),
         backgroundColor: _backgroundColor,
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
@@ -223,38 +224,58 @@ class _BusinessEnquiriesPageState extends State<BusinessEnquiriesPage> {
         stream: _service.watchBusinessEnquiries(widget.profile.id),
         builder: (context, snapshot) {
           final enquiries = snapshot.data ?? const <BusinessEnquiry>[];
-          final openCount = enquiries.where((item) => item.status == 'open').length;
+          final openCount =
+              enquiries.where((item) => item.status == 'open').length;
+
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const _LoadingList();
+          }
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
             children: [
-              _EnquiriesHeaderCard(
-                businessName: businessName,
-                enquiryCount: enquiries.length,
-                openCount: openCount,
+              _PageHeroCard(
+                icon: Icons.mark_email_unread_outlined,
+                title: 'Enquiries',
+                subtitle: businessName,
+                totalCount: enquiries.length,
+                activeCount: openCount,
+                activeLabel: 'open',
+                totalLabel: 'total',
               ),
               const SizedBox(height: 16),
-              if (snapshot.connectionState == ConnectionState.waiting)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(color: _goldColor),
-                  ),
-                )
-              else if (enquiries.isEmpty)
+              const _SectionHeader(
+                icon: Icons.tune_outlined,
+                title: 'Current enquiries',
+                subtitle: 'View and manage customer messages from your public profile.',
+              ),
+              const SizedBox(height: 10),
+              if (enquiries.isEmpty)
                 const _EmptyEnquiriesCard()
               else
-                ...enquiries.map(
-                  (enquiry) => _EnquiryCard(
-                    enquiry: enquiry,
-                    formattedDate: _formatDate(enquiry.displayDate),
-                    onView: () => _openEnquiryDetails(enquiry),
-                    onReply: () => _replyToEnquiry(enquiry),
-                    onMarkOpen: () => _updateStatus(enquiry, 'open'),
-                    onMarkReplied: () => _updateStatus(enquiry, 'replied'),
-                    onMarkClosed: () => _updateStatus(enquiry, 'closed'),
-                    onDelete: () => _deleteEnquiry(enquiry),
-                  ),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 9,
+                  crossAxisSpacing: 9,
+                  childAspectRatio: 0.72,
+                  children: enquiries.map(
+                    (enquiry) {
+                      return _EnquiryGridCard(
+                        enquiry: enquiry,
+                        formattedDate: _formatDate(enquiry.displayDate),
+                        onView: () => _openEnquiryDetails(enquiry),
+                        onReply: () => _replyToEnquiry(enquiry),
+                        onMarkOpen: () => _updateStatus(enquiry, 'open'),
+                        onMarkReplied: () =>
+                            _updateStatus(enquiry, 'replied'),
+                        onMarkClosed: () => _updateStatus(enquiry, 'closed'),
+                        onDelete: () => _deleteEnquiry(enquiry),
+                      );
+                    },
+                  ).toList(),
                 ),
             ],
           );
@@ -264,57 +285,52 @@ class _BusinessEnquiriesPageState extends State<BusinessEnquiriesPage> {
   }
 }
 
-class _EnquiriesHeaderCard extends StatelessWidget {
-  const _EnquiriesHeaderCard({
-    required this.businessName,
-    required this.enquiryCount,
-    required this.openCount,
+class _PageHeroCard extends StatelessWidget {
+  const _PageHeroCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.totalCount,
+    required this.activeCount,
+    required this.activeLabel,
+    required this.totalLabel,
   });
 
-  final String businessName;
-  final int enquiryCount;
-  final int openCount;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final int totalCount;
+  final int activeCount;
+  final String activeLabel;
+  final String totalLabel;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _BusinessEnquiriesPageState._cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _BusinessEnquiriesPageState._borderColor),
+        border: Border.all(color: _BusinessEnquiriesPageState._goldColor),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 18,
+            blurRadius: 16,
             offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Row(
         children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: _BusinessEnquiriesPageState._fieldColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _BusinessEnquiriesPageState._borderColor),
-            ),
-            child: const Icon(
-              Icons.mark_email_unread_outlined,
-              color: _BusinessEnquiriesPageState._goldColor,
-              size: 30,
-            ),
-          ),
-          const SizedBox(width: 13),
+          Icon(icon, color: _BusinessEnquiriesPageState._goldColor, size: 31),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  businessName,
-                  maxLines: 2,
+                  title,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
@@ -322,16 +338,36 @@ class _EnquiriesHeaderCard extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
-                  enquiryCount == 0
-                      ? 'No customer enquiries yet.'
-                      : '$enquiryCount total • $openCount open',
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: _BusinessEnquiriesPageState._softTextColor,
-                    height: 1.35,
                     fontWeight: FontWeight.w700,
                   ),
+                ),
+                const SizedBox(height: 9),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _TinyPill(
+                      icon: Icons.mark_email_unread_outlined,
+                      label: '$activeCount $activeLabel',
+                      color: activeCount > 0
+                          ? _BusinessEnquiriesPageState._successColor
+                          : _BusinessEnquiriesPageState._goldColor,
+                      highlighted: activeCount > 0,
+                    ),
+                    _TinyPill(
+                      icon: Icons.list_alt_outlined,
+                      label: '$totalCount $totalLabel',
+                      color: _BusinessEnquiriesPageState._goldColor,
+                      highlighted: false,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -342,52 +378,8 @@ class _EnquiriesHeaderCard extends StatelessWidget {
   }
 }
 
-class _EmptyEnquiriesCard extends StatelessWidget {
-  const _EmptyEnquiriesCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
-      decoration: BoxDecoration(
-        color: _BusinessEnquiriesPageState._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _BusinessEnquiriesPageState._borderColor),
-      ),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.mail_outline,
-            color: _BusinessEnquiriesPageState._goldColor,
-            size: 46,
-          ),
-          SizedBox(height: 12),
-          Text(
-            'No enquiries yet',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'When users contact this business from the app, their enquiries will appear here.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _BusinessEnquiriesPageState._softTextColor,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EnquiryCard extends StatelessWidget {
-  const _EnquiryCard({
+class _EnquiryGridCard extends StatelessWidget {
+  const _EnquiryGridCard({
     required this.enquiry,
     required this.formattedDate,
     required this.onView,
@@ -416,163 +408,314 @@ class _EnquiryCard extends StatelessWidget {
     };
   }
 
+  IconData _statusIcon() {
+    return switch (enquiry.status) {
+      'open' => Icons.mark_email_unread_outlined,
+      'replied' => Icons.reply_outlined,
+      'closed' => Icons.check_circle_outline,
+      _ => Icons.mark_email_unread_outlined,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    final contactEmail = enquiry.senderEmail.trim();
+    final subject = enquiry.subject.trim().isEmpty
+        ? 'Customer enquiry'
+        : enquiry.subject.trim();
+    final senderName = enquiry.displaySenderName.trim();
+    final hasDate = formattedDate.trim().isNotEmpty;
+    final hasMessage = enquiry.message.trim().isNotEmpty;
+    final hasEmail = enquiry.senderEmail.trim().isNotEmpty;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
+    return Container(
+      decoration: BoxDecoration(
         color: _BusinessEnquiriesPageState._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(22),
-          onTap: onView,
-          child: Container(
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: _BusinessEnquiriesPageState._borderColor,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _EnquiryBadge(
-                      icon: Icons.help_outline,
-                      label: enquiry.enquiryTypeLabel,
-                      color: _BusinessEnquiriesPageState._goldColor,
-                    ),
-                    _EnquiryBadge(
-                      icon: Icons.circle,
-                      label: enquiry.statusLabel,
-                      color: _statusColor(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  enquiry.subject.trim().isEmpty
-                      ? 'Customer enquiry'
-                      : enquiry.subject.trim(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  enquiry.message,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _BusinessEnquiriesPageState._softTextColor,
-                    height: 1.4,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _InfoRow(
-                  icon: Icons.person_outline,
-                  text: enquiry.displaySenderName,
-                ),
-                if (contactEmail.isNotEmpty)
-                  _InfoRow(
-                    icon: Icons.alternate_email,
-                    text: contactEmail,
-                  ),
-                if (formattedDate.isNotEmpty)
-                  _InfoRow(
-                    icon: Icons.schedule_outlined,
-                    text: formattedDate,
-                  ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor:
-                            _BusinessEnquiriesPageState._goldColor,
-                        foregroundColor:
-                            _BusinessEnquiriesPageState._backgroundColor,
-                      ),
-                      onPressed: onView,
-                      icon: const Icon(Icons.open_in_full),
-                      label: const Text('View details'),
-                    ),
-                    if (contactEmail.isNotEmpty)
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              _BusinessEnquiriesPageState._goldColor,
-                          side: const BorderSide(
-                            color: _BusinessEnquiriesPageState._goldColor,
-                          ),
-                        ),
-                        onPressed: onReply,
-                        icon: const Icon(Icons.reply_outlined),
-                        label: const Text('Reply by email'),
-                      ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            _BusinessEnquiriesPageState._goldColor,
-                        side: const BorderSide(
-                          color: _BusinessEnquiriesPageState._goldColor,
-                        ),
-                      ),
-                      onPressed: onMarkOpen,
-                      icon: const Icon(Icons.mark_email_unread_outlined),
-                      label: const Text('Mark open'),
-                    ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            _BusinessEnquiriesPageState._successColor,
-                        side: const BorderSide(
-                          color: _BusinessEnquiriesPageState._successColor,
-                        ),
-                      ),
-                      onPressed: onMarkReplied,
-                      icon: const Icon(Icons.reply_outlined),
-                      label: const Text('Mark replied'),
-                    ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            _BusinessEnquiriesPageState._softTextColor,
-                        side: const BorderSide(
-                          color: _BusinessEnquiriesPageState._borderColor,
-                        ),
-                      ),
-                      onPressed: onMarkClosed,
-                      icon: const Icon(Icons.check_circle_outline),
-                      label: const Text('Close'),
-                    ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.redAccent,
-                        side: const BorderSide(color: Colors.redAccent),
-                      ),
-                      onPressed: onDelete,
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Delete'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: enquiry.status == 'open'
+              ? _BusinessEnquiriesPageState._goldColor
+              : _BusinessEnquiriesPageState._borderColor,
         ),
       ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(17),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 82,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    color: _BusinessEnquiriesPageState._fieldColor,
+                    child: const Center(
+                      child: Icon(
+                        Icons.mark_email_unread_outlined,
+                        color: _BusinessEnquiriesPageState._goldColor,
+                        size: 32,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 7,
+                    bottom: 7,
+                    child: _TinyPill(
+                      icon: _statusIcon(),
+                      label: enquiry.statusLabel,
+                      color: _statusColor(),
+                      highlighted: enquiry.status != 'closed',
+                    ),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: _EnquiryMenuButton(
+                      hasEmail: hasEmail,
+                      onReply: onReply,
+                      onMarkOpen: onMarkOpen,
+                      onMarkReplied: onMarkReplied,
+                      onMarkClosed: onMarkClosed,
+                      onDelete: onDelete,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(9),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      subject,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      senderName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _BusinessEnquiriesPageState._goldColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 5,
+                      children: [
+                        _TinyPill(
+                          icon: Icons.help_outline,
+                          label: enquiry.enquiryTypeLabel,
+                          color: _BusinessEnquiriesPageState._goldColor,
+                          highlighted: false,
+                        ),
+                        if (hasDate)
+                          _TinyPill(
+                            icon: Icons.schedule_outlined,
+                            label: formattedDate,
+                            color: _BusinessEnquiriesPageState._goldColor,
+                            highlighted: false,
+                          ),
+                      ],
+                    ),
+                    if (hasMessage) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        enquiry.message.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _BusinessEnquiriesPageState._softTextColor,
+                          height: 1.25,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 36,
+                      child: _SmallActionButton(
+                        icon: Icons.open_in_full,
+                        label: 'Open',
+                        onPressed: onView,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EnquiryMenuButton extends StatelessWidget {
+  const _EnquiryMenuButton({
+    required this.hasEmail,
+    required this.onReply,
+    required this.onMarkOpen,
+    required this.onMarkReplied,
+    required this.onMarkClosed,
+    required this.onDelete,
+  });
+
+  final bool hasEmail;
+  final VoidCallback onReply;
+  final VoidCallback onMarkOpen;
+  final VoidCallback onMarkReplied;
+  final VoidCallback onMarkClosed;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Enquiry options',
+      padding: EdgeInsets.zero,
+      color: _BusinessEnquiriesPageState._cardColor,
+      iconColor: _BusinessEnquiriesPageState._goldColor,
+      iconSize: 20,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: _BusinessEnquiriesPageState._borderColor),
+      ),
+      onSelected: (value) {
+        if (value == 'reply') {
+          onReply();
+        } else if (value == 'open') {
+          onMarkOpen();
+        } else if (value == 'replied') {
+          onMarkReplied();
+        } else if (value == 'closed') {
+          onMarkClosed();
+        } else if (value == 'delete') {
+          onDelete();
+        }
+      },
+      itemBuilder: (context) {
+        return [
+          if (hasEmail)
+            const PopupMenuItem<String>(
+              value: 'reply',
+              child: _MenuItemRow(
+                icon: Icons.reply_outlined,
+                label: 'Reply',
+                color: _BusinessEnquiriesPageState._goldColor,
+              ),
+            ),
+          const PopupMenuItem<String>(
+            value: 'open',
+            child: _MenuItemRow(
+              icon: Icons.mark_email_unread_outlined,
+              label: 'Mark open',
+              color: _BusinessEnquiriesPageState._goldColor,
+            ),
+          ),
+          const PopupMenuItem<String>(
+            value: 'replied',
+            child: _MenuItemRow(
+              icon: Icons.reply_outlined,
+              label: 'Mark replied',
+              color: _BusinessEnquiriesPageState._successColor,
+            ),
+          ),
+          const PopupMenuItem<String>(
+            value: 'closed',
+            child: _MenuItemRow(
+              icon: Icons.check_circle_outline,
+              label: 'Close',
+              color: _BusinessEnquiriesPageState._softTextColor,
+            ),
+          ),
+          const PopupMenuItem<String>(
+            value: 'delete',
+            child: _MenuItemRow(
+              icon: Icons.delete_outline,
+              label: 'Delete',
+              color: _BusinessEnquiriesPageState._dangerColor,
+            ),
+          ),
+        ];
+      },
+    );
+  }
+}
+
+class _MenuItemRow extends StatelessWidget {
+  const _MenuItemRow({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 9),
+        Text(
+          label,
+          style: TextStyle(
+            color: color == _BusinessEnquiriesPageState._softTextColor
+                ? Colors.white
+                : color,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SmallActionButton extends StatelessWidget {
+  const _SmallActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: _BusinessEnquiriesPageState._goldColor,
+        side: const BorderSide(color: _BusinessEnquiriesPageState._goldColor),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(13),
+        ),
+      ),
+      icon: Icon(icon, size: 14),
+      label: Text(
+        label,
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+      onPressed: onPressed,
     );
   }
 }
@@ -742,6 +885,62 @@ class _BusinessEnquiryDetailsPage extends StatelessWidget {
   }
 }
 
+class _EmptyEnquiriesCard extends StatelessWidget {
+  const _EmptyEnquiriesCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
+      decoration: BoxDecoration(
+        color: _BusinessEnquiriesPageState._cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _BusinessEnquiriesPageState._borderColor),
+      ),
+      child: const Column(
+        children: [
+          Icon(
+            Icons.mail_outline,
+            color: _BusinessEnquiriesPageState._goldColor,
+            size: 46,
+          ),
+          SizedBox(height: 12),
+          Text(
+            'No enquiries yet',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'When users contact this business from the app, their enquiries will appear here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _BusinessEnquiriesPageState._softTextColor,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LoadingList extends StatelessWidget {
+  const _LoadingList();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child:
+          CircularProgressIndicator(color: _BusinessEnquiriesPageState._goldColor),
+    );
+  }
+}
+
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
     required this.icon,
@@ -811,6 +1010,104 @@ class _EnquiryBadge extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TinyPill extends StatelessWidget {
+  const _TinyPill({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.highlighted,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 118),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? color.withValues(alpha: 0.14)
+            : _BusinessEnquiriesPageState._fieldColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: highlighted ? color : _BusinessEnquiriesPageState._borderColor,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: _BusinessEnquiriesPageState._goldColor, size: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: _BusinessEnquiriesPageState._softTextColor,
+                  height: 1.3,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

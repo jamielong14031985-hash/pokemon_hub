@@ -1,18 +1,30 @@
-import 'package:firebase_auth/firebase_auth.dart';
+// ignore_for_file: unused_field, unused_element
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/business_event.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
+import 'business_events_directory_page.dart';
 
 class BusinessEventsPage extends StatefulWidget {
   const BusinessEventsPage({
     super.key,
-    required this.profile,
+    this.profile,
+    this.businessProfile,
+    this.businessId,
+    this.businessName,
+    this.readOnly = false,
+    this.publicView = false,
   });
 
-  final BusinessProfile profile;
+  final BusinessProfile? profile;
+  final BusinessProfile? businessProfile;
+  final String? businessId;
+  final String? businessName;
+  final bool readOnly;
+  final bool publicView;
 
   @override
   State<BusinessEventsPage> createState() => _BusinessEventsPageState();
@@ -28,18 +40,28 @@ class _BusinessEventsPageState extends State<BusinessEventsPage> {
 
   final BusinessProfileService _service = BusinessProfileService();
 
-  String get _currentUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  BusinessProfile? get _profile => widget.profile ?? widget.businessProfile;
 
-  bool get _canManage {
-    return _currentUid.isNotEmpty && _currentUid == widget.profile.ownerUid;
+  String get _businessId {
+    final directId = widget.businessId?.trim() ?? '';
+    if (directId.isNotEmpty) return directId;
+
+    final profileId = _profile?.id.trim() ?? '';
+    return profileId;
   }
 
-  bool get _canCreateEvents {
-    return _canManage && widget.profile.premiumIsActive;
+  String get _businessName {
+    final directName = widget.businessName?.trim() ?? '';
+    if (directName.isNotEmpty) return directName;
+
+    final profileName = _profile?.businessName.trim() ?? '';
+    if (profileName.isNotEmpty) return profileName;
+
+    return 'Business events';
   }
 
   String _formatDateTime(DateTime? value) {
-    if (value == null) return 'Not set';
+    if (value == null) return 'Date TBC';
 
     final day = value.day.toString().padLeft(2, '0');
     final month = value.month.toString().padLeft(2, '0');
@@ -49,426 +71,34 @@ class _BusinessEventsPageState extends State<BusinessEventsPage> {
     return '$day/$month/${value.year} at $hour:$minute';
   }
 
-  Future<void> _openEventSheet({BusinessEvent? existingEvent}) async {
-    if (!_canCreateEvents) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Business Pro must be active before adding events.'),
-        ),
-      );
-      return;
+  String _normaliseUrl(String rawValue) {
+    final cleanUrl = rawValue.trim();
+    if (cleanUrl.isEmpty) return '';
+
+    if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
+      return cleanUrl;
     }
 
-    final savedMessage = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
-        builder: (_) => _BusinessEventEditorPage(
-          profile: widget.profile,
-          existingEvent: existingEvent,
-        ),
-      ),
-    );
-
-    if (!mounted || savedMessage == null) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(savedMessage)),
-    );
+    return 'https://$cleanUrl';
   }
 
-  Future<void> _deleteEvent(BusinessEvent event) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: _cardColor,
-          title: const Text(
-            'Delete event?',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          content: Text(
-            'This will permanently delete "${event.title}".',
-            style: const TextStyle(
-              color: _softTextColor,
-              height: 1.35,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirm != true) return;
-
-    try {
-      await _service.deleteBusinessEvent(
-        businessId: widget.profile.id,
-        eventId: event.id,
-      );
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event deleted.')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete event: $error')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final businessName = widget.profile.businessName.trim().isEmpty
-        ? 'Business events'
-        : widget.profile.businessName.trim();
-
-    return Scaffold(
-      backgroundColor: _backgroundColor,
-      appBar: AppBar(
-        title: const Text('Shop Events'),
-        backgroundColor: _backgroundColor,
-        foregroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-      ),
-      floatingActionButton: _canManage
-          ? FloatingActionButton.extended(
-              heroTag: 'add-business-event',
-              backgroundColor: _goldColor,
-              foregroundColor: _backgroundColor,
-              icon: const Icon(Icons.add),
-              label: const Text(
-                'Add event',
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-              onPressed: () => _openEventSheet(),
-            )
-          : null,
-      body: StreamBuilder<List<BusinessEvent>>(
-        stream: _service.watchBusinessEvents(widget.profile.id),
-        builder: (context, snapshot) {
-          final events = snapshot.data ?? const <BusinessEvent>[];
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-            children: [
-              _EventsHeaderCard(
-                businessName: businessName,
-                eventCount: events.length,
-                premiumActive: widget.profile.premiumIsActive,
-              ),
-              if (_canManage && !widget.profile.premiumIsActive) ...[
-                const SizedBox(height: 14),
-                const _BusinessProRequiredCard(),
-              ],
-              const SizedBox(height: 16),
-              if (snapshot.connectionState == ConnectionState.waiting)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(color: _goldColor),
-                  ),
-                )
-              else if (events.isEmpty)
-                _EmptyEventsCard(canManage: _canManage)
-              else
-                ...events.map(
-                  (event) => _EventCard(
-                    event: event,
-                    canManage: _canManage,
-                    onEdit: () => _openEventSheet(existingEvent: event),
-                    onDelete: () => _deleteEvent(event),
-                    formatDateTime: _formatDateTime,
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _DateTimeButton extends StatelessWidget {
-  const _DateTimeButton({
-    required this.label,
-    required this.value,
-    required this.onPressed,
-    this.trailing,
-  });
-
-  final String label;
-  final String value;
-  final VoidCallback? onPressed;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: _BusinessEventsPageState._fieldColor,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onPressed,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: _BusinessEventsPageState._borderColor),
-          ),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.event_outlined,
-                color: _BusinessEventsPageState._goldColor,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        color: _BusinessEventsPageState._softTextColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      value,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              trailing ??
-                  const Icon(
-                    Icons.edit_calendar_outlined,
-                    color: _BusinessEventsPageState._goldColor,
-                  ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EventsHeaderCard extends StatelessWidget {
-  const _EventsHeaderCard({
-    required this.businessName,
-    required this.eventCount,
-    required this.premiumActive,
-  });
-
-  final String businessName;
-  final int eventCount;
-  final bool premiumActive;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _BusinessEventsPageState._cardColor,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: premiumActive
-              ? _BusinessEventsPageState._goldColor
-              : _BusinessEventsPageState._borderColor,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: _BusinessEventsPageState._fieldColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _BusinessEventsPageState._borderColor),
-            ),
-            child: const Icon(
-              Icons.event_available_outlined,
-              color: _BusinessEventsPageState._goldColor,
-              size: 30,
-            ),
-          ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  businessName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 23,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  eventCount == 0
-                      ? 'Create trade nights, tournaments, release days and meetups.'
-                      : '$eventCount event${eventCount == 1 ? '' : 's'} saved.',
-                  style: const TextStyle(
-                    color: _BusinessEventsPageState._softTextColor,
-                    height: 1.35,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BusinessProRequiredCard extends StatelessWidget {
-  const _BusinessProRequiredCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.orangeAccent.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.55)),
-      ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.lock_outline, color: Colors.orangeAccent),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Shop Events are a Business Pro feature. Ask an admin to activate Business Pro for this business.',
-              style: TextStyle(
-                color: _BusinessEventsPageState._softTextColor,
-                height: 1.35,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyEventsCard extends StatelessWidget {
-  const _EmptyEventsCard({required this.canManage});
-
-  final bool canManage;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
-      decoration: BoxDecoration(
-        color: _BusinessEventsPageState._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _BusinessEventsPageState._borderColor),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.event_available_outlined,
-            color: _BusinessEventsPageState._goldColor,
-            size: 46,
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'No events yet',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            canManage
-                ? 'Tap Add event to create your first Business Pro event.'
-                : 'This business has not posted any events yet.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _BusinessEventsPageState._softTextColor,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EventCard extends StatelessWidget {
-  const _EventCard({
-    required this.event,
-    required this.canManage,
-    required this.onEdit,
-    required this.onDelete,
-    required this.formatDateTime,
-  });
-
-  final BusinessEvent event;
-  final bool canManage;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final String Function(DateTime? value) formatDateTime;
-
-  Future<void> _openBooking(BuildContext context) async {
-    final cleanUrl = event.bookingUrl.trim();
-    if (cleanUrl.isEmpty) return;
-
-    final url = cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')
-        ? cleanUrl
-        : 'https://$cleanUrl';
+  Future<void> _openBookingLink(BuildContext context, BusinessEvent event) async {
+    final url = _normaliseUrl(event.bookingUrl);
+    if (url.isEmpty) return;
 
     final uri = Uri.tryParse(url);
     if (uri == null) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not open this booking link.')),
       );
       return;
     }
+
+    await _service.incrementBusinessAnalyticsMetric(
+      businessId: event.businessId,
+      metric: 'eventViews',
+    );
 
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
 
@@ -479,147 +109,291 @@ class _EventCard extends StatelessWidget {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final visible = event.isCurrentlyVisible;
+  List<BusinessEvent> _filterEventsForBusiness(List<BusinessEvent> events) {
+    final businessId = _businessId.toLowerCase();
+    final businessName = _businessName.toLowerCase();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: _BusinessEventsPageState._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: visible
-              ? _BusinessEventsPageState._goldColor
-              : _BusinessEventsPageState._borderColor,
+    return events.where((event) {
+      final eventBusinessId = event.businessId.trim().toLowerCase();
+      final eventBusinessName = event.businessName.trim().toLowerCase();
+
+      if (businessId.isNotEmpty && eventBusinessId == businessId) {
+        return true;
+      }
+
+      if (businessName.isNotEmpty && eventBusinessName == businessName) {
+        return true;
+      }
+
+      return false;
+    }).toList();
+  }
+
+  void _openEventDetails(BusinessEvent event) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessEventDetailsPage(
+          event: event,
+          formatDateTime: _formatDateTime,
+          onOpenBookingLink: (context) => _openBookingLink(context, event),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _EventBadge(
-                icon: Icons.event_outlined,
-                label: event.eventTypeLabel,
-                highlighted: true,
-              ),
-              _EventBadge(
-                icon:
-                    visible ? Icons.visibility_outlined : Icons.visibility_off,
-                label: visible ? 'Visible' : 'Hidden/ended',
-                highlighted: false,
-              ),
-              if (event.onlineEvent)
-                const _EventBadge(
-                  icon: Icons.language,
-                  label: 'Online',
-                  highlighted: false,
+    );
+  }
+
+  int _gridColumns(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+
+    if (width >= 900) return 3;
+    if (width >= 340) return 2;
+
+    return 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final businessName = _businessName;
+    final crossAxisCount = _gridColumns(context);
+
+    return Scaffold(
+      backgroundColor: _backgroundColor,
+      appBar: AppBar(
+        title: const Text('Shop Events'),
+        backgroundColor: _backgroundColor,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: StreamBuilder<List<BusinessEvent>>(
+        stream: _service.watchAllVisibleBusinessEvents(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return _StateCard(
+              icon: Icons.error_outline,
+              title: 'Could not load events',
+              message: snapshot.error.toString(),
+            );
+          }
+
+          if (!snapshot.hasData) {
+            return const Center(
+              child: CircularProgressIndicator(color: _goldColor),
+            );
+          }
+
+          final events = _filterEventsForBusiness(
+            snapshot.data ?? const <BusinessEvent>[],
+          );
+
+          if (events.isEmpty) {
+            return _StateCard(
+              icon: Icons.event_busy_outlined,
+              title: 'No events yet',
+              message: '$businessName has not added any visible events yet.',
+            );
+          }
+
+          return CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                sliver: SliverToBoxAdapter(
+                  child: _HeaderCard(
+                    businessName: businessName,
+                    eventCount: events.length,
+                  ),
                 ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                sliver: SliverGrid.builder(
+                  itemCount: events.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    mainAxisExtent: 295,
+                  ),
+                  itemBuilder: (context, index) {
+                    final event = events[index];
+
+                    return _BusinessEventTile(
+                      event: event,
+                      formatDateTime: _formatDateTime,
+                      onTap: () => _openEventDetails(event),
+                    );
+                  },
+                ),
+              ),
             ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _HeaderCard extends StatelessWidget {
+  const _HeaderCard({
+    required this.businessName,
+    required this.eventCount,
+  });
+
+  final String businessName;
+  final int eventCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _BusinessEventsPageState._cardColor,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _BusinessEventsPageState._goldColor),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.event_available_outlined,
+            color: _BusinessEventsPageState._goldColor,
+            size: 34,
           ),
-          const SizedBox(height: 12),
-          Text(
-            event.title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 19,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          if (event.description.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              event.description.trim(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '$eventCount event${eventCount == 1 ? '' : 's'} from $businessName',
               style: const TextStyle(
-                color: _BusinessEventsPageState._softTextColor,
-                height: 1.4,
-                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                height: 1.25,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
               ),
             ),
-          ],
-          const SizedBox(height: 12),
-          _EventInfoRow(
-            icon: Icons.schedule_outlined,
-            text: formatDateTime(event.startDate),
           ),
-          if (event.endDate != null)
-            _EventInfoRow(
-              icon: Icons.timelapse_outlined,
-              text: 'Ends ${formatDateTime(event.endDate)}',
-            ),
-          if (event.location.trim().isNotEmpty)
-            _EventInfoRow(
-              icon: event.onlineEvent ? Icons.language : Icons.place_outlined,
-              text: event.location.trim(),
-            ),
-          if (event.entryFee.trim().isNotEmpty)
-            _EventInfoRow(
-              icon: Icons.payments_outlined,
-              text: event.entryFee.trim(),
-            ),
-          if (event.bookingUrl.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _BusinessEventsPageState._goldColor,
-                  side: const BorderSide(color: _BusinessEventsPageState._goldColor),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                ),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text(
-                  'Booking / more info',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
-                onPressed: () => _openBooking(context),
-              ),
-            ),
-          ],
-          if (canManage) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(
-                      color: _BusinessEventsPageState._borderColor,
-                    ),
-                  ),
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit'),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.redAccent,
-                    side: const BorderSide(color: Colors.redAccent),
-                  ),
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Delete'),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
   }
 }
 
-class _EventInfoRow extends StatelessWidget {
-  const _EventInfoRow({
+class _BusinessEventTile extends StatelessWidget {
+  const _BusinessEventTile({
+    required this.event,
+    required this.formatDateTime,
+    required this.onTap,
+  });
+
+  final BusinessEvent event;
+  final String Function(DateTime? value) formatDateTime;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = event.title.trim().isEmpty ? 'Shop event' : event.title.trim();
+    final description = event.description.trim();
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color: _BusinessEventsPageState._cardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _BusinessEventsPageState._borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _TinyPill(
+                  icon: Icons.event_outlined,
+                  label: event.eventTypeLabel,
+                  highlighted: true,
+                ),
+                if (event.onlineEvent)
+                  const _TinyPill(
+                    icon: Icons.language,
+                    label: 'Online',
+                    highlighted: false,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 9),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.1,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _MiniLine(
+              icon: Icons.schedule_outlined,
+              text: formatDateTime(event.startDate),
+            ),
+            const SizedBox(height: 5),
+            _MiniLine(
+              icon: event.onlineEvent ? Icons.language : Icons.location_on_outlined,
+              text: event.onlineEvent
+                  ? 'Online'
+                  : event.location.trim().isEmpty
+                      ? 'Location TBC'
+                      : event.location.trim(),
+            ),
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                description,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _BusinessEventsPageState._softTextColor,
+                  fontSize: 12,
+                  height: 1.25,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            const Spacer(),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    event.bookingUrl.trim().isEmpty
+                        ? 'Tap for details'
+                        : 'Link available',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _BusinessEventsPageState._goldColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right,
+                  color: _BusinessEventsPageState._goldColor,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniLine extends StatelessWidget {
+  const _MiniLine({
     required this.icon,
     required this.text,
   });
@@ -629,31 +403,29 @@ class _EventInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: _BusinessEventsPageState._goldColor, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: _BusinessEventsPageState._softTextColor,
-                height: 1.3,
-                fontWeight: FontWeight.w700,
-              ),
+    return Row(
+      children: [
+        Icon(icon, color: _BusinessEventsPageState._goldColor, size: 15),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _BusinessEventsPageState._softTextColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _EventBadge extends StatelessWidget {
-  const _EventBadge({
+class _TinyPill extends StatelessWidget {
+  const _TinyPill({
     required this.icon,
     required this.label,
     required this.highlighted,
@@ -665,37 +437,29 @@ class _EventBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = highlighted
+        ? _BusinessEventsPageState._goldColor
+        : _BusinessEventsPageState._softTextColor;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
         color: highlighted
-            ? _BusinessEventsPageState._goldColor
-            : _BusinessEventsPageState._fieldColor,
+            ? _BusinessEventsPageState._goldColor.withValues(alpha: 0.16)
+            : Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: highlighted
-              ? _BusinessEventsPageState._goldColor
-              : _BusinessEventsPageState._borderColor,
-        ),
+        border: Border.all(color: highlighted ? color : Colors.white24),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            color: highlighted
-                ? _BusinessEventsPageState._backgroundColor
-                : _BusinessEventsPageState._goldColor,
-            size: 15,
-          ),
-          const SizedBox(width: 5),
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
-              color: highlighted
-                  ? _BusinessEventsPageState._backgroundColor
-                  : Colors.white,
-              fontSize: 12,
+              color: color,
+              fontSize: 10.5,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -705,462 +469,57 @@ class _EventBadge extends StatelessWidget {
   }
 }
 
-
-class _BusinessEventEditorPage extends StatefulWidget {
-  const _BusinessEventEditorPage({
-    required this.profile,
-    this.existingEvent,
+class _StateCard extends StatelessWidget {
+  const _StateCard({
+    required this.icon,
+    required this.title,
+    required this.message,
   });
 
-  final BusinessProfile profile;
-  final BusinessEvent? existingEvent;
-
-  @override
-  State<_BusinessEventEditorPage> createState() =>
-      _BusinessEventEditorPageState();
-}
-
-class _BusinessEventEditorPageState extends State<_BusinessEventEditorPage> {
-  static const Map<String, String> _eventTypeLabels = <String, String>{
-    'trade_night': 'Trade night',
-    'tournament': 'Tournament',
-    'pre_release': 'Pre-release',
-    'release_day': 'Release day',
-    'giveaway': 'Giveaway',
-    'meetup': 'Meetup',
-    'other': 'Other event',
-  };
-
-  final BusinessProfileService _service = BusinessProfileService();
-
-  late final TextEditingController _titleController;
-  late final TextEditingController _descriptionController;
-  late final TextEditingController _locationController;
-  late final TextEditingController _entryFeeController;
-  late final TextEditingController _bookingUrlController;
-
-  late String _selectedEventType;
-  late bool _onlineEvent;
-  late bool _active;
-  late DateTime _startsAt;
-  DateTime? _endsAt;
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-
-    final existingEvent = widget.existingEvent;
-
-    _titleController = TextEditingController(text: existingEvent?.title ?? '');
-    _descriptionController = TextEditingController(
-      text: existingEvent?.description ?? '',
-    );
-    _locationController = TextEditingController(
-      text: existingEvent?.location ??
-          (widget.profile.hasPhysicalShop
-              ? widget.profile.linkedShopName
-              : widget.profile.displayLocation),
-    );
-    _entryFeeController = TextEditingController(
-      text: existingEvent?.entryFee ?? '',
-    );
-    _bookingUrlController = TextEditingController(
-      text: existingEvent?.bookingUrl ?? widget.profile.website,
-    );
-
-    _selectedEventType = existingEvent?.eventType ?? 'trade_night';
-    if (!_eventTypeLabels.containsKey(_selectedEventType)) {
-      _selectedEventType = 'other';
-    }
-
-    _onlineEvent = existingEvent?.onlineEvent ?? false;
-    _active = existingEvent?.active ?? true;
-    _startsAt = existingEvent?.startDate ??
-        DateTime.now().add(const Duration(days: 7));
-    _endsAt = existingEvent?.endDate;
-  }
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _descriptionController.dispose();
-    _locationController.dispose();
-    _entryFeeController.dispose();
-    _bookingUrlController.dispose();
-    super.dispose();
-  }
-
-  String _formatDateTime(DateTime? value) {
-    if (value == null) return 'Not set';
-
-    final day = value.day.toString().padLeft(2, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-
-    return '$day/$month/${value.year} at $hour:$minute';
-  }
-
-  Future<DateTime?> _pickDateTime({
-    required BuildContext pickerContext,
-    required DateTime initialDateTime,
-  }) async {
-    final date = await showDatePicker(
-      context: pickerContext,
-      initialDate: initialDateTime,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 730)),
-    );
-
-    if (date == null || !pickerContext.mounted) return null;
-
-    final time = await showTimePicker(
-      context: pickerContext,
-      initialTime: TimeOfDay.fromDateTime(initialDateTime),
-    );
-
-    if (time == null) return null;
-
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      time.hour,
-      time.minute,
-    );
-  }
-
-  InputDecoration _inputDecoration(String labelText, {String? hintText}) {
-    return InputDecoration(
-      labelText: labelText,
-      hintText: hintText,
-      labelStyle: const TextStyle(
-        color: _BusinessEventsPageState._softTextColor,
-      ),
-      hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
-      floatingLabelStyle: const TextStyle(
-        color: _BusinessEventsPageState._goldColor,
-        fontWeight: FontWeight.w900,
-      ),
-      filled: true,
-      fillColor: _BusinessEventsPageState._fieldColor,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(
-          color: _BusinessEventsPageState._borderColor,
-        ),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(
-          color: _BusinessEventsPageState._borderColor,
-        ),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(
-          color: _BusinessEventsPageState._goldColor,
-          width: 1.6,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _saveEvent() async {
-    final title = _titleController.text.trim();
-    final description = _descriptionController.text.trim();
-
-    if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event title is required.')),
-      );
-      return;
-    }
-
-    if (description.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event description is required.')),
-      );
-      return;
-    }
-
-    if (!_onlineEvent && _locationController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event location is required.')),
-      );
-      return;
-    }
-
-    if (_endsAt != null && _endsAt!.isBefore(_startsAt)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End time must be after start time.')),
-      );
-      return;
-    }
-
-    setState(() => _saving = true);
-
-    try {
-      await _service.saveBusinessEvent(
-        profile: widget.profile,
-        eventId: widget.existingEvent?.id,
-        title: title,
-        description: description,
-        eventType: _selectedEventType,
-        location: _locationController.text.trim(),
-        onlineEvent: _onlineEvent,
-        entryFee: _entryFeeController.text.trim(),
-        bookingUrl: _bookingUrlController.text.trim(),
-        startsAt: _startsAt,
-        endsAt: _endsAt,
-        active: _active,
-      );
-
-      if (!mounted) return;
-
-      Navigator.of(context).pop(
-        widget.existingEvent == null ? 'Event added.' : 'Event saved.',
-      );
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() => _saving = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save event: $error')),
-      );
-    }
-  }
+  final IconData icon;
+  final String title;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
-    final existingEvent = widget.existingEvent;
-
-    return Scaffold(
-      backgroundColor: _BusinessEventsPageState._backgroundColor,
-      appBar: AppBar(
-        title: Text(existingEvent == null ? 'Add event' : 'Edit event'),
-        backgroundColor: _BusinessEventsPageState._backgroundColor,
-        foregroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
-          children: [
-            const Text(
-              'Create a Business Pro shop event for customers to discover.',
-              style: TextStyle(
-                color: _BusinessEventsPageState._softTextColor,
-                height: 1.35,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              initialValue: _selectedEventType,
-              dropdownColor: _BusinessEventsPageState._fieldColor,
-              iconEnabledColor: _BusinessEventsPageState._softTextColor,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-              decoration: _inputDecoration('Event type'),
-              items: _eventTypeLabels.entries
-                  .map(
-                    (entry) => DropdownMenuItem<String>(
-                      value: entry.key,
-                      child: Text(entry.value),
-                    ),
-                  )
-                  .toList(),
-              onChanged: _saving
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      setState(() => _selectedEventType = value);
-                    },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _titleController,
-              enabled: !_saving,
-              maxLength: 90,
-              textCapitalization: TextCapitalization.sentences,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: _BusinessEventsPageState._goldColor,
-              decoration: _inputDecoration('Event title'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _descriptionController,
-              enabled: !_saving,
-              minLines: 3,
-              maxLines: 5,
-              maxLength: 700,
-              textCapitalization: TextCapitalization.sentences,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: _BusinessEventsPageState._goldColor,
-              decoration: _inputDecoration('Description'),
-            ),
-            const SizedBox(height: 12),
-            _DateTimeButton(
-              label: 'Start time',
-              value: _formatDateTime(_startsAt),
-              onPressed: _saving
-                  ? null
-                  : () async {
-                      final picked = await _pickDateTime(
-                        pickerContext: context,
-                        initialDateTime: _startsAt,
-                      );
-                      if (picked == null || !mounted) return;
-                      setState(() => _startsAt = picked);
-                    },
-            ),
-            const SizedBox(height: 10),
-            _DateTimeButton(
-              label: 'End time',
-              value: _endsAt == null ? 'Optional' : _formatDateTime(_endsAt),
-              onPressed: _saving
-                  ? null
-                  : () async {
-                      final picked = await _pickDateTime(
-                        pickerContext: context,
-                        initialDateTime:
-                            _endsAt ?? _startsAt.add(const Duration(hours: 2)),
-                      );
-                      if (picked == null || !mounted) return;
-                      setState(() => _endsAt = picked);
-                    },
-              trailing: _endsAt == null
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear end time',
-                      color: _BusinessEventsPageState._softTextColor,
-                      icon: const Icon(Icons.clear),
-                      onPressed: _saving
-                          ? null
-                          : () => setState(() => _endsAt = null),
-                    ),
-            ),
-            const SizedBox(height: 12),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              activeThumbColor: _BusinessEventsPageState._goldColor,
-              activeTrackColor:
-                  _BusinessEventsPageState._goldColor.withValues(alpha: 0.35),
-              title: const Text(
-                'Online event',
-                style: TextStyle(
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: _BusinessEventsPageState._cardColor,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: _BusinessEventsPageState._borderColor),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: _BusinessEventsPageState._goldColor, size: 36),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
+                  fontSize: 18,
                 ),
               ),
-              subtitle: const Text(
-                'Turn this on if the event is online only.',
-                style: TextStyle(color: _BusinessEventsPageState._softTextColor),
-              ),
-              value: _onlineEvent,
-              onChanged: _saving
-                  ? null
-                  : (value) {
-                      setState(() => _onlineEvent = value);
-                    },
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _locationController,
-              enabled: !_saving,
-              maxLength: 180,
-              textCapitalization: TextCapitalization.words,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: _BusinessEventsPageState._goldColor,
-              decoration: _inputDecoration(
-                _onlineEvent ? 'Online location / platform' : 'Location',
-                hintText: _onlineEvent
-                    ? 'Discord, website, livestream, etc.'
-                    : 'Shop address or venue',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _entryFeeController,
-              enabled: !_saving,
-              maxLength: 80,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: _BusinessEventsPageState._goldColor,
-              decoration: _inputDecoration('Entry fee', hintText: 'Optional'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _bookingUrlController,
-              enabled: !_saving,
-              maxLength: 300,
-              keyboardType: TextInputType.url,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: _BusinessEventsPageState._goldColor,
-              decoration: _inputDecoration(
-                'Booking / more info link',
-                hintText: 'Optional',
-              ),
-            ),
-            const SizedBox(height: 4),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              activeThumbColor: _BusinessEventsPageState._goldColor,
-              activeTrackColor:
-                  _BusinessEventsPageState._goldColor.withValues(alpha: 0.35),
-              title: const Text(
-                'Show this event',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
+              const SizedBox(height: 6),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _BusinessEventsPageState._softTextColor,
+                  height: 1.35,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              subtitle: const Text(
-                'Turn this off to hide the event without deleting it.',
-                style: TextStyle(color: _BusinessEventsPageState._softTextColor),
-              ),
-              value: _active,
-              onChanged: _saving
-                  ? null
-                  : (value) {
-                      setState(() => _active = value);
-                    },
-            ),
-            const SizedBox(height: 18),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: _BusinessEventsPageState._goldColor,
-                foregroundColor: _BusinessEventsPageState._backgroundColor,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: _BusinessEventsPageState._backgroundColor,
-                      ),
-                    )
-                  : const Icon(Icons.save_outlined),
-              label: Text(
-                _saving ? 'Saving...' : 'Save event',
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-              onPressed: _saving ? null : _saveEvent,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
-

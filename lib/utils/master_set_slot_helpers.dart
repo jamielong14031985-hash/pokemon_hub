@@ -39,66 +39,100 @@ class MasterSetCardSlot {
     }
   }
 
-  bool isOwned(CardOwnership ownership) {
+  int countFor(CardOwnership ownership) {
     switch (kind) {
       case MasterSetSlotKind.normal:
-        return ownership.normal ||
-            (ownership.effectiveCopies > 0 && !ownership.reverseHolo && !ownership.holo);
+        return ownership.normalCount;
       case MasterSetSlotKind.reverseHolo:
-        return ownership.reverseHolo;
+        return ownership.reverseHoloCount;
       case MasterSetSlotKind.holo:
-        return ownership.holo;
+        return ownership.holoCount;
     }
   }
 
+  bool isOwned(CardOwnership ownership) => countFor(ownership) > 0;
+
   CardOwnership tileOwnership(CardOwnership ownership) {
-    if (!isOwned(ownership)) {
+    final count = countFor(ownership);
+    if (count <= 0) {
       return const CardOwnership();
     }
 
     switch (kind) {
       case MasterSetSlotKind.normal:
-        return const CardOwnership(normal: true, copies: 1);
+        return CardOwnership(
+          normal: true,
+          copies: count,
+          normalCopies: count,
+        );
       case MasterSetSlotKind.reverseHolo:
-        return const CardOwnership(reverseHolo: true, copies: 1);
+        return CardOwnership(
+          reverseHolo: true,
+          copies: count,
+          reverseHoloCopies: count,
+        );
       case MasterSetSlotKind.holo:
-        return const CardOwnership(holo: true, copies: 1);
+        return CardOwnership(
+          holo: true,
+          copies: count,
+          holoCopies: count,
+        );
+    }
+  }
+
+  CardOwnership addOne(CardOwnership ownership) {
+    switch (kind) {
+      case MasterSetSlotKind.normal:
+        return ownership.copyWith(
+          normal: true,
+          normalCopies: ownership.normalCount + 1,
+        );
+      case MasterSetSlotKind.reverseHolo:
+        return ownership.copyWith(
+          reverseHolo: true,
+          reverseHoloCopies: ownership.reverseHoloCount + 1,
+        );
+      case MasterSetSlotKind.holo:
+        return ownership.copyWith(
+          holo: true,
+          holoCopies: ownership.holoCount + 1,
+        );
+    }
+  }
+
+  CardOwnership removeOne(CardOwnership ownership) {
+    switch (kind) {
+      case MasterSetSlotKind.normal:
+        return ownership.copyWith(
+          normal: ownership.normalCount > 1,
+          normalCopies: (ownership.normalCount - 1).clamp(0, 999999).toInt(),
+        );
+      case MasterSetSlotKind.reverseHolo:
+        return ownership.copyWith(
+          reverseHolo: ownership.reverseHoloCount > 1,
+          reverseHoloCopies: (ownership.reverseHoloCount - 1).clamp(0, 999999).toInt(),
+        );
+      case MasterSetSlotKind.holo:
+        return ownership.copyWith(
+          holo: ownership.holoCount > 1,
+          holoCopies: (ownership.holoCount - 1).clamp(0, 999999).toInt(),
+        );
     }
   }
 
   CardOwnership toggleOwnership(CardOwnership ownership) {
-    final nextOwned = !isOwned(ownership);
-    var normal = ownership.normal;
-    var reverseHolo = ownership.reverseHolo;
-    var holo = ownership.holo;
-    var copies = ownership.effectiveCopies;
-
-    switch (kind) {
-      case MasterSetSlotKind.normal:
-        normal = nextOwned;
-        break;
-      case MasterSetSlotKind.reverseHolo:
-        reverseHolo = nextOwned;
-        break;
-      case MasterSetSlotKind.holo:
-        holo = nextOwned;
-        break;
+    if (isOwned(ownership)) {
+      switch (kind) {
+        case MasterSetSlotKind.normal:
+          return ownership.copyWith(normal: false, normalCopies: 0);
+        case MasterSetSlotKind.reverseHolo:
+          return ownership.copyWith(reverseHolo: false, reverseHoloCopies: 0);
+        case MasterSetSlotKind.holo:
+          return ownership.copyWith(holo: false, holoCopies: 0);
+      }
     }
 
-    if (nextOwned && copies < 1) {
-      copies = 1;
-    }
-
-    if (!normal && !reverseHolo && !holo) {
-      copies = 0;
-    }
-
-    return ownership.copyWith(
-      normal: normal,
-      reverseHolo: reverseHolo,
-      holo: holo,
-      copies: copies,
-    );
+    return addOne(ownership);
   }
 }
 
@@ -214,4 +248,3 @@ List<MasterSetCardSlot> buildMasterSetSlots(List<TcgCard> cards) {
 
   return slots;
 }
-

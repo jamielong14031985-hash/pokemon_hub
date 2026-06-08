@@ -1,13 +1,17 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/business_event.dart';
+import '../models/business_offer.dart';
+import '../models/business_product.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
 import '../widgets/business_enquiry_button.dart';
-import '../widgets/business_offers_preview.dart';
-import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
+import 'business_events_page.dart';
+import 'business_offers_page.dart';
+import 'business_products_page.dart';
 import 'business_reviews_page.dart';
 
 class PublicBusinessProfilePage extends StatelessWidget {
@@ -25,6 +29,23 @@ class PublicBusinessProfilePage extends StatelessWidget {
   static const Color _goldColor = Color(0xFFF7DE77);
   static const Color _softTextColor = Color(0xFFC8D4F0);
   static const Color _successColor = Color(0xFF4ADE80);
+
+  double? _readCoordinate(dynamic value) {
+    if (value is int) return value.toDouble();
+    if (value is double) return value;
+    return double.tryParse((value ?? '').toString());
+  }
+
+  Uri _mapsSearchUri(String query) {
+    return Uri.https(
+      'www.google.com',
+      '/maps/search/',
+      <String, String>{
+        'api': '1',
+        'query': query,
+      },
+    );
+  }
 
   Future<void> _openWebsite(BuildContext context) async {
     final cleanWebsite = profile.website.trim();
@@ -57,6 +78,71 @@ class PublicBusinessProfilePage extends StatelessWidget {
     }
   }
 
+  Future<void> _openMap(BuildContext context) async {
+    Uri? mapUri;
+
+    final linkedShopId = profile.linkedShopId.trim();
+
+    if (linkedShopId.isNotEmpty) {
+      try {
+        final shopSnapshot = await FirebaseFirestore.instance
+            .collection('tcg_shops')
+            .doc(linkedShopId)
+            .get();
+
+        final shopData = shopSnapshot.data();
+
+        if (shopData != null) {
+          final location = shopData['location'];
+          double? lat = _readCoordinate(shopData['lat']);
+          double? lng = _readCoordinate(shopData['lng']);
+
+          if (location is GeoPoint) {
+            lat = location.latitude;
+            lng = location.longitude;
+          }
+
+          if (lat != null && lng != null && (lat != 0 || lng != 0)) {
+            mapUri = _mapsSearchUri('$lat,$lng');
+          }
+        }
+      } catch (_) {
+        // Fall back to the saved display location below.
+      }
+    }
+
+    if (mapUri == null) {
+      final fallbackLocation = profile.displayLocation.trim();
+
+      if (fallbackLocation.isEmpty) {
+        if (!context.mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No map location is available.')),
+        );
+        return;
+      }
+
+      mapUri = _mapsSearchUri(fallbackLocation);
+    }
+
+    await BusinessProfileService().incrementBusinessAnalyticsMetric(
+      businessId: profile.id,
+      metric: 'mapViews',
+    );
+
+    final opened = await launchUrl(
+      mapUri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open maps.')),
+      );
+    }
+  }
+
   void _openReviews(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -65,15 +151,28 @@ class PublicBusinessProfilePage extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime? value) {
-    if (value == null) return '';
+  void _openOffers(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessOffersPage(profile: profile),
+      ),
+    );
+  }
 
-    final day = value.day.toString().padLeft(2, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
+  void _openEvents(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessEventsPage(profile: profile),
+      ),
+    );
+  }
 
-    return '$day/$month/${value.year} $hour:$minute';
+  void _openProducts(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BusinessProductsPage(profile: profile),
+      ),
+    );
   }
 
   @override
@@ -101,76 +200,29 @@ class PublicBusinessProfilePage extends StatelessWidget {
           _PublicHeroCard(
             profile: profile,
             title: title,
-            isOnlineOnly: isOnlineOnly,
+            onReviews: () => _openReviews(context),
           ),
           const SizedBox(height: 14),
           _QuickActionsCard(
             profile: profile,
             website: website,
             phone: phone,
+            onMap: isOnlineOnly ? null : () => _openMap(context),
             onWebsite: website.isEmpty ? null : () => _openWebsite(context),
-            onReviews: () => _openReviews(context),
           ),
-          if (profile.description.trim().isNotEmpty) ...[
-            const SizedBox(height: 16),
-            const _SectionHeader(
-              icon: Icons.info_outline,
-              title: 'About this business',
-            ),
-            const SizedBox(height: 10),
-            _DescriptionCard(text: profile.description.trim()),
-          ],
           const SizedBox(height: 16),
-          const _SectionHeader(
-            icon: Icons.star_rate_rounded,
-            title: 'Reviews',
-          ),
-          const SizedBox(height: 10),
-          _ReviewsCard(
+          _PublicBusinessSummaryButtons(
             profile: profile,
-            onReviews: () => _openReviews(context),
+            onOffers: () => _openOffers(context),
+            onEvents: () => _openEvents(context),
+            onProducts: () => _openProducts(context),
           ),
           const SizedBox(height: 16),
-          const _SectionHeader(
-            icon: Icons.local_offer_outlined,
-            title: 'Offers & deals',
-          ),
-          const SizedBox(height: 10),
-          BusinessOffersPreview(
-            profile: profile,
-            maxItems: 3,
-          ),
-          const SizedBox(height: 16),
-          const _SectionHeader(
-            icon: Icons.event_outlined,
-            title: 'Shop events',
-          ),
-          const SizedBox(height: 10),
-          _PublicEventsPreview(
-            profile: profile,
-            formatDate: _formatDate,
-          ),
-          const SizedBox(height: 16),
-          const _SectionHeader(
-            icon: Icons.inventory_2_outlined,
-            title: 'Product showcase',
-          ),
-          const SizedBox(height: 10),
-          BusinessProductsPreview(
-            profile: profile,
-            maxItems: 4,
-          ),
-          const SizedBox(height: 16),
-          const _SectionHeader(
-            icon: Icons.schedule_outlined,
-            title: 'Opening hours',
-          ),
-          const SizedBox(height: 10),
-          _OpeningHoursCard(profile: profile),
+          _OpeningHoursDropdownCard(profile: profile),
           const SizedBox(height: 16),
           const _SectionHeader(
             icon: Icons.contact_support_outlined,
-            title: 'Contact and enquiries',
+            title: 'Contact details',
           ),
           const SizedBox(height: 10),
           _ContactCard(
@@ -179,8 +231,6 @@ class PublicBusinessProfilePage extends StatelessWidget {
             phone: phone,
             isOnlineOnly: isOnlineOnly,
           ),
-          const SizedBox(height: 10),
-          BusinessEnquiryButton(profile: profile),
         ],
       ),
     );
@@ -191,12 +241,12 @@ class _PublicHeroCard extends StatelessWidget {
   const _PublicHeroCard({
     required this.profile,
     required this.title,
-    required this.isOnlineOnly,
+    required this.onReviews,
   });
 
   final BusinessProfile profile;
   final String title;
-  final bool isOnlineOnly;
+  final VoidCallback onReviews;
 
   @override
   Widget build(BuildContext context) {
@@ -205,104 +255,140 @@ class _PublicHeroCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: PublicBusinessProfilePage._cardColor,
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(
-          color: profile.premiumIsActive
-              ? PublicBusinessProfilePage._goldColor
-              : PublicBusinessProfilePage._borderColor,
-        ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: PublicBusinessProfilePage._goldColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (bannerUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(25),
-              ),
-              child: AspectRatio(
-                aspectRatio: 16 / 7,
-                child: Image.network(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(27),
+        child: SizedBox(
+          height: 265,
+          width: double.infinity,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (bannerUrl.isNotEmpty)
+                Image.network(
                   bannerUrl,
                   fit: BoxFit.cover,
+                  alignment: Alignment.center,
+                  filterQuality: FilterQuality.medium,
                   errorBuilder: (context, error, stackTrace) {
                     return const _BannerPlaceholder();
                   },
-                ),
-              ),
-            )
-          else
-            const _BannerPlaceholder(),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _BusinessLogo(profile: profile),
-                const SizedBox(width: 13),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
+                )
+              else
+                const _BannerPlaceholder(),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.02),
+                      PublicBusinessProfilePage._backgroundColor.withValues(
+                        alpha: 0.22,
                       ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 7,
-                        runSpacing: 7,
-                        children: [
-                          _TinyBadge(
-                            icon: isOnlineOnly
-                                ? Icons.language
-                                : Icons.storefront_outlined,
-                            text: isOnlineOnly ? 'Online shop' : 'Physical shop',
-                            highlighted: false,
-                          ),
-                          if (profile.premiumIsActive)
-                            const _TinyBadge(
-                              icon: Icons.workspace_premium,
-                              text: 'Business Pro',
-                              highlighted: true,
-                            ),
-                          if (profile.verified)
-                            const _TinyBadge(
-                              icon: Icons.verified_outlined,
-                              text: 'Verified',
-                              highlighted: true,
-                            ),
-                        ],
+                      PublicBusinessProfilePage._backgroundColor.withValues(
+                        alpha: 0.96,
                       ),
-                      const SizedBox(height: 10),
-                      BusinessRatingSummary(
-                        businessId: profile.id,
-                        starColor: PublicBusinessProfilePage._goldColor,
-                        textColor: Colors.white,
-                        mutedTextColor: PublicBusinessProfilePage._softTextColor,
-                      ),
-                      const SizedBox(height: 8),
-                      _OpenNowBadge(profile: profile),
                     ],
+                    stops: const [0.28, 0.58, 1],
                   ),
                 ),
-              ],
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (profile.verified) ...[
+                      const _TinyBadge(
+                        icon: Icons.verified_outlined,
+                        text: 'Verified',
+                        highlighted: true,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        height: 1.02,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 9,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _HeroRatingChip(
+                          businessId: profile.id,
+                          onTap: onReviews,
+                        ),
+                        _OpenNowBadge(profile: profile),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroRatingChip extends StatelessWidget {
+  const _HeroRatingChip({
+    required this.businessId,
+    required this.onTap,
+  });
+
+  final String businessId;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: PublicBusinessProfilePage._backgroundColor.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: PublicBusinessProfilePage._goldColor.withValues(
+                alpha: 0.55,
+              ),
             ),
           ),
-        ],
+          child: BusinessRatingSummary(
+            businessId: businessId,
+            starColor: PublicBusinessProfilePage._goldColor,
+            textColor: Colors.white,
+            mutedTextColor: PublicBusinessProfilePage._softTextColor,
+            onTap: onTap,
+          ),
+        ),
       ),
     );
   }
@@ -357,65 +443,350 @@ class _OpenNowBadge extends StatelessWidget {
   }
 }
 
-class _OpeningHoursCard extends StatelessWidget {
-  const _OpeningHoursCard({required this.profile});
+
+class _PublicBusinessSummaryButtons extends StatelessWidget {
+  const _PublicBusinessSummaryButtons({
+    required this.profile,
+    required this.onOffers,
+    required this.onEvents,
+    required this.onProducts,
+  });
+
+  final BusinessProfile profile;
+  final VoidCallback onOffers;
+  final VoidCallback onEvents;
+  final VoidCallback onProducts;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _PublicSummaryButton<BusinessOffer>(
+          stream: BusinessProfileService().watchBusinessOffers(
+            profile.id,
+            visibleOnly: true,
+          ),
+          icon: Icons.local_offer_outlined,
+          title: 'Offers & deals',
+          emptyText: 'No current offers',
+          countText: (itemCount) => itemCount == 1 ? '1 current offer' : '$itemCount current offers',
+          buttonText: 'View offers',
+          onPressed: onOffers,
+        ),
+        const SizedBox(height: 10),
+        _PublicSummaryButton<BusinessEvent>(
+          stream: BusinessProfileService().watchBusinessEvents(
+            profile.id,
+            visibleOnly: true,
+          ),
+          icon: Icons.event_outlined,
+          title: 'Shop events',
+          emptyText: 'No upcoming events',
+          countText: (itemCount) => itemCount == 1 ? '1 upcoming event' : '$itemCount upcoming events',
+          buttonText: 'View events',
+          onPressed: onEvents,
+        ),
+        const SizedBox(height: 10),
+        _PublicSummaryButton<BusinessProduct>(
+          stream: BusinessProfileService().watchBusinessProducts(
+            profile.id,
+            visibleOnly: true,
+          ),
+          icon: Icons.inventory_2_outlined,
+          title: 'Product showcase',
+          emptyText: 'No showcased products',
+          countText: (itemCount) => itemCount == 1 ? '1 showcased product' : '$itemCount showcased products',
+          buttonText: 'View products',
+          onPressed: onProducts,
+        ),
+      ],
+    );
+  }
+}
+
+class _PublicSummaryButton<T> extends StatelessWidget {
+  const _PublicSummaryButton({
+    required this.stream,
+    required this.icon,
+    required this.title,
+    required this.emptyText,
+    required this.countText,
+    required this.buttonText,
+    required this.onPressed,
+  });
+
+  final Stream<List<T>> stream;
+  final IconData icon;
+  final String title;
+  final String emptyText;
+  final String Function(int count) countText;
+  final String buttonText;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<T>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final itemCount = snapshot.data?.length ?? 0;
+        final loading = snapshot.connectionState == ConnectionState.waiting;
+
+        if (!loading && itemCount == 0) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: PublicBusinessProfilePage._cardColor,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: PublicBusinessProfilePage._borderColor),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: PublicBusinessProfilePage._fieldColor,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: PublicBusinessProfilePage._borderColor,
+                  ),
+                ),
+                child: loading
+                    ? const Padding(
+                        padding: EdgeInsets.all(11),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: PublicBusinessProfilePage._goldColor,
+                        ),
+                      )
+                    : Icon(
+                        icon,
+                        color: PublicBusinessProfilePage._goldColor,
+                      ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      loading ? 'Checking...' : countText(itemCount),
+                      style: const TextStyle(
+                        color: PublicBusinessProfilePage._softTextColor,
+                        fontSize: 13,
+                        height: 1.3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: PublicBusinessProfilePage._goldColor,
+                  foregroundColor: PublicBusinessProfilePage._backgroundColor,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: loading ? null : onPressed,
+                child: Text(
+                  buttonText,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OpeningHoursDropdownCard extends StatefulWidget {
+  const _OpeningHoursDropdownCard({required this.profile});
 
   final BusinessProfile profile;
 
   @override
+  State<_OpeningHoursDropdownCard> createState() =>
+      _OpeningHoursDropdownCardState();
+}
+
+class _OpeningHoursDropdownCardState extends State<_OpeningHoursDropdownCard> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
+    final profile = widget.profile;
+    final todayHours = profile.todayOpeningHours;
+    final todayText = todayHours.hasTimes || todayHours.closed
+        ? todayHours.displayText
+        : 'Hours not set';
+
     return Container(
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: PublicBusinessProfilePage._cardColor,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: PublicBusinessProfilePage._borderColor),
       ),
       child: Column(
-        children: BusinessOpeningHours.dayKeys.map((dayKey) {
-          final hours = profile.openingHoursForDay(dayKey);
-          final isToday = hours.dayKey ==
-              BusinessOpeningHours.dayKeys[DateTime.now().weekday - 1];
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-            decoration: BoxDecoration(
-              color: isToday
-                  ? PublicBusinessProfilePage._goldColor.withValues(alpha: 0.12)
-                  : PublicBusinessProfilePage._fieldColor,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: isToday
-                    ? PublicBusinessProfilePage._goldColor
-                    : PublicBusinessProfilePage._borderColor,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(22),
+              onTap: () {
+                setState(() => _expanded = !_expanded);
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: PublicBusinessProfilePage._fieldColor,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(
+                          color: PublicBusinessProfilePage._borderColor,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.schedule_outlined,
+                        color: PublicBusinessProfilePage._goldColor,
+                      ),
+                    ),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Opening hours',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Today: $todayText',
+                            style: const TextStyle(
+                              color: PublicBusinessProfilePage._softTextColor,
+                              fontSize: 12,
+                              height: 1.3,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _OpenNowBadge(profile: profile),
+                    const SizedBox(width: 6),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      child: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: PublicBusinessProfilePage._goldColor,
+                        size: 30,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    isToday ? '${hours.dayLabel}  •  Today' : hours.dayLabel,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                children: BusinessOpeningHours.dayKeys.map((dayKey) {
+                  final hours = profile.openingHoursForDay(dayKey);
+                  final isToday = hours.dayKey ==
+                      BusinessOpeningHours.dayKeys[DateTime.now().weekday - 1];
+
+                  return Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 9,
                     ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  hours.displayText,
-                  style: TextStyle(
-                    color: hours.closed
-                        ? PublicBusinessProfilePage._softTextColor
-                        : PublicBusinessProfilePage._goldColor,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
+                    decoration: BoxDecoration(
+                      color: isToday
+                          ? PublicBusinessProfilePage._goldColor.withValues(
+                              alpha: 0.12,
+                            )
+                          : PublicBusinessProfilePage._fieldColor,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isToday
+                            ? PublicBusinessProfilePage._goldColor
+                            : PublicBusinessProfilePage._borderColor,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            isToday
+                                ? '${hours.dayLabel}  •  Today'
+                                : hours.dayLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          hours.displayText,
+                          style: TextStyle(
+                            color: hours.closed
+                                ? PublicBusinessProfilePage._softTextColor
+                                : PublicBusinessProfilePage._goldColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
             ),
-          );
-        }).toList(),
+            crossFadeState: _expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 180),
+            sizeCurve: Curves.easeOut,
+          ),
+        ],
       ),
     );
   }
@@ -426,18 +797,74 @@ class _QuickActionsCard extends StatelessWidget {
     required this.profile,
     required this.website,
     required this.phone,
+    required this.onMap,
     required this.onWebsite,
-    required this.onReviews,
   });
 
   final BusinessProfile profile;
   final String website;
   final String phone;
+  final VoidCallback? onMap;
   final VoidCallback? onWebsite;
-  final VoidCallback onReviews;
+
+  Future<void> _openPhoneDialler(BuildContext context) async {
+    final cleanPhone = phone.trim();
+
+    if (cleanPhone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No phone number is available.')),
+      );
+      return;
+    }
+
+    final uri = Uri(
+      scheme: 'tel',
+      path: cleanPhone,
+    );
+
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the phone app.')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final buttons = <Widget>[
+      BusinessEnquiryButton(
+        profile: profile,
+        compact: true,
+      ),
+      if (onMap != null)
+        _ActionButton(
+          icon: Icons.map_outlined,
+          label: 'Map',
+          onPressed: onMap,
+          filled: false,
+        ),
+      if (website.isNotEmpty)
+        _ActionButton(
+          icon: Icons.open_in_new,
+          label: 'Website',
+          onPressed: onWebsite,
+          filled: true,
+        ),
+      if (phone.isNotEmpty)
+        _ActionButton(
+          icon: Icons.phone_outlined,
+          label: 'Call',
+          onPressed: () => _openPhoneDialler(context),
+          filled: false,
+        ),
+    ];
+
+    if (buttons.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
@@ -445,35 +872,24 @@ class _QuickActionsCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: PublicBusinessProfilePage._borderColor),
       ),
-      child: Wrap(
-        spacing: 9,
-        runSpacing: 9,
-        children: [
-          _ActionButton(
-            icon: Icons.star_rate_rounded,
-            label: 'Reviews',
-            onPressed: onReviews,
-            filled: false,
-          ),
-          if (website.isNotEmpty)
-            _ActionButton(
-              icon: Icons.open_in_new,
-              label: 'Website',
-              onPressed: onWebsite,
-              filled: true,
-            ),
-          if (phone.isNotEmpty)
-            _ActionButton(
-              icon: Icons.phone_outlined,
-              label: 'Contact',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Contact: $phone')),
-                );
-              },
-              filled: false,
-            ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const spacing = 10.0;
+          final buttonWidth = (constraints.maxWidth - spacing) / 2;
+
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: [
+              for (final button in buttons)
+                SizedBox(
+                  width: buttonWidth,
+                  height: 58,
+                  child: button,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -494,211 +910,55 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (filled) {
-      return FilledButton.icon(
-        style: FilledButton.styleFrom(
-          backgroundColor: PublicBusinessProfilePage._goldColor,
-          foregroundColor: PublicBusinessProfilePage._backgroundColor,
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        icon: Icon(icon),
-        label: Text(
-          label,
-          style: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        onPressed: onPressed,
-      );
-    }
+    final backgroundColor = filled
+        ? PublicBusinessProfilePage._goldColor
+        : Colors.transparent;
+    final foregroundColor = filled
+        ? PublicBusinessProfilePage._backgroundColor
+        : PublicBusinessProfilePage._goldColor;
+    final borderColor = filled
+        ? PublicBusinessProfilePage._goldColor
+        : PublicBusinessProfilePage._goldColor;
 
-    return OutlinedButton.icon(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: PublicBusinessProfilePage._goldColor,
-        side: const BorderSide(color: PublicBusinessProfilePage._goldColor),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
-      ),
-      icon: Icon(icon),
-      label: Text(
-        label,
-        style: const TextStyle(fontWeight: FontWeight.w900),
-      ),
-      onPressed: onPressed,
-    );
-  }
-}
-
-class _ReviewsCard extends StatelessWidget {
-  const _ReviewsCard({
-    required this.profile,
-    required this.onReviews,
-  });
-
-  final BusinessProfile profile;
-  final VoidCallback onReviews;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: PublicBusinessProfilePage._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: PublicBusinessProfilePage._borderColor),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: BusinessRatingSummary(
-              businessId: profile.id,
-              starColor: PublicBusinessProfilePage._goldColor,
-              textColor: Colors.white,
-              mutedTextColor: PublicBusinessProfilePage._softTextColor,
-              onTap: onReviews,
+    return SizedBox.expand(
+      child: Material(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(15),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(15),
+          onTap: onPressed,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: borderColor),
             ),
-          ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: PublicBusinessProfilePage._goldColor,
-              side: const BorderSide(color: PublicBusinessProfilePage._goldColor),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            icon: const Icon(Icons.rate_review_outlined),
-            label: const Text(
-              'View',
-              style: TextStyle(fontWeight: FontWeight.w900),
-            ),
-            onPressed: onReviews,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PublicEventsPreview extends StatelessWidget {
-  const _PublicEventsPreview({
-    required this.profile,
-    required this.formatDate,
-  });
-
-  final BusinessProfile profile;
-  final String Function(DateTime? value) formatDate;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<BusinessEvent>>(
-      stream: BusinessProfileService().watchBusinessEvents(
-        profile.id,
-        visibleOnly: true,
-      ),
-      builder: (context, snapshot) {
-        final events = snapshot.data ?? const <BusinessEvent>[];
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const _LoadingCard();
-        }
-
-        if (events.isEmpty) {
-          return const _EmptyPreviewCard(
-            icon: Icons.event_outlined,
-            text: 'No upcoming public events yet.',
-          );
-        }
-
-        final visibleEvents = events.take(3).toList();
-
-        return Column(
-          children: visibleEvents.map((event) {
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                color: PublicBusinessProfilePage._cardColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: PublicBusinessProfilePage._borderColor,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  color: foregroundColor,
+                  size: 18,
                 ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.event_available_outlined,
-                    color: PublicBusinessProfilePage._goldColor,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Wrap(
-                          spacing: 7,
-                          runSpacing: 7,
-                          children: [
-                            _TinyBadge(
-                              icon: Icons.event_outlined,
-                              text: event.eventTypeLabel,
-                              highlighted: true,
-                            ),
-                            if (event.onlineEvent)
-                              const _TinyBadge(
-                                icon: Icons.language,
-                                text: 'Online',
-                                highlighted: false,
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          event.title.trim().isEmpty
-                              ? 'Shop event'
-                              : event.title.trim(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        if (formatDate(event.startDate).isNotEmpty) ...[
-                          const SizedBox(height: 5),
-                          Text(
-                            formatDate(event.startDate),
-                            style: const TextStyle(
-                              color: PublicBusinessProfilePage._softTextColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                        if (event.description.trim().isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            event.description.trim(),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: PublicBusinessProfilePage._softTextColor,
-                              height: 1.35,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ],
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foregroundColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
-                ],
-              ),
-            );
-          }).toList(),
-        );
-      },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -757,33 +1017,6 @@ class _ContactCard extends StatelessWidget {
   }
 }
 
-class _DescriptionCard extends StatelessWidget {
-  const _DescriptionCard({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: PublicBusinessProfilePage._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: PublicBusinessProfilePage._borderColor),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: PublicBusinessProfilePage._softTextColor,
-          height: 1.45,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
 class _InfoLine extends StatelessWidget {
   const _InfoLine({
     required this.icon,
@@ -818,60 +1051,13 @@ class _InfoLine extends StatelessWidget {
   }
 }
 
-class _BusinessLogo extends StatelessWidget {
-  const _BusinessLogo({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final logoUrl = profile.logoUrl.trim();
-
-    return Container(
-      width: 64,
-      height: 64,
-      decoration: BoxDecoration(
-        color: PublicBusinessProfilePage._fieldColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: PublicBusinessProfilePage._borderColor),
-      ),
-      child: logoUrl.isEmpty
-          ? const Icon(
-              Icons.storefront_outlined,
-              color: PublicBusinessProfilePage._goldColor,
-              size: 34,
-            )
-          : ClipRRect(
-              borderRadius: BorderRadius.circular(21),
-              child: Image.network(
-                logoUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Icon(
-                    Icons.storefront_outlined,
-                    color: PublicBusinessProfilePage._goldColor,
-                    size: 34,
-                  );
-                },
-              ),
-            ),
-    );
-  }
-}
-
 class _BannerPlaceholder extends StatelessWidget {
   const _BannerPlaceholder();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 130,
-      decoration: const BoxDecoration(
-        color: PublicBusinessProfilePage._fieldColor,
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(25),
-        ),
-      ),
+      color: PublicBusinessProfilePage._fieldColor,
       child: const Center(
         child: Icon(
           Icons.storefront_outlined,
@@ -962,27 +1148,6 @@ class _SectionHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _LoadingCard extends StatelessWidget {
-  const _LoadingCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: PublicBusinessProfilePage._cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: PublicBusinessProfilePage._borderColor),
-      ),
-      child: const Center(
-        child: CircularProgressIndicator(
-          color: PublicBusinessProfilePage._goldColor,
-        ),
-      ),
     );
   }
 }

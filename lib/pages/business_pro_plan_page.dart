@@ -67,42 +67,23 @@ class BusinessProPlanPage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             const _SectionHeader(
-              icon: Icons.payments_outlined,
-              title: 'Pricing placeholder',
-              subtitle: 'Prices can be finalised before payments go live.',
-            ),
-            const SizedBox(height: 10),
-            _PricingCards(
-              premiumActive: premiumActive,
-              onRequest: () => _openRequestPage(context),
-            ),
-            const SizedBox(height: 18),
-            const _SectionHeader(
               icon: Icons.workspace_premium_outlined,
-              title: 'What Business Pro includes',
-              subtitle: 'Everything included in the Pro package for shops.',
+              title: 'Included with Business Pro',
+              subtitle: 'The main tools unlocked for business profiles.',
             ),
             const SizedBox(height: 10),
             const _PlanFeatureGrid(),
             const SizedBox(height: 18),
             const _SectionHeader(
               icon: Icons.verified_user_outlined,
-              title: 'How approval works',
-              subtitle: 'For now, Pro is controlled manually by the app admin.',
+              title: 'Current setup',
+              subtitle: 'Business Pro is currently managed by admin approval.',
             ),
             const SizedBox(height: 10),
-            _ApprovalFlowCard(
+            _CurrentSetupCard(
               premiumActive: premiumActive,
               onRequest: () => _openRequestPage(context),
             ),
-            const SizedBox(height: 18),
-            const _SectionHeader(
-              icon: Icons.info_outline,
-              title: 'Important notes',
-              subtitle: 'This can be updated later when payments are added.',
-            ),
-            const SizedBox(height: 10),
-            const _NotesCard(),
           ],
         ),
       ),
@@ -127,20 +108,20 @@ class _HeroPlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusColor = premiumActive
+        ? BusinessProPlanPage._successColor
+        : BusinessProPlanPage._goldColor;
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: BusinessProPlanPage._cardColor,
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(
-          color: premiumActive
-              ? BusinessProPlanPage._successColor
-              : BusinessProPlanPage._goldColor,
-        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: statusColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.20),
-            blurRadius: 18,
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 16,
             offset: const Offset(0, 8),
           ),
         ],
@@ -150,85 +131,50 @@ class _HeroPlanCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 62,
-                height: 62,
-                decoration: BoxDecoration(
-                  color: BusinessProPlanPage._fieldColor,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: BusinessProPlanPage._borderColor),
-                ),
-                child: Icon(
-                  premiumActive
-                      ? Icons.workspace_premium
-                      : Icons.workspace_premium_outlined,
-                  color: BusinessProPlanPage._goldColor,
-                  size: 34,
-                ),
+              Icon(
+                premiumActive
+                    ? Icons.workspace_premium
+                    : Icons.workspace_premium_outlined,
+                color: BusinessProPlanPage._goldColor,
+                size: 30,
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      businessName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 23,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      statusLabel,
-                      style: const TextStyle(
-                        color: BusinessProPlanPage._softTextColor,
-                        height: 1.35,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  businessName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    height: 1.08,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(13),
-            decoration: BoxDecoration(
-              color: BusinessProPlanPage._fieldColor,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: BusinessProPlanPage._borderColor),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  premiumActive
-                      ? Icons.check_circle_outline
-                      : Icons.lock_open_outlined,
-                  color: premiumActive
-                      ? BusinessProPlanPage._successColor
-                      : BusinessProPlanPage._goldColor,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    premiumActive
-                        ? 'Business Pro is active. $expiryText.'
-                        : 'Business Pro is not active yet. Send a request to the app admin.',
-                    style: const TextStyle(
-                      color: BusinessProPlanPage._softTextColor,
-                      height: 1.35,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _StatusPill(
+                icon: premiumActive
+                    ? Icons.check_circle_outline
+                    : Icons.lock_open_outlined,
+                text: statusLabel,
+                color: statusColor,
+                filled: premiumActive,
+              ),
+              _StatusPill(
+                icon: Icons.schedule_outlined,
+                text: expiryText,
+                color: BusinessProPlanPage._goldColor,
+                filled: false,
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -237,15 +183,13 @@ class _HeroPlanCard extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: BusinessProPlanPage._goldColor,
                 foregroundColor: BusinessProPlanPage._backgroundColor,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
               icon: Icon(
-                premiumActive
-                    ? Icons.update_outlined
-                    : Icons.send_outlined,
+                premiumActive ? Icons.update_outlined : Icons.send_outlined,
               ),
               label: Text(
                 premiumActive
@@ -262,8 +206,51 @@ class _HeroPlanCard extends StatelessWidget {
   }
 }
 
-class _PricingCards extends StatelessWidget {
-  const _PricingCards({
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({
+    required this.icon,
+    required this.text,
+    required this.color,
+    required this.filled,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color color;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: filled
+            ? color.withValues(alpha: 0.16)
+            : BusinessProPlanPage._fieldColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: filled ? color : BusinessProPlanPage._borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CurrentSetupCard extends StatelessWidget {
+  const _CurrentSetupCard({
     required this.premiumActive,
     required this.onRequest,
   });
@@ -273,83 +260,27 @@ class _PricingCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _PriceCard(
-          title: 'Monthly Pro',
-          price: 'Price placeholder',
-          subtitle: 'Flexible monthly Business Pro access.',
-          badge: 'Monthly',
-          highlighted: false,
-          onRequest: onRequest,
-        ),
-        const SizedBox(height: 10),
-        _PriceCard(
-          title: 'Yearly Pro',
-          price: 'Price placeholder',
-          subtitle: 'Best for shops that want long-term visibility.',
-          badge: 'Best value',
-          highlighted: true,
-          onRequest: onRequest,
-        ),
-        const SizedBox(height: 10),
-        _PriceCard(
-          title: 'Manual admin approval',
-          price: premiumActive ? 'Currently active' : 'Request access',
-          subtitle:
-              'Payments are not live yet, so admin reviews and activates Pro manually.',
-          badge: 'Current setup',
-          highlighted: premiumActive,
-          onRequest: onRequest,
-        ),
-      ],
-    );
-  }
-}
-
-class _PriceCard extends StatelessWidget {
-  const _PriceCard({
-    required this.title,
-    required this.price,
-    required this.subtitle,
-    required this.badge,
-    required this.highlighted,
-    required this.onRequest,
-  });
-
-  final String title;
-  final String price;
-  final String subtitle;
-  final String badge;
-  final bool highlighted;
-  final VoidCallback onRequest;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: BusinessProPlanPage._cardColor,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: highlighted
-              ? BusinessProPlanPage._goldColor
-              : BusinessProPlanPage._borderColor,
-        ),
+        border: Border.all(color: BusinessProPlanPage._borderColor),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 46,
-            height: 46,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: BusinessProPlanPage._fieldColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: BusinessProPlanPage._borderColor),
             ),
-            child: const Icon(
-              Icons.payments_outlined,
+            child: Icon(
+              premiumActive
+                  ? Icons.admin_panel_settings_outlined
+                  : Icons.contact_support_outlined,
               color: BusinessProPlanPage._goldColor,
             ),
           ),
@@ -358,38 +289,26 @@ class _PriceCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    _TinyBadge(text: badge),
-                  ],
-                ),
-                const SizedBox(height: 6),
                 Text(
-                  price,
+                  premiumActive
+                      ? 'Manual admin approval active'
+                      : 'Request admin approval',
                   style: const TextStyle(
-                    color: BusinessProPlanPage._goldColor,
-                    fontSize: 18,
+                    color: Colors.white,
+                    fontSize: 15,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 4),
                 Text(
-                  subtitle,
+                  premiumActive
+                      ? 'Payments are not live yet, so Pro is managed by the app admin.'
+                      : 'Send a request and the app admin can review your business profile.',
                   style: const TextStyle(
                     color: BusinessProPlanPage._softTextColor,
-                    height: 1.35,
-                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -397,7 +316,7 @@ class _PriceCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           IconButton(
-            tooltip: 'Request this plan',
+            tooltip: premiumActive ? 'Request renewal' : 'Request Pro',
             color: BusinessProPlanPage._goldColor,
             icon: const Icon(Icons.chevron_right),
             onPressed: onRequest,
@@ -413,60 +332,46 @@ class _PlanFeatureGrid extends StatelessWidget {
 
   static const List<_PlanFeature> _features = <_PlanFeature>[
     _PlanFeature(
-      icon: Icons.view_carousel_outlined,
-      title: 'Featured moving banner',
-      description: 'Use a business image to appear in the moving Pro banner.',
-    ),
-    _PlanFeature(
-      icon: Icons.map_outlined,
-      title: 'Featured map shop',
-      description: 'Extra visibility for physical shops on the TCG Shop Map.',
-    ),
-    _PlanFeature(
-      icon: Icons.language,
-      title: 'Featured online shop',
-      description: 'Online-only shops can stand out in online shop areas.',
-    ),
-    _PlanFeature(
-      icon: Icons.campaign_outlined,
-      title: 'Featured community posts',
-      description: 'Eligible business posts can get extra visibility.',
-    ),
-    _PlanFeature(
       icon: Icons.local_offer_outlined,
-      title: 'Offers & deals',
-      description: 'Post offers, discounts, codes and announcements.',
+      title: 'Offers',
+      description: 'Post deals and discount codes.',
     ),
     _PlanFeature(
       icon: Icons.event_outlined,
-      title: 'Shop events',
-      description: 'Promote trade nights, tournaments and releases.',
+      title: 'Events',
+      description: 'Promote trade nights and tournaments.',
     ),
     _PlanFeature(
       icon: Icons.inventory_2_outlined,
-      title: 'Product showcase',
-      description: 'Show featured products, prices and product links.',
+      title: 'Products',
+      description: 'Showcase featured stock.',
     ),
     _PlanFeature(
       icon: Icons.mail_outline,
-      title: 'Customer enquiries',
-      description: 'Receive questions about stock, events and products.',
+      title: 'Enquiries',
+      description: 'Receive customer questions.',
     ),
     _PlanFeature(
       icon: Icons.star_rate_rounded,
-      title: 'Reviews and replies',
-      description: 'Customers can rate shops and businesses can reply.',
+      title: 'Reviews',
+      description: 'Collect reviews and reply.',
     ),
     _PlanFeature(
       icon: Icons.insights_outlined,
-      title: 'Business analytics',
-      description: 'Track profile views and useful customer actions.',
+      title: 'Analytics',
+      description: 'Track useful customer actions.',
     ),
   ];
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      mainAxisSpacing: 9,
+      crossAxisSpacing: 9,
+      childAspectRatio: 1.22,
       children: _features
           .map(
             (feature) => _FeatureCard(feature: feature),
@@ -496,291 +401,44 @@ class _FeatureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: BusinessProPlanPage._cardColor,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: BusinessProPlanPage._borderColor),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             feature.icon,
             color: BusinessProPlanPage._goldColor,
+            size: 25,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  feature.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  feature.description,
-                  style: const TextStyle(
-                    color: BusinessProPlanPage._softTextColor,
-                    height: 1.35,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+          const Spacer(),
+          Text(
+            feature.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            feature.description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: BusinessProPlanPage._softTextColor,
+              height: 1.2,
+              fontSize: 10.8,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ApprovalFlowCard extends StatelessWidget {
-  const _ApprovalFlowCard({
-    required this.premiumActive,
-    required this.onRequest,
-  });
-
-  final bool premiumActive;
-  final VoidCallback onRequest;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: BusinessProPlanPage._cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: BusinessProPlanPage._borderColor),
-      ),
-      child: Column(
-        children: [
-          _ApprovalStep(
-            number: '1',
-            title: premiumActive ? 'Request renewal' : 'Request Business Pro',
-            description:
-                'The business sends a Pro request from inside PocketChase.',
-            active: true,
-          ),
-          const _ApprovalStep(
-            number: '2',
-            title: 'Admin reviews request',
-            description:
-                'Admin checks the business profile and decides whether to approve.',
-            active: true,
-          ),
-          const _ApprovalStep(
-            number: '3',
-            title: 'Admin activates Pro',
-            description:
-                'Admin sets Pro active, start date, expiry date and any notes.',
-            active: true,
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: BusinessProPlanPage._goldColor,
-                side: const BorderSide(color: BusinessProPlanPage._goldColor),
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              icon: const Icon(Icons.contact_support_outlined),
-              label: Text(
-                premiumActive
-                    ? 'Request renewal'
-                    : 'Contact admin about Pro',
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-              onPressed: onRequest,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ApprovalStep extends StatelessWidget {
-  const _ApprovalStep({
-    required this.number,
-    required this.title,
-    required this.description,
-    required this.active,
-  });
-
-  final String number;
-  final String title;
-  final String description;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 11),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: active
-                  ? BusinessProPlanPage._goldColor
-                  : BusinessProPlanPage._fieldColor,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              number,
-              style: TextStyle(
-                color: active
-                    ? BusinessProPlanPage._backgroundColor
-                    : BusinessProPlanPage._softTextColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  description,
-                  style: const TextStyle(
-                    color: BusinessProPlanPage._softTextColor,
-                    height: 1.35,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NotesCard extends StatelessWidget {
-  const _NotesCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: BusinessProPlanPage._fieldColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: BusinessProPlanPage._borderColor),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _NoteLine(
-            icon: Icons.admin_panel_settings_outlined,
-            text:
-                'For now, Pro access is activated manually by admin approval.',
-          ),
-          _NoteLine(
-            icon: Icons.payments_outlined,
-            text:
-                'Monthly and yearly prices are placeholders until you choose final pricing.',
-          ),
-          _NoteLine(
-            icon: Icons.lock_outline,
-            text:
-                'Businesses cannot give themselves Pro access because premium fields are protected.',
-          ),
-          _NoteLine(
-            icon: Icons.update_outlined,
-            text:
-                'Renewals can be requested from this page or the Business Pro request page.',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NoteLine extends StatelessWidget {
-  const _NoteLine({
-    required this.icon,
-    required this.text,
-  });
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 9),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            color: BusinessProPlanPage._goldColor,
-            size: 19,
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: BusinessProPlanPage._softTextColor,
-                height: 1.35,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TinyBadge extends StatelessWidget {
-  const _TinyBadge({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: BusinessProPlanPage._goldColor,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: BusinessProPlanPage._backgroundColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-        ),
       ),
     );
   }

@@ -97,7 +97,7 @@ Future<List<TcgCard>> fetchProfileCardsFast(Iterable<String> cardIds) async {
 
   if (ids.isEmpty) return const <TcgCard>[];
 
-  const chunkSize = 12;
+  const chunkSize = 8;
   final fetchedCards = <TcgCard>[];
 
   for (var start = 0; start < ids.length; start += chunkSize) {
@@ -107,9 +107,27 @@ Future<List<TcgCard>> fetchProfileCardsFast(Iterable<String> cardIds) async {
     final results = await Future.wait<TcgCard?>(
       chunk.map((cardId) async {
         try {
-          return await PokemonTcgService.fetchCardById(cardId).timeout(
-            const Duration(seconds: 5),
+          final cachedCard = await PokemonTcgService.fetchCardById(cardId).timeout(
+            const Duration(seconds: 8),
           );
+          if ((cachedCard.marketPrice ?? 0) > 0) {
+            return cachedCard;
+          }
+
+          final freshCard = await PokemonTcgService.fetchCardById(
+            cardId,
+            forceRefresh: true,
+          ).timeout(
+            const Duration(seconds: 12),
+          );
+          if ((freshCard.marketPrice ?? 0) > 0) {
+            return freshCard;
+          }
+
+          // Do not call JustTCG while loading profile stats. A profile can contain
+          // lots of cards, and JustTCG is rate limited. Manual refresh on the
+          // card details screen still uses JustTCG and the Cloud Function cache.
+          return freshCard;
         } catch (_) {
           return null;
         }
@@ -133,6 +151,14 @@ ImageProvider? profileImageProviderFromRef(String? imageRef) {
   final bytes = CommunityImageCodec.decode(trimmed);
   if (bytes == null) return null;
   return MemoryImage(bytes);
+}
+
+double profileRawUnitPriceInSelectedCurrency(TcgCard card) {
+  return CurrencySettings.convertAmountSync(
+        card.marketPrice,
+        fromCurrency: card.marketPriceCurrency,
+      ) ??
+      0;
 }
 
 Future<ProfileStats> loadProfileStatsForOwner(
@@ -184,11 +210,7 @@ Future<ProfileStats> loadProfileStatsForOwner(
     final copies = cardCopies[card.id] ?? 0;
     if (copies <= 0) continue;
 
-    final convertedUnitPrice = CurrencySettings.convertAmountSync(
-          card.marketPrice,
-          fromCurrency: card.rawPriceCurrency,
-        ) ??
-        0;
+    final convertedUnitPrice = profileRawUnitPriceInSelectedCurrency(card);
     final cardTotalValue = convertedUnitPrice * copies;
     totalEstimatedPrice += cardTotalValue;
 
@@ -203,7 +225,7 @@ Future<ProfileStats> loadProfileStatsForOwner(
       setCopies.update(card.setName, (existing) => existing + copies, ifAbsent: () => copies);
     }
 
-    if (convertedUnitPrice > mostExpensivePrice) {
+    if (convertedUnitPrice > 0 && convertedUnitPrice > mostExpensivePrice) {
       mostExpensivePrice = convertedUnitPrice;
       mostExpensiveCard = card;
       mostExpensiveCardCopies = copies;
@@ -213,16 +235,8 @@ Future<ProfileStats> loadProfileStatsForOwner(
   topValueCards.sort((a, b) {
     final aCopies = cardCopies[a.id] ?? 0;
     final bCopies = cardCopies[b.id] ?? 0;
-    final aUnitPrice = CurrencySettings.convertAmountSync(
-          a.marketPrice,
-          fromCurrency: a.rawPriceCurrency,
-        ) ??
-        0;
-    final bUnitPrice = CurrencySettings.convertAmountSync(
-          b.marketPrice,
-          fromCurrency: b.rawPriceCurrency,
-        ) ??
-        0;
+    final aUnitPrice = profileRawUnitPriceInSelectedCurrency(a);
+    final bUnitPrice = profileRawUnitPriceInSelectedCurrency(b);
     final valueCompare = (bUnitPrice * bCopies).compareTo(aUnitPrice * aCopies);
     if (valueCompare != 0) return valueCompare;
     return bUnitPrice.compareTo(aUnitPrice);

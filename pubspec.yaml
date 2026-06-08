@@ -2,7 +2,7 @@ name: pokemon_hub_flutter
 description: PocketChase app
 publish_to: 'none'
 
-version: 1.0.0+12
+version: 1.0.0+14
 
 environment:
   sdk: '>=3.5.0 <4.0.0'

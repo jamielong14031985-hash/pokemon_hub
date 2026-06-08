@@ -11,6 +11,7 @@ class BusinessProduct {
     required this.category,
     required this.price,
     required this.imageUrl,
+    required this.imagePath,
     required this.buyUrl,
     required this.active,
     required this.featured,
@@ -27,6 +28,7 @@ class BusinessProduct {
   final String category;
   final String price;
   final String imageUrl;
+  final String imagePath;
   final String buyUrl;
   final bool active;
   final bool featured;
@@ -58,6 +60,7 @@ class BusinessProduct {
       category: cleanString(data['category']),
       price: cleanString(data['price']),
       imageUrl: cleanString(data['imageUrl']),
+      imagePath: cleanString(data['imagePath']),
       buyUrl: cleanString(data['buyUrl']),
       active: cleanBool(data['active']),
       featured: cleanBool(data['featured']),

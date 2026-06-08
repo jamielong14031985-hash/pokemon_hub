@@ -1,13 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
-import '../widgets/business_enquiry_button.dart';
-import '../widgets/business_offers_preview.dart';
-import '../widgets/business_products_preview.dart';
 import '../widgets/business_rating_summary.dart';
 import 'business_reviews_page.dart';
 import 'public_business_profile_page.dart';
@@ -129,29 +124,48 @@ class _OnlineShopsPageState extends State<OnlineShopsPage> {
             return const _EmptyState();
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-            itemCount: profiles.length + 2,
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return _buildSearchBox();
-              }
-
-              if (index == 1) {
-                return _buildIntroCard(
-                  totalCount: allProfiles.length,
-                  filteredCount: profiles.length,
-                  query: query,
-                );
-              }
-
-              if (profiles.isEmpty) {
-                return const _NoSearchResultsState();
-              }
-
-              final profile = profiles[index - 2];
-              return _OnlineShopCard(profile: profile);
-            },
+          return CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate(
+                    [
+                      _buildSearchBox(),
+                      _buildIntroCard(
+                        totalCount: allProfiles.length,
+                        filteredCount: profiles.length,
+                        query: query,
+                      ),
+                      if (profiles.isEmpty) const _NoSearchResultsState(),
+                    ],
+                  ),
+                ),
+              ),
+              if (profiles.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 10,
+                      childAspectRatio: 0.58,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _OnlineShopCard(
+                        profile: profiles[index],
+                      ),
+                      childCount: profiles.length,
+                    ),
+                  ),
+                )
+              else
+                const SliverToBoxAdapter(
+                  child: SizedBox(height: 120),
+                ),
+            ],
           );
         },
       ),
@@ -218,232 +232,190 @@ class _OnlineShopCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final website = profile.website.trim();
-    final phone = profile.phone.trim();
     final location = profile.displayLocation;
     final title = profile.businessName.trim().isEmpty
         ? 'Online TCG Shop'
         : profile.businessName.trim();
+    final description = profile.description.trim();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _onlineCardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: profile.premiumIsActive ? _onlineGoldColor : _onlineBorderColor,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.17),
-            blurRadius: 15,
-            offset: const Offset(0, 7),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (profile.bannerUrl.trim().isNotEmpty) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: AspectRatio(
-                aspectRatio: 16 / 7,
-                child: Image.network(
-                  profile.bannerUrl.trim(),
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return _BannerFallback(profile: profile);
-                  },
-                ),
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _openPublicProfile(context),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _onlineCardColor,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: profile.premiumIsActive ? _onlineGoldColor : _onlineBorderColor,
             ),
-            const SizedBox(height: 12),
-          ],
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _BusinessAvatar(profile: profile),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: [
-                        const _SmallBadge(
-                          icon: Icons.language,
-                          label: 'Online shop',
-                          highlighted: false,
-                        ),
-                        if (profile.premiumIsActive)
-                          const _SmallBadge(
-                            icon: Icons.workspace_premium,
-                            label: 'Business Pro',
-                            highlighted: true,
-                          ),
-                        if (profile.autoFeaturePosts)
-                          const _SmallBadge(
-                            icon: Icons.campaign_outlined,
-                            label: 'Featured posts',
-                            highlighted: true,
-                          ),
-                        _OnlineOpenStatusBadge(profile: profile),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    BusinessRatingSummary(
-                      businessId: profile.id,
-                      starColor: _onlineGoldColor,
-                      textColor: Colors.white,
-                      mutedTextColor: _onlineSoftTextColor,
-                      onTap: () => _openReviews(context),
-                    ),
-                  ],
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.13),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
-          if (profile.description.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              profile.description.trim(),
-              style: const TextStyle(
-                color: _onlineSoftTextColor,
-                height: 1.35,
-                fontWeight: FontWeight.w600,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  height: 62,
+                  width: double.infinity,
+                  child: _OnlineShopBanner(profile: profile),
+                ),
               ),
-            ),
-          ],
-          if (location.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(Icons.place_outlined, color: _onlineGoldColor, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    location,
-                    style: const TextStyle(
-                      color: _onlineSoftTextColor,
-                      fontWeight: FontWeight.w700,
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _BusinessAvatar(profile: profile),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.5,
+                            height: 1.08,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 5,
+                          runSpacing: 5,
+                          children: [
+                            const _SmallBadge(
+                              icon: Icons.language,
+                              label: 'Online',
+                              highlighted: false,
+                            ),
+                            if (profile.premiumIsActive)
+                              const _SmallBadge(
+                                icon: Icons.workspace_premium,
+                                label: 'Pro',
+                                highlighted: true,
+                              ),
+                            if (profile.hasAnyOpeningHours)
+                              _OnlineOpenStatusBadge(profile: profile),
+                          ],
+                        ),
+                      ],
                     ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 7),
+              BusinessRatingSummary(
+                businessId: profile.id,
+                starColor: _onlineGoldColor,
+                textColor: Colors.white,
+                mutedTextColor: _onlineSoftTextColor,
+                onTap: () => _openReviews(context),
+              ),
+              if (description.isNotEmpty) ...[
+                const SizedBox(height: 7),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _onlineSoftTextColor,
+                    height: 1.25,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
-            ),
-          ],
-          const SizedBox(height: 12),
-          BusinessOffersPreview(
-            profile: profile,
-            maxItems: 2,
-          ),
-          const SizedBox(height: 12),
-          BusinessProductsPreview(
-            profile: profile,
-            maxItems: 3,
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: _onlineGoldColor,
-                foregroundColor: _onlineBackgroundColor,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              icon: const Icon(Icons.storefront_outlined),
-              label: const Text(
-                'View business profile',
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-              onPressed: () => _openPublicProfile(context),
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _onlineGoldColor,
-                side: const BorderSide(color: _onlineGoldColor),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              icon: const Icon(Icons.star_rate_rounded),
-              label: const Text(
-                'View reviews',
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-              onPressed: () => _openReviews(context),
-            ),
-          ),
-          const SizedBox(height: 10),
-          BusinessEnquiryButton(profile: profile),
-          if (website.isNotEmpty || phone.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                if (website.isNotEmpty)
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _onlineGoldColor,
-                        foregroundColor: _onlineBackgroundColor,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
+              if (location.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(Icons.place_outlined, color: _onlineGoldColor, size: 15),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        location,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _onlineSoftTextColor,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                      icon: const Icon(Icons.open_in_new),
-                      label: const Text(
-                        'Website',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      onPressed: () => _openWebsite(context, website),
                     ),
-                  ),
-                if (website.isNotEmpty && phone.isNotEmpty)
-                  const SizedBox(width: 10),
-                if (phone.isNotEmpty)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _onlineGoldColor,
-                        side: const BorderSide(color: _onlineGoldColor),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                      ),
-                      icon: const Icon(Icons.phone_outlined),
-                      label: const Text(
-                        'Contact',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      onPressed: () => _showContact(context, phone),
-                    ),
-                  ),
+                  ],
+                ),
               ],
-            ),
-          ],
-        ],
+              const Spacer(),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 36,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _onlineGoldColor,
+                          foregroundColor: _onlineBackgroundColor,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () => _openPublicProfile(context),
+                        child: const Text(
+                          'Profile',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (website.isNotEmpty) ...[
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: SizedBox(
+                        height: 36,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _onlineGoldColor,
+                            side: const BorderSide(color: _onlineGoldColor),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () => _openWebsite(context, website),
+                          child: const Text(
+                            'Website',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -497,70 +469,28 @@ class _OnlineShopCard extends StatelessWidget {
       );
     }
   }
+}
 
-  void _showContact(BuildContext context, String phone) {
-    unawaited(
-      BusinessProfileService().incrementBusinessAnalyticsMetric(
-        businessId: profile.id,
-        metric: 'phoneClicks',
-      ),
-    );
+class _OnlineShopBanner extends StatelessWidget {
+  const _OnlineShopBanner({required this.profile});
 
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: _onlineCardColor,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      builder: (bottomSheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.phone_outlined,
-                  color: _onlineGoldColor,
-                  size: 36,
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Contact online shop',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SelectableText(
-                  phone,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: _onlineSoftTextColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _onlineGoldColor,
-                      foregroundColor: _onlineBackgroundColor,
-                    ),
-                    onPressed: () => Navigator.of(bottomSheetContext).pop(),
-                    child: const Text(
-                      'Close',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+  final BusinessProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final bannerUrl = profile.bannerUrl.trim();
+    final logoUrl = profile.logoUrl.trim();
+    final imageUrl = bannerUrl.isNotEmpty ? bannerUrl : logoUrl;
+
+    if (imageUrl.isEmpty) {
+      return _BannerFallback(profile: profile);
+    }
+
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) {
+        return _BannerFallback(profile: profile);
       },
     );
   }
@@ -576,25 +506,25 @@ class _BusinessAvatar extends StatelessWidget {
     final logoUrl = profile.logoUrl.trim();
 
     return CircleAvatar(
-      radius: 27,
+      radius: 22,
       backgroundColor: _onlineFieldColor,
       child: logoUrl.isEmpty
           ? const Icon(
               Icons.language,
               color: _onlineGoldColor,
-              size: 28,
+              size: 24,
             )
           : ClipOval(
               child: Image.network(
                 logoUrl,
-                width: 54,
-                height: 54,
+                width: 44,
+                height: 44,
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) {
                   return const Icon(
                     Icons.language,
                     color: _onlineGoldColor,
-                    size: 28,
+                    size: 24,
                   );
                 },
               ),
@@ -612,17 +542,15 @@ class _BannerFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: _onlineFieldColor,
-      child: Center(
-        child: Icon(
-          profile.premiumIsActive ? Icons.workspace_premium : Icons.language,
-          color: _onlineGoldColor,
-          size: 40,
-        ),
+      alignment: Alignment.center,
+      child: Icon(
+        profile.premiumIsActive ? Icons.workspace_premium : Icons.language,
+        color: _onlineGoldColor,
+        size: 36,
       ),
     );
   }
 }
-
 
 class _OnlineOpenStatusBadge extends StatelessWidget {
   const _OnlineOpenStatusBadge({required this.profile});
@@ -643,7 +571,7 @@ class _OnlineOpenStatusBadge extends StatelessWidget {
             : _onlineGoldColor;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
@@ -659,14 +587,14 @@ class _OnlineOpenStatusBadge extends StatelessWidget {
                     ? Icons.cancel_outlined
                     : Icons.schedule_outlined,
             color: color,
-            size: 15,
+            size: 13,
           ),
-          const SizedBox(width: 5),
+          const SizedBox(width: 4),
           Text(
             profile.openStatusLabel,
             style: TextStyle(
               color: color,
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -690,7 +618,7 @@ class _SmallBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
         color: highlighted ? _onlineGoldColor : _onlineFieldColor,
         borderRadius: BorderRadius.circular(999),
@@ -704,14 +632,16 @@ class _SmallBadge extends StatelessWidget {
           Icon(
             icon,
             color: highlighted ? _onlineBackgroundColor : _onlineGoldColor,
-            size: 15,
+            size: 13,
           ),
-          const SizedBox(width: 5),
+          const SizedBox(width: 4),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: highlighted ? _onlineBackgroundColor : Colors.white,
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: FontWeight.w900,
             ),
           ),

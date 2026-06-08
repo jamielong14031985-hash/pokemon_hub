@@ -6,6 +6,7 @@ import '../models/tcg_card.dart';
 import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/wishlist_service.dart';
+import '../services/external_card_price_service.dart';
 import '../utils/ebay_sold_search.dart';
 import '../widgets/card_image_with_fallback.dart';
 import '../widgets/custom_binder_sheets.dart';
@@ -16,9 +17,22 @@ import 'graded_prices_page.dart';
 import 'set_card_details_page.dart';
 
 class CardDetailsPage extends StatefulWidget {
-  const CardDetailsPage({super.key, required this.card});
+  const CardDetailsPage({
+    super.key,
+    required this.card,
+    this.addAsNormal = true,
+    this.addAsReverseHolo = false,
+    this.addAsHolo = false,
+  });
 
   final TcgCard card;
+
+  /// These flags let the Pokédex grid open this same card screen for the exact
+  /// slot the user tapped. For example, tapping the reverse holo slot makes the
+  /// Add Card button add the reverse holo flag instead of the normal flag.
+  final bool addAsNormal;
+  final bool addAsReverseHolo;
+  final bool addAsHolo;
 
   @override
   State<CardDetailsPage> createState() => _CardDetailsPageState();
@@ -28,7 +42,10 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
   late CardOwnership _ownership;
   bool _loadingOwnership = true;
   bool _wishlistBusy = false;
+  bool _addCardBusy = false;
+  bool _refreshingPrice = false;
   bool _searchCardActionsVisible = true;
+  late TcgCard _pricedCard;
 
   Future<void> _addToCustomBinder() async {
     await addCardToCustomBinderFlow(context, widget.card);
@@ -38,7 +55,60 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
   @override
   void initState() {
     super.initState();
+    _pricedCard = widget.card;
     _loadOwnership();
+    _refreshExternalPriceIfMissing();
+  }
+
+
+  Future<void> _refreshExternalPriceIfMissing() async {
+    // Do not call JustTCG automatically when a card screen opens.
+    // The JustTCG free tier is rate limited, so external pricing is now
+    // checked only when the user presses Refresh Raw Price.
+    return;
+  }
+
+  Future<void> _refreshExternalPrice({bool showMessageWhenMissing = true}) async {
+    if (_refreshingPrice) return;
+
+    setState(() {
+      _refreshingPrice = true;
+    });
+
+    try {
+      final enrichedCard = await ExternalCardPriceService.enrichCardWithExternalPrice(
+        _pricedCard,
+        rethrowErrors: showMessageWhenMissing,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pricedCard = enrichedCard;
+      });
+      if (showMessageWhenMissing) {
+        final hasPrice = (enrichedCard.marketPrice ?? 0) > 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              hasPrice
+                  ? 'Raw price updated from ${enrichedCard.marketPriceSource}'
+                  : 'No raw price found from JustTCG yet',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (showMessageWhenMissing && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ExternalCardPriceService.friendlyErrorMessage(error))),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _refreshingPrice = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadOwnership() async {
@@ -53,7 +123,10 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
     }
   }
 
-  Future<void> _saveOwnership(CardOwnership ownership) async {
+  Future<void> _saveOwnership(
+    CardOwnership ownership, {
+    String successMessage = 'Card saved to Set Pokédex',
+  }) async {
     final ownershipByCardId = await PokedexSyncService.loadCurrentUserSetOwnership(widget.card.setId);
     ownershipByCardId[widget.card.id] = ownership;
     await LocalPokedexStore.saveSetOwnershipMap(widget.card.setId, ownershipByCardId);
@@ -64,8 +137,69 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
         _ownership = ownership;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Card saved to Set Pokédex')),
+        SnackBar(content: Text(successMessage)),
       );
+    }
+  }
+
+  Future<void> _addCardToPokedex() async {
+    if (_loadingOwnership || _addCardBusy) return;
+
+    setState(() {
+      _addCardBusy = true;
+    });
+
+    try {
+      // Reload first so repeated opens/screens do not overwrite a newer count.
+      final ownershipByCardId = await PokedexSyncService.loadCurrentUserSetOwnership(widget.card.setId);
+      final currentOwnership = ownershipByCardId[widget.card.id] ?? _ownership;
+
+      final addReverseHolo = widget.addAsReverseHolo;
+      final addHolo = widget.addAsHolo;
+      late final CardOwnership updatedOwnership;
+      late final int selectedVersionCount;
+      late final String selectedVersionLabel;
+
+      if (addReverseHolo) {
+        selectedVersionCount = currentOwnership.reverseHoloCount + 1;
+        selectedVersionLabel = 'Reverse Holo';
+        updatedOwnership = currentOwnership.copyWith(
+          reverseHolo: true,
+          reverseHoloCopies: selectedVersionCount,
+        );
+      } else if (addHolo) {
+        selectedVersionCount = currentOwnership.holoCount + 1;
+        selectedVersionLabel = 'Holo';
+        updatedOwnership = currentOwnership.copyWith(
+          holo: true,
+          holoCopies: selectedVersionCount,
+        );
+      } else {
+        selectedVersionCount = currentOwnership.normalCount + 1;
+        selectedVersionLabel = 'Normal';
+        updatedOwnership = currentOwnership.copyWith(
+          normal: true,
+          normalCopies: selectedVersionCount,
+        );
+      }
+
+      await _saveOwnership(
+        updatedOwnership,
+        successMessage: selectedVersionCount == 1
+            ? '$selectedVersionLabel card added to Set Pokédex'
+            : '$selectedVersionLabel now x$selectedVersionCount',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add card: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _addCardBusy = false;
+        });
+      }
     }
   }
 
@@ -128,7 +262,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final card = widget.card;
+    final card = _pricedCard;
     final hasSavedCopies = !_loadingOwnership && _ownership.effectiveCopies > 0;
 
     return Scaffold(
@@ -158,6 +292,8 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                   PriceLookupCard(
                     card: card,
                     onOpenRawSold: () => openEbaySoldSearch(context: context, card: card),
+                    onRefreshPrice: () => _refreshExternalPrice(),
+                    refreshingPrice: _refreshingPrice,
                   ),
                   GradedPricesButton(
                     card: card,
@@ -204,7 +340,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                 ],
                                 const SizedBox(height: 10),
                                 const Text(
-                                  'Use the buttons below to add this card straight from search results.',
+                                  'Tap Add Card each time you want to save another copy.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: Colors.white54,
@@ -258,7 +394,24 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                   ),
                                 ),
                               ),
-                              if (hasSavedCopies)
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  onPressed: _addCardBusy ? null : _addCardToPokedex,
+                                  icon: _addCardBusy
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.add_circle_outline_rounded),
+                                  label: Text(
+                                    _addCardBusy ? 'Adding...' : 'Add Card',
+                                  ),
+                                ),
+                              ),
+                              if (hasSavedCopies) ...[
+                                const SizedBox(height: 8),
                                 SizedBox(
                                   width: double.infinity,
                                   child: OutlinedButton(
@@ -266,7 +419,8 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                     child: const Text('Remove from Set Pokédex'),
                                   ),
                                 ),
-                              if (hasSavedCopies) const SizedBox(height: 8),
+                              ],
+                              const SizedBox(height: 8),
                               StreamBuilder<bool>(
                                 stream: WishlistService.cardInWishlistStream(
                                   FirebaseAuth.instance.currentUser?.uid ?? '',
@@ -302,7 +456,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                               const SizedBox(height: 8),
                               SizedBox(
                                 width: double.infinity,
-                                child: FilledButton(
+                                child: OutlinedButton(
                                   onPressed: () async {
                                     final updatedOwnership =
                                         await Navigator.of(context).push<CardOwnership>(
@@ -319,8 +473,8 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                   },
                                   child: Text(
                                     hasSavedCopies
-                                        ? 'Edit Set Pokédex Count'
-                                        : 'Add to Set Pokédex',
+                                        ? 'Edit Count / Variant'
+                                        : 'Choose Variant / Count',
                                   ),
                                 ),
                               ),
@@ -363,7 +517,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Tap to show wishlist, binder and Pokédex actions',
+                                'Tap to show Add Card, wishlist, binder and Pokédex actions',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.68),

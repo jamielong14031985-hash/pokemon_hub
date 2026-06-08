@@ -1164,177 +1164,256 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
   }) {
     final canDelete =
         reply.authorId == currentUid || livePost.authorId == currentUid || _isAdmin;
+    final isMine = currentUid != null && reply.authorId == currentUid;
+    final authorName = reply.authorName.trim().isEmpty
+        ? 'Trainer'
+        : reply.authorName.trim();
+    final replyTime = _formatDate(reply.createdAt).split('  ').last;
+
+    Widget optionsButton() {
+      if (!canDelete) {
+        return IconButton(
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+          onPressed: () => _openReplyMemberSheet(
+            reply: reply,
+            livePost: livePost,
+          ),
+          icon: const Icon(
+            Icons.more_horiz_rounded,
+            color: Colors.white54,
+            size: 18,
+          ),
+          tooltip: 'Reply options',
+        );
+      }
+
+      return PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        iconColor: Colors.white60,
+        color: const Color(0xFF264A8A),
+        onSelected: (value) {
+          if (value == 'delete') {
+            _deleteReply(reply);
+          }
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem<String>(
+            value: 'delete',
+            child: Row(
+              children: [
+                const Icon(Icons.delete_outline, color: Colors.redAccent),
+                const SizedBox(width: 10),
+                Text(
+                  _isAdmin && currentUid != reply.authorId
+                      ? 'Admin delete comment'
+                      : 'Delete comment',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final bubbleColor = isMine ? const Color(0xFF173A78) : const Color(0xFF102754);
+    final borderColor = isMine
+        ? const Color(0xFFF7DE77).withValues(alpha: 0.28)
+        : Colors.white.withValues(alpha: 0.08);
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      child: Card(
-        color: const Color(0xFF102754),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _openReplyMemberSheet(
-                        reply: reply,
-                        livePost: livePost,
-                      ),
-                      borderRadius: BorderRadius.circular(999),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CommunityUserAvatar(
-                              userId: reply.authorId,
-                              displayName: reply.authorName,
-                              size: 34,
-                              initialImageBase64: reply.authorProfileImageBase64,
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (!isMine) ...[
+            InkWell(
+              onTap: () => _openReplyMemberSheet(
+                reply: reply,
+                livePost: livePost,
+              ),
+              borderRadius: BorderRadius.circular(999),
+              child: CommunityUserAvatar(
+                userId: reply.authorId,
+                displayName: authorName,
+                size: 30,
+                initialImageBase64: reply.authorProfileImageBase64,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: bubbleColor,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(isMine ? 18 : 6),
+                    bottomRight: Radius.circular(isMine ? 6 : 18),
+                  ),
+                  border: Border.all(color: borderColor),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.10),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 9),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => _openReplyMemberSheet(
+                                reply: reply,
+                                livePost: livePost,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
                               child: Text(
-                                reply.authorName,
+                                isMine ? 'You' : authorName,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xFFF7DE77),
-                                  fontWeight: FontWeight.w800,
-                                  decoration: TextDecoration.underline,
-                                  decorationColor: Color(0xFFF7DE77),
+                                style: TextStyle(
+                                  color: isMine
+                                      ? const Color(0xFFF7DE77)
+                                      : const Color(0xFFE4ECFF),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 4),
-                            const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              color: Color(0xFFF7DE77),
-                              size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            replyTime,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
                             ),
-                          ],
-                        ),
+                          ),
+                          optionsButton(),
+                        ],
                       ),
-                    ),
-                  ),
-                  Flexible(
-                    child: Text(
-                      _formatDate(reply.createdAt),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  if (canDelete)
-                    PopupMenuButton<String>(
-                      iconColor: Colors.white,
-                      color: const Color(0xFF264A8A),
-                      onSelected: (value) {
-                        if (value == 'delete') {
-                          _deleteReply(reply);
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        PopupMenuItem<String>(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.delete_outline,
-                                color: Colors.redAccent,
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                _isAdmin && currentUid != reply.authorId
-                                    ? 'Admin delete comment'
-                                    : 'Delete comment',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
+                      if (reply.message.trim().isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          reply.message.trim(),
+                          style: const TextStyle(
+                            color: Color(0xFFD8E3FB),
+                            fontSize: 13,
+                            height: 1.32,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
-                    ),
-                ],
+                      if (reply.hasImage) ...[
+                        const SizedBox(height: 8),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => CommunityImageViewerPage(
+                                  imageBase64List: [reply.imageBase64!],
+                                  initialIndex: 0,
+                                ),
+                              ),
+                            );
+                          },
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: StoredImage(
+                              imageRef: reply.imageBase64,
+                              fit: BoxFit.cover,
+                              height: 150,
+                              width: double.infinity,
+                              errorChild: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.04),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Text(
+                                  'Image could not be displayed.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-              if (reply.message.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  reply.message,
-                  style: const TextStyle(
-                    color: Color(0xFFD8E3FB),
-                    fontSize: 15,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-              if (reply.hasImage) ...[
-                const SizedBox(height: 10),
-                InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => CommunityImageViewerPage(
-                          imageBase64List: [reply.imageBase64!],
-                          initialIndex: 0,
-                        ),
-                      ),
-                    );
-                  },
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: StoredImage(
-                      imageRef: reply.imageBase64,
-                      fit: BoxFit.cover,
-                      height: 220,
-                      width: double.infinity,
-                      errorChild: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.04),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Text(
-                          'Image could not be displayed.',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
+          if (isMine) ...[
+            const SizedBox(width: 8),
+            CommunityUserAvatar(
+              userId: reply.authorId,
+              displayName: authorName,
+              size: 30,
+              initialImageBase64: reply.authorProfileImageBase64,
+            ),
+          ],
+        ],
       ),
     );
   }
 
   Widget _buildRepliesEmptyCard() {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Card(
-        color: Color(0xFF102754),
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No replies yet. Start the conversation below.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70, fontSize: 15),
-          ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        decoration: BoxDecoration(
+          color: const Color(0xFF102754),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.chat_bubble_outline_rounded, color: Color(0xFFF7DE77)),
+            SizedBox(height: 8),
+            Text(
+              'No replies yet',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Start the conversation below.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white60, fontSize: 13),
+            ),
+          ],
         ),
       ),
     );
@@ -1349,6 +1428,148 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white70),
         ),
+      ),
+    );
+  }
+
+  Widget _buildReplyComposer() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF041B4A),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.20),
+            blurRadius: 14,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_replyImageBase64 != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: StoredImage(
+                        imageRef: _replyImageBase64,
+                        height: 78,
+                        width: 78,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: InkWell(
+                        onTap: () => setState(() => _replyImageBase64 = null),
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.62),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF16366E),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF3F5C96)),
+                ),
+                child: IconButton(
+                  onPressed: _sending ? null : _pickReplyImage,
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.add_photo_alternate_outlined, size: 21),
+                  color: Colors.white,
+                  tooltip: 'Add photo reply',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _replyController,
+                  minLines: 1,
+                  maxLines: 3,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Write a reply...',
+                    hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
+                    filled: true,
+                    fillColor: const Color(0xFF16366E),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(color: Color(0xFF3F5C96)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(color: Color(0xFF3F5C96)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(
+                        color: Color(0xFFF7DE77),
+                        width: 1.4,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 44,
+                child: FilledButton(
+                  onPressed: _sending ? null : _addReply,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    backgroundColor: const Color(0xFFF7DE77),
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: _sending
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_rounded, size: 20),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1410,7 +1631,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                         controller: _scrollController,
                         keyboardDismissBehavior:
                             ScrollViewKeyboardDismissBehavior.onDrag,
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: 8),
                         itemCount: itemCount,
                         itemBuilder: (context, index) {
                           if (index == 0) {
@@ -1435,131 +1656,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                     },
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_replyImageBase64 != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Stack(
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: StoredImage(
-                                    imageRef: _replyImageBase64,
-                                    height: 96,
-                                    width: 96,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 4,
-                                  right: 4,
-                                  child: InkWell(
-                                    onTap: () => setState(
-                                      () => _replyImageBase64 = null,
-                                    ),
-                                    borderRadius: BorderRadius.circular(999),
-                                    child: Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.58,
-                                        ),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.close,
-                                        size: 18,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF16366E),
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(
-                                color: const Color(0xFF3F5C96),
-                              ),
-                            ),
-                            child: IconButton(
-                              onPressed: _sending ? null : _pickReplyImage,
-                              icon: const Icon(Icons.add_a_photo_outlined),
-                              color: Colors.white,
-                              tooltip: 'Add photo reply',
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: _replyController,
-                              minLines: 1,
-                              maxLines: 4,
-                              style: const TextStyle(color: Colors.white),
-                              decoration: const InputDecoration(
-                                hintText: 'Write a reply or add a photo...',
-                                hintStyle: TextStyle(color: Color(0xFFAFC0E6)),
-                                filled: true,
-                                fillColor: Color(0xFF16366E),
-                                border: OutlineInputBorder(
-                                  borderRadius:
-                                      BorderRadius.all(Radius.circular(18)),
-                                  borderSide: BorderSide(
-                                    color: Color(0xFF3F5C96),
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius:
-                                      BorderRadius.all(Radius.circular(18)),
-                                  borderSide: BorderSide(
-                                    color: Color(0xFF3F5C96),
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius:
-                                      BorderRadius.all(Radius.circular(18)),
-                                  borderSide: BorderSide(
-                                    color: Color(0xFFF7DE77),
-                                    width: 1.5,
-                                  ),
-                                ),
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 14,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          FilledButton(
-                            onPressed: _sending ? null : _addReply,
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
-                                vertical: 16,
-                              ),
-                            ),
-                            child: const Text('Reply'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+                _buildReplyComposer(),
               ],
             );
           },

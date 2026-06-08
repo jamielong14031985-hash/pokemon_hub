@@ -66,6 +66,7 @@ class PokemonTcgService {
 
 
   static const Duration _apiDiskCacheFreshFor = Duration(days: 14);
+  static const Duration _apiCardLookupDiskCacheFreshFor = Duration(hours: 6);
   static const Duration _apiSetListDiskCacheFreshFor = Duration(hours: 6);
   static const Duration _apiSetLookupDiskCacheFreshFor = Duration(hours: 12);
   static const Duration _apiCardsBySetDiskCacheFreshFor = Duration(hours: 12);
@@ -145,10 +146,13 @@ class PokemonTcgService {
   static Future<Map<String, dynamic>> _getJsonMapWithDiskCache(
     Uri uri, {
     Duration freshFor = _apiDiskCacheFreshFor,
+    bool forceRefresh = false,
   }) async {
-    final freshCachedData = await _readApiJsonFromDisk(uri, maxAge: freshFor);
-    if (freshCachedData != null) {
-      return freshCachedData;
+    if (!forceRefresh) {
+      final freshCachedData = await _readApiJsonFromDisk(uri, maxAge: freshFor);
+      if (freshCachedData != null) {
+        return freshCachedData;
+      }
     }
 
     try {
@@ -3109,35 +3113,49 @@ class PokemonTcgService {
     return score(candidate) > score(existing);
   }
 
-  static Future<TcgCard> fetchCardById(String cardId) async {
+  static Future<TcgCard> fetchCardById(
+    String cardId, {
+    bool forceRefresh = false,
+  }) async {
     final normalizedId = cardId.trim();
     if (normalizedId.isEmpty) {
       throw Exception('Missing card id');
     }
 
-    final cached = _cardByIdCache[normalizedId];
-    if (cached != null) {
-      return cached;
+    if (!forceRefresh) {
+      final cached = _cardByIdCache[normalizedId];
+      if (cached != null) {
+        return cached;
+      }
     }
 
-    final existingFuture = _cardByIdInFlight[normalizedId];
+    final inFlightKey = forceRefresh ? 'fresh:$normalizedId' : normalizedId;
+    final existingFuture = _cardByIdInFlight[inFlightKey];
     if (existingFuture != null) {
       return existingFuture;
     }
 
     final future = () async {
       final uri = Uri.parse('$_baseUrl/cards/$normalizedId');
-      final data = await _getJsonMapWithDiskCache(uri);
+      final data = await _getJsonMapWithDiskCache(
+        uri,
+        freshFor: _apiCardLookupDiskCacheFreshFor,
+        forceRefresh: forceRefresh,
+      );
       final card = TcgCard.fromJson(data['data'] as Map<String, dynamic>);
       _cardByIdCache[normalizedId] = card;
       return card;
     }();
 
-    _cardByIdInFlight[normalizedId] = future;
+    _cardByIdInFlight[inFlightKey] = future;
     try {
       return await future;
     } finally {
-      _cardByIdInFlight.remove(normalizedId);
+      _cardByIdInFlight.remove(inFlightKey);
     }
+  }
+
+  static Future<TcgCard> refreshCardById(String cardId) {
+    return fetchCardById(cardId, forceRefresh: true);
   }
 }

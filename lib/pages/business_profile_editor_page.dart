@@ -62,10 +62,14 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
 
   String _linkedShopId = '';
   String _linkedShopName = '';
+  Uint8List? _logoImageBytes;
+  String _logoImageFileName = 'business_logo.jpg';
+  bool _removeLogoImage = false;
   Uint8List? _featuredImageBytes;
   String _featuredImageFileName = 'featured_banner.jpg';
   bool _removeFeaturedImage = false;
   bool? _hasPhysicalShop;
+  bool _changingLinkedShop = false;
   String _openingStatus = 'auto';
   final Map<String, bool> _openingClosed = <String, bool>{};
   final Map<String, TextEditingController> _openingOpenControllers =
@@ -102,6 +106,11 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
     _linkedShopId = profile?.linkedShopId ?? '';
     _linkedShopName = profile?.linkedShopName ?? '';
     _hasPhysicalShop = profile?.hasPhysicalShop;
+
+    if (_hasPhysicalShop == null && _linkedShopId.trim().isNotEmpty) {
+      _hasPhysicalShop = true;
+    }
+
     _openingStatus = profile?.openingStatus ?? 'auto';
 
     for (final dayKey in BusinessOpeningHours.dayKeys) {
@@ -280,11 +289,26 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
       stream: _shopService.watchApprovedShops(),
       builder: (context, snapshot) {
         final shops = snapshot.data ?? const <TcgShop>[];
+        final shopIds = shops.map((shop) => shop.id).toSet();
+        final linkedShopMissingFromList =
+            _linkedShopId.isNotEmpty && !shopIds.contains(_linkedShopId);
+        final currentLinkedShopName = _linkedShopName.trim().isEmpty
+            ? 'Linked shop'
+            : _linkedShopName.trim();
+
         final items = <DropdownMenuItem<String>>[
           const DropdownMenuItem<String>(
             value: '',
             child: Text('No linked shop yet'),
           ),
+          if (linkedShopMissingFromList)
+            DropdownMenuItem<String>(
+              value: _linkedShopId,
+              child: Text(
+                '$currentLinkedShopName (currently linked)',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ...shops.map(
             (shop) => DropdownMenuItem<String>(
               value: shop.id,
@@ -296,24 +320,8 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
           ),
         ];
 
-        final shopIds = shops.map((shop) => shop.id).toSet();
-        final safeSelectedShopId =
-            _linkedShopId.isNotEmpty && shopIds.contains(_linkedShopId)
-                ? _linkedShopId
-                : '';
-
-        if (_linkedShopId.isNotEmpty && safeSelectedShopId.isEmpty) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            setState(() {
-              _linkedShopId = '';
-              _linkedShopName = '';
-            });
-          });
-        }
-
         return DropdownButtonFormField<String>(
-          initialValue: safeSelectedShopId,
+          initialValue: _linkedShopId,
           isExpanded: true,
           dropdownColor: _fieldColor,
           iconEnabledColor: _softTextColor,
@@ -339,7 +347,12 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
 
             setState(() {
               _linkedShopId = selectedShopId;
-              _linkedShopName = selectedShop?.name ?? '';
+
+              if (selectedShop != null) {
+                _linkedShopName = selectedShop.name;
+              } else if (selectedShopId.isEmpty) {
+                _linkedShopName = '';
+              }
             });
           },
         );
@@ -348,6 +361,142 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
   }
 
 
+  bool get _hasExistingLogoImage {
+    return !_removeLogoImage &&
+        widget.profile?.logoUrl.trim().isNotEmpty == true;
+  }
+
+  Widget _buildBusinessProfilePicturePicker() {
+    final hasNewImage = _logoImageBytes != null;
+    final existingLogoUrl = widget.profile?.logoUrl.trim() ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 104,
+            height: 104,
+            decoration: BoxDecoration(
+              color: _fieldColor,
+              shape: BoxShape.circle,
+              border: Border.all(color: _goldColor, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.20),
+                  blurRadius: 14,
+                  offset: const Offset(0, 7),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: hasNewImage
+                ? Image.memory(
+                    _logoImageBytes!,
+                    fit: BoxFit.cover,
+                  )
+                : _hasExistingLogoImage
+                    ? Image.network(
+                        existingLogoUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _buildBusinessProfilePicturePlaceholder();
+                        },
+                      )
+                    : _buildBusinessProfilePicturePlaceholder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _goldColor,
+                  side: const BorderSide(color: _goldColor),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                icon: const Icon(Icons.photo_library_outlined),
+                label: Text(
+                  hasNewImage || _hasExistingLogoImage
+                      ? 'Change picture'
+                      : 'Upload picture',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                onPressed: _saving ? null : _pickBusinessProfilePicture,
+              ),
+            ),
+            if (hasNewImage || _hasExistingLogoImage) ...[
+              const SizedBox(width: 10),
+              IconButton.filledTonal(
+                tooltip: 'Remove picture',
+                style: IconButton.styleFrom(
+                  foregroundColor: Colors.redAccent,
+                  backgroundColor: Colors.redAccent.withValues(alpha: 0.12),
+                ),
+                icon: const Icon(Icons.delete_outline),
+                onPressed: _saving
+                    ? null
+                    : () {
+                        setState(() {
+                          _logoImageBytes = null;
+                          _logoImageFileName = 'business_logo.jpg';
+                          _removeLogoImage = true;
+                        });
+                      },
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'This picture is used as the business logo on the Business Profile and public customer view.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: _softTextColor,
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBusinessProfilePicturePlaceholder() {
+    return Container(
+      color: _fieldColor,
+      child: const Center(
+        child: Icon(
+          Icons.storefront_outlined,
+          color: _goldColor,
+          size: 44,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickBusinessProfilePicture() async {
+    final pickedImage = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 900,
+      imageQuality: 88,
+    );
+
+    if (pickedImage == null) return;
+
+    final bytes = await pickedImage.readAsBytes();
+
+    if (!mounted) return;
+
+    setState(() {
+      _logoImageBytes = bytes;
+      _logoImageFileName = pickedImage.name;
+      _removeLogoImage = false;
+    });
+  }
 
   bool get _hasExistingFeaturedImage {
     return !_removeFeaturedImage &&
@@ -534,6 +683,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
           onTap: () {
             setState(() {
               _hasPhysicalShop = true;
+              _changingLinkedShop = false;
             });
           },
         ),
@@ -549,6 +699,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
               _hasPhysicalShop = false;
               _linkedShopId = '';
               _linkedShopName = '';
+              _changingLinkedShop = false;
             });
           },
         ),
@@ -614,6 +765,81 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
       );
     }
 
+    final hasLinkedShop = _linkedShopId.trim().isNotEmpty;
+    final linkedShopName = _linkedShopName.trim().isEmpty
+        ? 'Linked TCG shop'
+        : _linkedShopName.trim();
+
+    if (hasLinkedShop && !_changingLinkedShop) {
+      return Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: _goldColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _goldColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.check_circle_outline,
+                  color: _goldColor,
+                  size: 22,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Shop already linked',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        linkedShopName,
+                        style: const TextStyle(
+                          color: _softTextColor,
+                          fontSize: 12,
+                          height: 1.35,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 11),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _goldColor,
+                side: const BorderSide(color: _goldColor),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              icon: const Icon(Icons.swap_horiz_outlined),
+              label: const Text(
+                'Change linked shop',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              onPressed: () {
+                setState(() => _changingLinkedShop = true);
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -644,7 +870,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
               Expanded(
                 child: Text(
                   _linkedShopId.isEmpty
-                      ? 'Because this business has a physical shop, you must select the shop if it is already on the map, or add it to the map first.'
+                      ? 'Because this business has a physical shop, select its map listing once. After it is linked, you will not need to link it again.'
                       : 'This business is linked to "$_linkedShopName" on the TCG Shop Map.',
                   style: const TextStyle(
                     color: Colors.white,
@@ -657,6 +883,22 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
             ],
           ),
         ),
+        if (hasLinkedShop) ...[
+          const SizedBox(height: 10),
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: _softTextColor,
+            ),
+            icon: const Icon(Icons.close_outlined),
+            label: const Text(
+              'Cancel change',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+            onPressed: () {
+              setState(() => _changingLinkedShop = false);
+            },
+          ),
+        ],
         const SizedBox(height: 10),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
@@ -695,7 +937,6 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
       ],
     );
   }
-
 
   bool _validOpeningTime(String value) {
     final cleanValue = value.trim();
@@ -1058,6 +1299,9 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
         phone: _phoneController.text,
         town: _townController.text,
         county: _countyController.text,
+        logoImageBytes: _logoImageBytes,
+        logoImageFileName: _logoImageFileName,
+        removeLogoImage: _removeLogoImage,
         featuredImageBytes: _featuredImageBytes,
         featuredImageFileName: _featuredImageFileName,
         removeFeaturedImage: _removeFeaturedImage,
@@ -1133,6 +1377,15 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                 ),
               ),
               _buildSection(
+                title: 'Business profile picture',
+                icon: Icons.account_circle_outlined,
+                subtitle:
+                    'Upload the logo or picture customers will see on the business profile.',
+                children: [
+                  _buildBusinessProfilePicturePicker(),
+                ],
+              ),
+              _buildSection(
                 title: 'Business details',
                 icon: Icons.business_outlined,
                 children: [
@@ -1176,7 +1429,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                 title: 'TCG Shop Map listing',
                 icon: Icons.map_outlined,
                 subtitle:
-                    'If your shop is already on the map, select it here. If not, add it to the map first.',
+                    'Link your map listing once. After it is linked, you only need this section if you want to change it.',
                 children: [
                   _buildShopMapRequirementCard(),
                 ],

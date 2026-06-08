@@ -9,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/business_profile.dart';
 import '../models/tcg_shop.dart';
 import '../services/business_profile_service.dart';
-import '../services/saved_tcg_shop_service.dart';
 import '../services/tcg_shop_service.dart';
 import 'add_tcg_shop_page.dart';
 import 'edit_tcg_shop_page.dart';
@@ -21,7 +20,6 @@ import 'business_deals_page.dart';
 import 'business_events_directory_page.dart';
 import 'business_reviews_page.dart';
 import 'public_business_profile_page.dart';
-import 'saved_tcg_shops_page.dart';
 import 'online_shops_page.dart';
 
 class TcgShopMapPage extends StatefulWidget {
@@ -48,7 +46,6 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   final TcgShopService _shopService = TcgShopService();
   final BusinessProfileService _businessProfileService =
       BusinessProfileService();
-  final SavedTcgShopService _savedShopService = SavedTcgShopService();
   final TextEditingController _areaController = TextEditingController();
 
   double _currentZoom = _initialZoom;
@@ -196,6 +193,13 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     BuildContext pageContext,
     BusinessProfile profile,
   ) {
+    unawaited(
+      _businessProfileService.incrementBusinessAnalyticsMetric(
+        businessId: profile.id,
+        metric: 'mapViews',
+      ),
+    );
+
     Navigator.of(pageContext).push(
       MaterialPageRoute<void>(
         builder: (_) => PublicBusinessProfilePage(profile: profile),
@@ -235,14 +239,6 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => const OnlineShopsPage(),
-      ),
-    );
-  }
-
-  Future<void> _openSavedShopsPage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const SavedTcgShopsPage(),
       ),
     );
   }
@@ -449,6 +445,19 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     );
   }
 
+  void _openShopOrBusinessProfile({
+    required TcgShop shop,
+    required BusinessProfile? businessProfile,
+    required BusinessProfile? featuredProfile,
+  }) {
+    if (businessProfile != null) {
+      _openPublicBusinessProfile(context, businessProfile);
+      return;
+    }
+
+    _showShopDetails(shop, featuredProfile);
+  }
+
   double _clusterCellSizeDegrees() {
     if (_currentZoom >= _showIndividualPinsZoom) return 0;
 
@@ -529,6 +538,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
 
   List<Marker> _buildMapMarkers(
     List<TcgShop> shops,
+    Map<String, BusinessProfile> businessProfilesByShopId,
     Map<String, BusinessProfile> featuredProfilesByShopId,
   ) {
     final clusters = _buildClusters(shops, featuredProfilesByShopId);
@@ -536,6 +546,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     return clusters.map((cluster) {
       if (cluster.count == 1) {
         final shop = cluster.shops.first;
+        final businessProfile = businessProfilesByShopId[shop.id];
         final featuredProfile = featuredProfilesByShopId[shop.id];
         final isFeatured = featuredProfile != null;
 
@@ -544,7 +555,11 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
           width: isFeatured ? 66 : 46,
           height: isFeatured ? 66 : 46,
           child: GestureDetector(
-            onTap: () => _showShopDetails(shop, featuredProfile),
+            onTap: () => _openShopOrBusinessProfile(
+              shop: shop,
+              businessProfile: businessProfile,
+              featuredProfile: featuredProfile,
+            ),
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -585,7 +600,11 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
         width: markerSize,
         height: markerSize,
         child: GestureDetector(
-          onTap: () => _showClusterDetails(cluster, featuredProfilesByShopId),
+          onTap: () => _showClusterDetails(
+            cluster,
+            businessProfilesByShopId,
+            featuredProfilesByShopId,
+          ),
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -665,6 +684,18 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     return <String, BusinessProfile>{
       for (final profile in profiles)
         if (profile.canFeatureShop) profile.linkedShopId: profile,
+    };
+  }
+
+  Map<String, BusinessProfile> _businessProfilesByLinkedShopId(
+    List<BusinessProfile> profiles,
+  ) {
+    return <String, BusinessProfile>{
+      for (final profile in profiles)
+        if (profile.status == 'approved' &&
+            profile.hasPhysicalShop &&
+            profile.linkedShopId.trim().isNotEmpty)
+          profile.linkedShopId.trim(): profile,
     };
   }
 
@@ -1076,12 +1107,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
         final profile = snapshot.data;
 
         if (profile == null || !profile.hasLinkedShop) {
-          return IconButton(
-            tooltip: 'Saved shops',
-            icon: const Icon(Icons.bookmark_outline),
-            color: _goldColor,
-            onPressed: _openSavedShopsPage,
-          );
+          return const SizedBox.shrink();
         }
 
         final openNow = profile.isOpenNow ?? false;
@@ -1170,10 +1196,16 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
           final approvedShops = shopSnapshot.data ?? const <TcgShop>[];
 
           return StreamBuilder<List<BusinessProfile>>(
-            stream: _businessProfileService.watchMapPremiumBusinessProfiles(),
+            stream: _businessProfileService.watchApprovedMapBusinessProfiles(),
             builder: (context, profileSnapshot) {
-              final featuredProfiles =
+              final businessProfiles =
                   profileSnapshot.data ?? const <BusinessProfile>[];
+              final featuredProfiles = businessProfiles
+                  .where((profile) => profile.premiumIsActive)
+                  .toList();
+              final businessProfilesByShopId = _businessProfilesByLinkedShopId(
+                businessProfiles,
+              );
               final featuredProfilesByShopId = _profilesByLinkedShopId(
                 featuredProfiles,
               );
@@ -1185,6 +1217,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
               );
               final markers = _buildMapMarkers(
                 shops,
+                businessProfilesByShopId,
                 featuredProfilesByShopId,
               );
 
@@ -1315,6 +1348,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
 
   void _showClusterDetails(
     _ShopMapMarkerCluster cluster,
+    Map<String, BusinessProfile> businessProfilesByShopId,
     Map<String, BusinessProfile> featuredProfilesByShopId,
   ) {
     final shops = _sortFeaturedFirst(cluster.shops, featuredProfilesByShopId);
@@ -1343,7 +1377,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Zoom in to separate the pins, or tap a shop below.',
+                    'Tap a linked business to open its profile, or zoom in to separate pins.',
                     style: TextStyle(
                       color: _softTextColor,
                       fontSize: 13,
@@ -1353,6 +1387,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                   const SizedBox(height: 14),
                   ...shops.map((shop) {
                     final address = shop.singleLineAddress;
+                    final businessProfile = businessProfilesByShopId[shop.id];
                     final featuredProfile = featuredProfilesByShopId[shop.id];
                     final isFeatured = featuredProfile != null;
 
@@ -1362,7 +1397,11 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                         borderRadius: BorderRadius.circular(16),
                         onTap: () {
                           Navigator.of(bottomSheetContext).pop();
-                          _showShopDetails(shop, featuredProfile);
+                          _openShopOrBusinessProfile(
+                            shop: shop,
+                            businessProfile: businessProfile,
+                            featuredProfile: featuredProfile,
+                          );
                         },
                         child: Container(
                           padding: const EdgeInsets.all(12),
@@ -1399,6 +1438,9 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                                           ),
                                         ),
                                         if (isFeatured) _buildFeaturedBadge(),
+                                        if (!isFeatured &&
+                                            businessProfile != null)
+                                          _buildChip('Business profile'),
                                       ],
                                     ),
                                     if (address.isNotEmpty) ...[
@@ -1661,11 +1703,6 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                         },
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 10),
-                  _SavedShopButton(
-                    shop: shop,
-                    service: _savedShopService,
                   ),
                   if (featuredProfile != null &&
                       featuredProfile.businessName != shop.name) ...[
@@ -2197,76 +2234,6 @@ class _PremiumMarqueeCardBackground extends StatelessWidget {
   }
 }
 
-
-
-class _SavedShopButton extends StatelessWidget {
-  const _SavedShopButton({
-    required this.shop,
-    required this.service,
-  });
-
-  final TcgShop shop;
-  final SavedTcgShopService service;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<Set<String>>(
-      stream: service.watchSavedShopIds(),
-      builder: (context, snapshot) {
-        final savedIds = snapshot.data ?? <String>{};
-        final isSaved = savedIds.contains(shop.id);
-
-        return SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _TcgShopMapPageState._goldColor,
-              side: const BorderSide(
-                color: _TcgShopMapPageState._goldColor,
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            icon: Icon(
-              isSaved ? Icons.bookmark : Icons.bookmark_border,
-            ),
-            label: Text(
-              isSaved ? 'Saved shop' : 'Save shop',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            onPressed: () async {
-              try {
-                await service.toggleSaved(shop);
-
-                if (!context.mounted) return;
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      isSaved
-                          ? '${shop.name} removed from saved shops.'
-                          : '${shop.name} saved.',
-                    ),
-                  ),
-                );
-              } catch (error) {
-                if (!context.mounted) return;
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Could not update saved shop: $error'),
-                  ),
-                );
-              }
-            },
-          ),
-        );
-      },
-    );
-  }
-}
 
 class _ShopMapMarkerCluster {
   const _ShopMapMarkerCluster({

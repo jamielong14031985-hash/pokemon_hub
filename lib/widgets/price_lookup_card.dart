@@ -8,18 +8,33 @@ class PriceLookupCard extends StatelessWidget {
     super.key,
     required this.card,
     required this.onOpenRawSold,
+    this.onRefreshPrice,
+    this.refreshingPrice = false,
   });
 
   final TcgCard card;
   final VoidCallback onOpenRawSold;
+  final VoidCallback? onRefreshPrice;
+  final bool refreshingPrice;
 
-  bool get _hasRawPrice => (card.rawPrice ?? 0) > 0;
+  bool get _hasRawPrice => (card.marketPrice ?? 0) > 0;
 
   @override
   Widget build(BuildContext context) {
     final rawPriceText = _hasRawPrice
-        ? CurrencySettings.formatAmount(card.rawPrice, fromCurrency: card.rawPriceCurrency)
-        : 'No live raw price found yet';
+        ? CurrencySettings.formatAmount(
+            card.marketPrice,
+            fromCurrency: card.marketPriceCurrency,
+          )
+        : refreshingPrice
+            ? 'Checking latest raw price...'
+            : 'No live raw price found yet';
+
+    final sourceText = _hasRawPrice
+        ? 'Source: ${card.marketPriceSource}'
+        : onRefreshPrice != null
+            ? 'PocketChase checked the Pokémon TCG API first. Use Refresh Raw Price to check JustTCG as the extra pricing source.'
+            : 'PocketChase checked the Pokémon TCG API, but no raw price was available for this card yet.';
 
     return Card(
       color: const Color(0xFF102754),
@@ -48,9 +63,7 @@ class PriceLookupCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              _hasRawPrice
-                  ? 'This is the live raw market estimate currently available for this card.'
-                  : 'Some cards do not have a live API price. Use the eBay sold search below on the details page for a quick price check.',
+              sourceText,
               style: const TextStyle(
                 color: Colors.white54,
                 fontSize: 12,
@@ -58,6 +71,25 @@ class PriceLookupCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            if (onRefreshPrice != null) ...[
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: refreshingPrice ? null : onRefreshPrice,
+                  icon: refreshingPrice
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync_rounded),
+                  label: Text(
+                    refreshingPrice ? 'Checking JustTCG...' : 'Refresh Raw Price',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(

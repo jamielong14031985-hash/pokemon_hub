@@ -13,6 +13,8 @@ class BusinessEvent {
     required this.onlineEvent,
     required this.entryFee,
     required this.bookingUrl,
+    required this.imageUrl,
+    required this.imagePath,
     required this.active,
     this.startsAt,
     this.endsAt,
@@ -31,6 +33,8 @@ class BusinessEvent {
   final bool onlineEvent;
   final String entryFee;
   final String bookingUrl;
+  final String imageUrl;
+  final String imagePath;
   final bool active;
   final Timestamp? startsAt;
   final Timestamp? endsAt;
@@ -64,6 +68,8 @@ class BusinessEvent {
       onlineEvent: cleanBool(data['onlineEvent']),
       entryFee: cleanString(data['entryFee']),
       bookingUrl: cleanString(data['bookingUrl']),
+      imageUrl: cleanString(data['imageUrl']),
+      imagePath: cleanString(data['imagePath']),
       active: cleanBool(data['active']),
       startsAt: cleanTimestamp(data['startsAt']),
       endsAt: cleanTimestamp(data['endsAt']),
@@ -92,6 +98,8 @@ class BusinessEvent {
 
   bool get hasEntryFee => entryFee.trim().isNotEmpty;
 
+  bool get hasImage => imageUrl.trim().isNotEmpty;
+
   bool get isCurrentlyVisible {
     if (!active) return false;
 
@@ -105,7 +113,6 @@ class BusinessEvent {
 
     if (start == null) return true;
 
-    // If no end time is set, keep the event visible until 24 hours after it starts.
     return start.add(const Duration(hours: 24)).isAfter(now);
   }
 }

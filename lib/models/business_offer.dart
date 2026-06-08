@@ -11,6 +11,8 @@ class BusinessOffer {
     required this.category,
     required this.code,
     required this.websiteUrl,
+    required this.imageUrl,
+    required this.imagePath,
     required this.active,
     this.startsAt,
     this.endsAt,
@@ -27,6 +29,8 @@ class BusinessOffer {
   final String category;
   final String code;
   final String websiteUrl;
+  final String imageUrl;
+  final String imagePath;
   final bool active;
   final Timestamp? startsAt;
   final Timestamp? endsAt;
@@ -58,6 +62,8 @@ class BusinessOffer {
       category: cleanString(data['category']),
       code: cleanString(data['code']),
       websiteUrl: cleanString(data['websiteUrl']),
+      imageUrl: cleanString(data['imageUrl']),
+      imagePath: cleanString(data['imagePath']),
       active: cleanBool(data['active']),
       startsAt: cleanTimestamp(data['startsAt']),
       endsAt: cleanTimestamp(data['endsAt']),
@@ -79,6 +85,8 @@ class BusinessOffer {
   bool get hasCode => code.trim().isNotEmpty;
 
   bool get hasWebsite => websiteUrl.trim().isNotEmpty;
+
+  bool get hasImage => imageUrl.trim().isNotEmpty;
 
   bool get isCurrentlyVisible {
     if (!active) return false;

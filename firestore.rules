@@ -820,6 +820,8 @@ service cloud.firestore {
           'ownerUid',
           'title',
           'description',
+          'imageUrl',
+          'imagePath',
           'eventType',
           'location',
           'onlineEvent',
@@ -841,6 +843,8 @@ service cloud.firestore {
         && data.description is string
         && data.description.size() > 0
         && data.description.size() <= 700
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000))
+        && (!('imagePath' in data) || (data.imagePath is string && data.imagePath.size() <= 1000))
         && data.eventType in ['trade_night', 'tournament', 'pre_release', 'release_day', 'giveaway', 'meetup', 'other']
         && data.location is string
         && data.location.size() <= 180
@@ -943,6 +947,7 @@ service cloud.firestore {
           'category',
           'price',
           'imageUrl',
+          'imagePath',
           'buyUrl',
           'active',
           'featured',
@@ -962,8 +967,8 @@ service cloud.firestore {
         && data.category in ['sealed', 'singles', 'accessories', 'pre_order', 'new_arrival', 'deal', 'other']
         && data.price is string
         && data.price.size() <= 40
-        && data.imageUrl is string
-        && data.imageUrl.size() <= 500
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000))
+        && (!('imagePath' in data) || (data.imagePath is string && data.imagePath.size() <= 1000))
         && data.buyUrl is string
         && data.buyUrl.size() <= 500
         && data.active is bool
@@ -979,6 +984,8 @@ service cloud.firestore {
           'ownerUid',
           'title',
           'description',
+          'imageUrl',
+          'imagePath',
           'category',
           'code',
           'websiteUrl',
@@ -998,6 +1005,8 @@ service cloud.firestore {
         && data.description is string
         && data.description.size() > 0
         && data.description.size() <= 500
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000))
+        && (!('imagePath' in data) || (data.imagePath is string && data.imagePath.size() <= 1000))
         && data.category in ['discount', 'new_stock', 'event', 'announcement']
         && data.code is string
         && data.code.size() <= 40
@@ -1873,6 +1882,36 @@ service cloud.firestore {
         rules above.
       - The fallback write rule is false, so unknown write paths stay blocked.
     */
+
+    match /feedback_reports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.app == 'PocketChase'
+        && request.resource.data.status == 'new'
+        && request.resource.data.type is string
+        && request.resource.data.impact is string
+        && request.resource.data.screen is string
+        && request.resource.data.tryingToDo is string
+        && request.resource.data.whatHappened is string
+        && request.resource.data.expectedResult is string
+        && request.resource.data.stepsToReproduce is string
+        && request.resource.data.contactEmail is string
+        && request.resource.data.devicePlatform is string
+        && request.resource.data.imageCount is int
+        && request.resource.data.imageCount >= 0
+        && request.resource.data.imageCount <= 4
+        && request.resource.data.imageUrls is list
+        && request.resource.data.imageStoragePaths is list
+        && request.resource.data.images is list;
+
+      allow read: if isAdminOrModerator()
+        || (signedIn() && resource.data.userId == request.auth.uid);
+
+      allow update: if isAdminOrModerator();
+
+      allow delete: if isAdmin();
+    }
+
     match /{document=**} {
       allow read: if true;
       allow write: if false;

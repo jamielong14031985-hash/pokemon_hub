@@ -2,8 +2,64 @@ import 'money_value.dart';
 
 double? _asPrice(dynamic value) {
   if (value is num) return value.toDouble();
+
+  if (value is String) {
+    final cleaned = value
+        .trim()
+        .replaceAll(',', '')
+        .replaceAll(RegExp(r'[^0-9.\-]'), '');
+    if (cleaned.isEmpty || cleaned == '-' || cleaned == '.') return null;
+    return double.tryParse(cleaned);
+  }
+
   return null;
 }
+
+Map<String, dynamic> _asStringDynamicMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map<String, dynamic>(
+      (dynamic key, dynamic mapValue) => MapEntry<String, dynamic>(
+        key.toString(),
+        mapValue,
+      ),
+    );
+  }
+  return <String, dynamic>{};
+}
+
+const List<String> _tcgPlayerRawPriceGroupPriority = <String>[
+  'normal',
+  'holofoil',
+  'reverseHolofoil',
+  '1stEditionNormal',
+  '1stEditionHolofoil',
+  'unlimitedNormal',
+  'unlimitedHolofoil',
+  'unlimitedReverseHolofoil',
+  'unlimited',
+];
+
+const List<String> _tcgPlayerPriceFieldPriority = <String>[
+  'market',
+  'mid',
+  'directLow',
+  'low',
+  'high',
+];
+
+const List<String> _cardmarketPriceFieldPriority = <String>[
+  'averageSellPrice',
+  'trendPrice',
+  'avg7',
+  'avg30',
+  'avg1',
+  'lowPrice',
+  'lowPriceExPlus',
+  'reverseHoloSell',
+  'reverseHoloTrend',
+  'reverseHoloLow',
+];
 
 double? _pickFirstAvailablePrice(Map<String, dynamic> source, List<String> keys) {
   for (final key in keys) {
@@ -15,22 +71,44 @@ double? _pickFirstAvailablePrice(Map<String, dynamic> source, List<String> keys)
   return null;
 }
 
-MoneyValue? _extractRawCardMoney(Map<String, dynamic> json) {
-  final tcgplayer = (json['tcgplayer'] as Map<String, dynamic>? ?? {});
-  final tcgPrices = (tcgplayer['prices'] as Map<String, dynamic>? ?? {});
-  final cardmarket = (json['cardmarket'] as Map<String, dynamic>? ?? {});
-  final cardmarketPrices = (cardmarket['prices'] as Map<String, dynamic>? ?? {});
+bool _isRawTcgPlayerPriceGroup(String key) {
+  final value = key.toLowerCase();
+  if (value.contains('psa')) return false;
+  if (value.contains('bgs')) return false;
+  if (value.contains('cgc')) return false;
+  if (value.contains('sgc')) return false;
+  if (value.contains('ace')) return false;
+  if (value.contains('graded')) return false;
+  if (value.contains('grade')) return false;
+  if (value.contains('gem')) return false;
+  return true;
+}
 
-  for (final key in [
-    'normal',
-    'holofoil',
-    'reverseHolofoil',
-    '1stEditionNormal',
-    '1stEditionHolofoil',
-    'unlimitedHolofoil',
-  ]) {
-    final priceMap = (tcgPrices[key] as Map<String, dynamic>? ?? {});
-    final price = _pickFirstAvailablePrice(priceMap, ['market', 'mid', 'low']);
+Iterable<String> _tcgPlayerRawPriceGroupKeys(Map<String, dynamic> tcgPrices) sync* {
+  final seen = <String>{};
+
+  for (final key in _tcgPlayerRawPriceGroupPriority) {
+    if (tcgPrices.containsKey(key) && seen.add(key)) {
+      yield key;
+    }
+  }
+
+  for (final key in tcgPrices.keys) {
+    if (_isRawTcgPlayerPriceGroup(key) && seen.add(key)) {
+      yield key;
+    }
+  }
+}
+
+MoneyValue? _extractRawCardMoney(Map<String, dynamic> json) {
+  final tcgplayer = _asStringDynamicMap(json['tcgplayer']);
+  final tcgPrices = _asStringDynamicMap(tcgplayer['prices']);
+  final cardmarket = _asStringDynamicMap(json['cardmarket']);
+  final cardmarketPrices = _asStringDynamicMap(cardmarket['prices']);
+
+  for (final key in _tcgPlayerRawPriceGroupKeys(tcgPrices)) {
+    final priceMap = _asStringDynamicMap(tcgPrices[key]);
+    final price = _pickFirstAvailablePrice(priceMap, _tcgPlayerPriceFieldPriority);
     if (price != null) {
       return MoneyValue(amount: price, currencyCode: 'USD');
     }
@@ -38,7 +116,7 @@ MoneyValue? _extractRawCardMoney(Map<String, dynamic> json) {
 
   final cardmarketPrice = _pickFirstAvailablePrice(
     cardmarketPrices,
-    ['averageSellPrice', 'trendPrice', 'avg30', 'lowPrice'],
+    _cardmarketPriceFieldPriority,
   );
   if (cardmarketPrice != null) {
     return MoneyValue(amount: cardmarketPrice, currencyCode: 'EUR');
@@ -47,11 +125,67 @@ MoneyValue? _extractRawCardMoney(Map<String, dynamic> json) {
   return null;
 }
 
+String _prettyPriceGroupLabel(String key) {
+  const labels = <String, String>{
+    'normal': 'Normal',
+    'holofoil': 'Holofoil',
+    'reverseHolofoil': 'Reverse Holo',
+    '1stEditionNormal': '1st Ed Normal',
+    '1stEditionHolofoil': '1st Ed Holo',
+    'unlimitedNormal': 'Unlimited Normal',
+    'unlimitedHolofoil': 'Unlimited Holo',
+    'unlimitedReverseHolofoil': 'Unlimited Reverse Holo',
+    'unlimited': 'Unlimited',
+  };
+  return labels[key] ?? _titleCasePriceLabel(key);
+}
+
+String _prettyPriceFieldLabel(String key) {
+  const labels = <String, String>{
+    'market': 'Market',
+    'mid': 'Mid',
+    'directLow': 'Direct Low',
+    'low': 'Low',
+    'high': 'High',
+    'averageSellPrice': 'Avg Sell',
+    'trendPrice': 'Trend',
+    'avg1': 'Avg 1 Day',
+    'avg7': 'Avg 7 Days',
+    'avg30': 'Avg 30 Days',
+    'lowPrice': 'Low',
+    'lowPriceExPlus': 'Low EX+',
+    'reverseHoloSell': 'Reverse Holo Sell',
+    'reverseHoloTrend': 'Reverse Holo Trend',
+    'reverseHoloLow': 'Reverse Holo Low',
+  };
+  return labels[key] ?? _titleCasePriceLabel(key);
+}
+
+String _titleCasePriceLabel(String value) {
+  final spaced = value
+      .replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (match) => '${match.group(1)} ${match.group(2)}',
+      )
+      .replaceAll(RegExp(r'[_\-]+'), ' ')
+      .trim();
+  if (spaced.isEmpty) return value;
+
+  return spaced
+      .split(RegExp(r'\s+'))
+      .map((word) {
+        if (word.isEmpty) return word;
+        if (word.length == 1) return word.toUpperCase();
+        return '${word[0].toUpperCase()}${word.substring(1)}';
+      })
+      .join(' ');
+}
+
 Map<String, double> _extractRawPriceBreakdown(Map<String, dynamic> json) {
-  final tcgplayer = (json['tcgplayer'] as Map<String, dynamic>? ?? {});
-  final tcgPrices = (tcgplayer['prices'] as Map<String, dynamic>? ?? {});
-  final cardmarket = (json['cardmarket'] as Map<String, dynamic>? ?? {});
-  final cardmarketPrices = (cardmarket['prices'] as Map<String, dynamic>? ?? {});
+  final tcgplayer = _asStringDynamicMap(json['tcgplayer']);
+  final tcgPrices = _asStringDynamicMap(tcgplayer['prices']);
+  final cardmarket = _asStringDynamicMap(json['cardmarket']);
+  final cardmarketPrices = _asStringDynamicMap(cardmarket['prices']);
 
   final result = <String, double>{};
 
@@ -59,29 +193,52 @@ Map<String, double> _extractRawPriceBreakdown(Map<String, dynamic> json) {
     if (value != null && value > 0) result[label] = value;
   }
 
-  for (final entry in <String, String>{
-    'Normal Market': 'normal',
-    'Holofoil Market': 'holofoil',
-    'Reverse Holo Market': 'reverseHolofoil',
-    '1st Ed Normal Market': '1stEditionNormal',
-    '1st Ed Holo Market': '1stEditionHolofoil',
-    'Unlimited Holo Market': 'unlimitedHolofoil',
-  }.entries) {
-    final priceMap = (tcgPrices[entry.value] as Map<String, dynamic>? ?? {});
-    addIf(entry.key, _pickFirstAvailablePrice(priceMap, ['market', 'mid', 'low']));
+  void addTcgPlayerPriceMap(String groupKey, Map<String, dynamic> priceMap) {
+    final usedFields = <String>{};
+    for (final fieldKey in _tcgPlayerPriceFieldPriority) {
+      usedFields.add(fieldKey);
+      addIf(
+        '${_prettyPriceGroupLabel(groupKey)} ${_prettyPriceFieldLabel(fieldKey)}',
+        _asPrice(priceMap[fieldKey]),
+      );
+    }
+
+    for (final entry in priceMap.entries) {
+      if (usedFields.contains(entry.key)) continue;
+      addIf(
+        '${_prettyPriceGroupLabel(groupKey)} ${_prettyPriceFieldLabel(entry.key)}',
+        _asPrice(entry.value),
+      );
+    }
   }
 
-  addIf('Cardmarket Avg Sell', _asPrice(cardmarketPrices['averageSellPrice']));
-  addIf('Cardmarket Trend', _asPrice(cardmarketPrices['trendPrice']));
-  addIf('Cardmarket Avg30', _asPrice(cardmarketPrices['avg30']));
-  addIf('Cardmarket Low', _asPrice(cardmarketPrices['lowPrice']));
+  for (final key in _tcgPlayerRawPriceGroupKeys(tcgPrices)) {
+    addTcgPlayerPriceMap(key, _asStringDynamicMap(tcgPrices[key]));
+  }
+
+  final usedCardmarketFields = <String>{};
+  for (final fieldKey in _cardmarketPriceFieldPriority) {
+    usedCardmarketFields.add(fieldKey);
+    addIf(
+      'Cardmarket ${_prettyPriceFieldLabel(fieldKey)}',
+      _asPrice(cardmarketPrices[fieldKey]),
+    );
+  }
+
+  for (final entry in cardmarketPrices.entries) {
+    if (usedCardmarketFields.contains(entry.key)) continue;
+    addIf(
+      'Cardmarket ${_prettyPriceFieldLabel(entry.key)}',
+      _asPrice(entry.value),
+    );
+  }
 
   return result;
 }
 
 Map<String, double> _extractGradedPrices(Map<String, dynamic> json) {
-  final tcgplayer = (json['tcgplayer'] as Map<String, dynamic>? ?? {});
-  final tcgPrices = (tcgplayer['prices'] as Map<String, dynamic>? ?? {});
+  final tcgplayer = _asStringDynamicMap(json['tcgplayer']);
+  final tcgPrices = _asStringDynamicMap(tcgplayer['prices']);
 
   final gradedMappings = <String, List<String>>{
     'PSA 10': ['psa10'],
@@ -96,8 +253,8 @@ Map<String, double> _extractGradedPrices(Map<String, dynamic> json) {
 
   for (final entry in gradedMappings.entries) {
     for (final key in entry.value) {
-      final priceMap = (tcgPrices[key] as Map<String, dynamic>? ?? {});
-      final price = _pickFirstAvailablePrice(priceMap, ['market', 'mid', 'low']);
+      final priceMap = _asStringDynamicMap(tcgPrices[key]);
+      final price = _pickFirstAvailablePrice(priceMap, _tcgPlayerPriceFieldPriority);
       if (price != null) {
         result[entry.key] = price;
         break;
@@ -125,6 +282,11 @@ class TcgCard {
     this.setLogoUrl,
     this.rawPrice,
     this.rawPriceCurrency = 'USD',
+    this.rawPriceSource = 'Pokémon TCG API',
+    this.externalRawPrice,
+    this.externalRawPriceCurrency = 'USD',
+    this.externalRawPriceSource = '',
+    this.externalRawPriceUpdatedAtMs,
     this.rawPriceBreakdown = const {},
     this.gradedPrices = const {},
   });
@@ -144,10 +306,77 @@ class TcgCard {
   final String? setLogoUrl;
   final double? rawPrice;
   final String rawPriceCurrency;
+  final String rawPriceSource;
+  final double? externalRawPrice;
+  final String externalRawPriceCurrency;
+  final String externalRawPriceSource;
+  final int? externalRawPriceUpdatedAtMs;
   final Map<String, double> rawPriceBreakdown;
   final Map<String, double> gradedPrices;
 
-  double? get marketPrice => rawPrice;
+  double? get marketPrice => (rawPrice ?? 0) > 0 ? rawPrice : externalRawPrice;
+
+  String get marketPriceCurrency => (rawPrice ?? 0) > 0 ? rawPriceCurrency : externalRawPriceCurrency;
+
+  String get marketPriceSource {
+    if ((rawPrice ?? 0) > 0) return rawPriceSource;
+    final source = externalRawPriceSource.trim();
+    return source.isEmpty ? 'External pricing' : source;
+  }
+
+  bool get hasLiveMarketPrice => (marketPrice ?? 0) > 0;
+
+  bool get hasExternalRawPrice => (externalRawPrice ?? 0) > 0;
+
+  TcgCard copyWith({
+    String? id,
+    String? name,
+    String? setId,
+    String? setName,
+    String? number,
+    List<String>? types,
+    String? rarity,
+    String? hp,
+    String? artist,
+    String? flavorText,
+    String? imageUrl,
+    String? largeImageUrl,
+    String? setLogoUrl,
+    double? rawPrice,
+    String? rawPriceCurrency,
+    String? rawPriceSource,
+    double? externalRawPrice,
+    String? externalRawPriceCurrency,
+    String? externalRawPriceSource,
+    int? externalRawPriceUpdatedAtMs,
+    Map<String, double>? rawPriceBreakdown,
+    Map<String, double>? gradedPrices,
+  }) {
+    return TcgCard(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      setId: setId ?? this.setId,
+      setName: setName ?? this.setName,
+      number: number ?? this.number,
+      types: types ?? this.types,
+      rarity: rarity ?? this.rarity,
+      hp: hp ?? this.hp,
+      artist: artist ?? this.artist,
+      flavorText: flavorText ?? this.flavorText,
+      imageUrl: imageUrl ?? this.imageUrl,
+      largeImageUrl: largeImageUrl ?? this.largeImageUrl,
+      setLogoUrl: setLogoUrl ?? this.setLogoUrl,
+      rawPrice: rawPrice ?? this.rawPrice,
+      rawPriceCurrency: rawPriceCurrency ?? this.rawPriceCurrency,
+      rawPriceSource: rawPriceSource ?? this.rawPriceSource,
+      externalRawPrice: externalRawPrice ?? this.externalRawPrice,
+      externalRawPriceCurrency: externalRawPriceCurrency ?? this.externalRawPriceCurrency,
+      externalRawPriceSource: externalRawPriceSource ?? this.externalRawPriceSource,
+      externalRawPriceUpdatedAtMs: externalRawPriceUpdatedAtMs ?? this.externalRawPriceUpdatedAtMs,
+      rawPriceBreakdown: rawPriceBreakdown ?? this.rawPriceBreakdown,
+      gradedPrices: gradedPrices ?? this.gradedPrices,
+    );
+  }
 
   String? get effectiveImageUrl {
     final candidates = imageUrlCandidates;
@@ -579,6 +808,7 @@ class TcgCard {
       setLogoUrl: (set['images'] as Map<String, dynamic>? ?? {})['logo']?.toString(),
       rawPrice: rawPriceMoney?.amount,
       rawPriceCurrency: rawPriceMoney?.currencyCode ?? 'USD',
+      rawPriceSource: rawPriceMoney == null ? '' : 'Pokémon TCG API',
       rawPriceBreakdown: _extractRawPriceBreakdown(json),
       gradedPrices: _extractGradedPrices(json),
       types: (json['types'] as List<dynamic>? ?? const [])
@@ -608,6 +838,11 @@ class TcgCard {
       setLogoUrl: baseCard.setLogoUrl,
       rawPrice: baseCard.rawPrice,
       rawPriceCurrency: baseCard.rawPriceCurrency,
+      rawPriceSource: baseCard.rawPriceSource,
+      externalRawPrice: baseCard.externalRawPrice,
+      externalRawPriceCurrency: baseCard.externalRawPriceCurrency,
+      externalRawPriceSource: baseCard.externalRawPriceSource,
+      externalRawPriceUpdatedAtMs: baseCard.externalRawPriceUpdatedAtMs,
       rawPriceBreakdown: baseCard.rawPriceBreakdown,
       gradedPrices: baseCard.gradedPrices,
       types: baseCard.types,

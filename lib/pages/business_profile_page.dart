@@ -1,13 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../models/business_enquiry.dart';
-import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../services/business_profile_service.dart';
-import 'business_enquiries_page.dart';
-import 'business_pro_plan_page.dart';
-import 'business_pro_request_page.dart';
-import 'business_profile_dashboard_page.dart';
+import 'business_onboarding_page.dart';
+import 'business_quick_actions_page.dart';
 import 'business_profile_editor_page.dart';
 
 class BusinessProfilePage extends StatelessWidget {
@@ -22,6 +19,57 @@ class BusinessProfilePage extends StatelessWidget {
   static const Color successColor = Color(0xFF4ADE80);
   static const Color warningColor = Color(0xFFFBBF24);
 
+  Future<void> _confirmSignOut(BuildContext context) async {
+    final shouldSignOut = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: cardColor,
+          title: const Text(
+            'Log out?',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          content: const Text(
+            'You will be signed out of this business account.',
+            style: TextStyle(
+              color: softTextColor,
+              height: 1.35,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: goldColor,
+                foregroundColor: backgroundColor,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.logout),
+              label: const Text(
+                'Log out',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldSignOut != true) return;
+
+    await FirebaseAuth.instance.signOut();
+
+    if (!context.mounted) return;
+
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
   @override
   Widget build(BuildContext context) {
     final service = BusinessProfileService();
@@ -34,6 +82,14 @@ class BusinessProfilePage extends StatelessWidget {
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Log out',
+            icon: const Icon(Icons.logout),
+            onPressed: () => _confirmSignOut(context),
+          ),
+          const SizedBox(width: 6),
+        ],
       ),
       body: StreamBuilder<BusinessProfile?>(
         stream: service.watchMyBusinessProfile(),
@@ -79,111 +135,27 @@ class _BusinessProfileMenu extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 120),
       children: [
         _ProfileHeroCard(profile: profile),
+        if (!_BusinessSetupPreviewCard.isSetupComplete(profile)) ...[
+          const SizedBox(height: 12),
+          _BusinessSetupPreviewCard(
+            profile: profile,
+            onTap: () => _openBusinessOnboarding(context),
+          ),
+        ],
         const SizedBox(height: 12),
-        _BusinessNotificationSummary(profile: profile),
-        const SizedBox(height: 16),
-        const _SectionHeader(
-          icon: Icons.menu_rounded,
-          title: 'Business menu',
-          subtitle: 'Manage your business profile and future premium features.',
-        ),
-        const SizedBox(height: 10),
-        _MenuCard(
-          children: [
-            _MenuTile(
-              icon: Icons.edit_outlined,
-              iconColor: BusinessProfilePage.goldColor,
-              title: 'Edit business profile',
-              subtitle: 'Update your business name, description, website, phone and area.',
-              onTap: () => _openEditor(context),
-            ),
-            const _MenuDivider(),
-            _MenuTile(
-              icon: Icons.store_mall_directory_outlined,
-              iconColor: profile.linkedShopId.isEmpty
-                  ? BusinessProfilePage.softTextColor
-                  : BusinessProfilePage.goldColor,
-              title: profile.linkedShopId.isEmpty
-                  ? 'Link a TCG shop later'
-                  : 'Linked TCG shop',
-              subtitle: profile.linkedShopName.isEmpty
-                  ? 'Optional. Your profile can work without a featured shop.'
-                  : profile.linkedShopName,
-              onTap: () => _openEditor(context),
-            ),
-            const _MenuDivider(),
-            _MenuTile(
-              icon: Icons.mark_email_unread_outlined,
-              iconColor: BusinessProfilePage.goldColor,
-              title: 'Customer enquiries',
-              subtitle: 'View messages and questions from users.',
-              trailing: _BusinessEnquiriesBadge(profile: profile),
-              onTap: () => _openCustomerEnquiries(context),
-            ),
-            const _MenuDivider(),
-            _MenuTile(
-              icon: Icons.dashboard_customize_outlined,
-              iconColor: BusinessProfilePage.goldColor,
-              title: 'Business Pro dashboard',
-              subtitle: profile.premiumIsActive
-                  ? 'Manage offers, events, products, enquiries, analytics and Pro tools.'
-                  : 'View Pro tools and request access from the app admin.',
-              trailing: _SmallPill(
-                text: profile.premiumIsActive ? 'Active' : 'Pro',
-                color: profile.premiumIsActive
-                    ? BusinessProfilePage.successColor
-                    : BusinessProfilePage.goldColor,
-                textColor: BusinessProfilePage.backgroundColor,
-              ),
-              onTap: () => _openBusinessProDashboard(context),
-            ),
-            const _MenuDivider(),
-            _MenuTile(
-              icon: Icons.contact_support_outlined,
-              iconColor: BusinessProfilePage.goldColor,
-              title: profile.premiumIsActive
-                  ? 'Request Pro renewal'
-                  : 'Request Business Pro',
-              subtitle: 'Send a request or message to the app admin about Business Pro.',
-              trailing: _BusinessProRequestsBadge(profile: profile),
-              onTap: () => _openBusinessProRequest(context),
-            ),
-            const _MenuDivider(),
-            _MenuTile(
-              icon: Icons.price_change_outlined,
-              iconColor: BusinessProfilePage.goldColor,
-              title: 'Business Pro pricing & plan',
-              subtitle: 'View included features, price placeholders and request options.',
-              onTap: () => _openBusinessProPlan(context),
-            ),
-            const _MenuDivider(),
-            _MenuTile(
-              icon: Icons.info_outline,
-              iconColor: BusinessProfilePage.softTextColor,
-              title: 'What Business Pro includes',
-              subtitle: 'Quick overview of featured placements, offers, events and enquiries.',
-              onTap: () => _showBusinessProInfo(context),
-            ),
-          ],
+        _BusinessQuickActionsPreviewCard(
+          profile: profile,
+          onTap: () => _openBusinessQuickActions(context),
         ),
         const SizedBox(height: 16),
         const _SectionHeader(
           icon: Icons.visibility_outlined,
-          title: 'Profile details',
-          subtitle: 'What is currently saved on this business profile.',
+          title: 'Business overview',
+          subtitle: 'Your main management tools are now inside Business Quick Actions.',
         ),
         const SizedBox(height: 10),
         _ProfileDetailsCard(profile: profile),
         const SizedBox(height: 16),
-        const _SectionHeader(
-          icon: Icons.verified_outlined,
-          title: 'Status',
-          subtitle: 'Approval and premium are protected by Firestore rules.',
-        ),
-        const SizedBox(height: 10),
-        _StatusCard(profile: profile),
-        const SizedBox(height: 16),
-        _BusinessProCard(profile: profile),
         const SizedBox(height: 16),
         const _SectionHeader(
           icon: Icons.warning_amber_rounded,
@@ -259,444 +231,339 @@ class _BusinessProfileMenu extends StatelessWidget {
     }
   }
 
-  void _openEditor(BuildContext context) {
+
+  void _openBusinessOnboarding(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => BusinessProfileEditorPage(profile: profile),
+        builder: (_) => BusinessOnboardingPage(profile: profile),
       ),
     );
   }
 
-  void _openBusinessProDashboard(BuildContext context) {
+  void _openBusinessQuickActions(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => BusinessProDashboardPage(profile: profile),
+        builder: (_) => BusinessQuickActionsPage(profile: profile),
       ),
     );
   }
 
-  void _openCustomerEnquiries(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BusinessEnquiriesPage(profile: profile),
-      ),
-    );
-  }
 
-  void _openBusinessProRequest(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BusinessProRequestPage(profile: profile),
-      ),
-    );
-  }
+}
 
-  void _openBusinessProPlan(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BusinessProPlanPage(profile: profile),
-      ),
-    );
-  }
 
-  void _showBusinessProInfo(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: BusinessProfilePage.cardColor,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      builder: (bottomSheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
+class _BusinessQuickActionsPreviewCard extends StatelessWidget {
+  const _BusinessQuickActionsPreviewCard({
+    required this.profile,
+    required this.onTap,
+  });
+
+  final BusinessProfile profile;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isOpen = profile.isOpenNow ?? profile.openingStatus == 'open';
+    final statusColor = isOpen
+        ? BusinessProfilePage.successColor
+        : Colors.redAccent;
+
+    return Material(
+      color: BusinessProfilePage.cardColor,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: statusColor),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: BusinessProfilePage.fieldColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: BusinessProfilePage.borderColor),
+                ),
+                child: Icon(
+                  isOpen ? Icons.lock_open_outlined : Icons.lock_outline,
+                  color: statusColor,
+                  size: 27,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.workspace_premium,
-                      color: BusinessProfilePage.goldColor,
-                      size: 30,
+                    const Text(
+                      'Business quick actions',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'PocketChase Business Pro',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
+                    const SizedBox(height: 5),
+                    Text(
+                      isOpen
+                          ? 'Open now. Quickly manage offers, events, products and enquiries.'
+                          : 'Closed now. Quickly manage offers, events, products and enquiries.',
+                      style: const TextStyle(
+                        color: BusinessProfilePage.softTextColor,
+                        height: 1.35,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.chevron_right,
+                color: BusinessProfilePage.goldColor,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BusinessSetupPreviewCard extends StatelessWidget {
+  const _BusinessSetupPreviewCard({
+    required this.profile,
+    required this.onTap,
+  });
+
+  final BusinessProfile profile;
+  final VoidCallback onTap;
+
+  static bool isSetupComplete(BusinessProfile profile) {
+    const total = 4;
+    var count = 0;
+
+    if (profile.hasRequiredBusinessDetails) count++;
+    if (!profile.hasPhysicalShop || profile.hasLinkedShop) count++;
+    if (profile.hasAnyOpeningHours) count++;
+    if (profile.logoUrl.trim().isNotEmpty ||
+        profile.bannerUrl.trim().isNotEmpty) {
+      count++;
+    }
+
+    return count == total;
+  }
+
+  int get _completeCount {
+    var count = 0;
+
+    if (profile.hasRequiredBusinessDetails) count++;
+    if (!profile.hasPhysicalShop || profile.hasLinkedShop) count++;
+    if (profile.hasAnyOpeningHours) count++;
+    if (profile.logoUrl.trim().isNotEmpty ||
+        profile.bannerUrl.trim().isNotEmpty) {
+      count++;
+    }
+
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const total = 4;
+    final completeCount = _completeCount;
+    final complete = completeCount == total;
+    final progress = completeCount / total;
+
+    return Material(
+      color: BusinessProfilePage.cardColor,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: complete
+                  ? BusinessProfilePage.successColor
+                  : BusinessProfilePage.goldColor,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: BusinessProfilePage.fieldColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: BusinessProfilePage.borderColor),
+                ),
+                child: Icon(
+                  complete
+                      ? Icons.verified_outlined
+                      : Icons.checklist_rounded,
+                  color: complete
+                      ? BusinessProfilePage.successColor
+                      : BusinessProfilePage.goldColor,
+                  size: 27,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Business setup checklist',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      complete
+                          ? 'Required setup complete. Add extra polish when ready.'
+                          : '$completeCount of $total required setup steps complete.',
+                      style: const TextStyle(
+                        color: BusinessProfilePage.softTextColor,
+                        height: 1.35,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: progress.clamp(0, 1),
+                        minHeight: 7,
+                        backgroundColor: BusinessProfilePage.fieldColor,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          complete
+                              ? BusinessProfilePage.successColor
+                              : BusinessProfilePage.goldColor,
                         ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Business Pro gives shop owners extra visibility and tools inside PocketChase.',
-                  style: TextStyle(
-                    color: BusinessProfilePage.softTextColor,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const _FeatureLine(
-                  enabled: true,
-                  text: 'Featured moving banner and featured map/online shop placements',
-                ),
-                const _FeatureLine(
-                  enabled: true,
-                  text: 'Offers, shop events, product showcase and customer enquiries',
-                ),
-                const _FeatureLine(
-                  enabled: true,
-                  text: 'Reviews, replies, analytics and Pro request/renewal support',
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: BusinessProfilePage.fieldColor,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: BusinessProfilePage.borderColor),
-                  ),
-                  child: const Text(
-                    'Use Request Business Pro or Request Pro renewal to contact the app admin. Admin can then activate or renew Pro access.',
-                    style: TextStyle(
-                      color: BusinessProfilePage.softTextColor,
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: BusinessProfilePage.goldColor,
-                      foregroundColor: BusinessProfilePage.backgroundColor,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    onPressed: () => Navigator.of(bottomSheetContext).pop(),
-                    child: const Text(
-                      'Close',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-
-class _BusinessNotificationSummary extends StatelessWidget {
-  const _BusinessNotificationSummary({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<BusinessEnquiry>>(
-      stream: BusinessProfileService().watchBusinessEnquiries(profile.id),
-      builder: (context, enquirySnapshot) {
-        final enquiries = enquirySnapshot.data ?? const <BusinessEnquiry>[];
-        final openEnquiries = enquiries
-            .where((enquiry) => enquiry.status == 'open')
-            .length;
-
-        return StreamBuilder<List<BusinessProRequest>>(
-          stream: BusinessProfileService().watchBusinessProRequestsForBusiness(
-            profile.id,
-          ),
-          builder: (context, requestSnapshot) {
-            final requests =
-                requestSnapshot.data ?? const <BusinessProRequest>[];
-            final pendingRequests = requests
-                .where((request) => request.status == 'pending')
-                .length;
-            final latestRequest = requests.isEmpty ? null : requests.first;
-
-            final hasExpiryAlert =
-                profile.premiumExpiresSoon || profile.premiumIsExpired;
-            final hasNotifications =
-                openEnquiries > 0 || pendingRequests > 0 || hasExpiryAlert;
-
-            final subtitle = hasNotifications
-                ? 'You have business updates to check.'
-                : 'No urgent business notifications.';
-
-            return Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: hasNotifications
-                    ? BusinessProfilePage.goldColor.withValues(alpha: 0.12)
-                    : BusinessProfilePage.cardColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: hasNotifications
-                      ? BusinessProfilePage.goldColor
-                      : BusinessProfilePage.borderColor,
-                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Container(
-                            width: 46,
-                            height: 46,
-                            decoration: BoxDecoration(
-                              color: BusinessProfilePage.fieldColor,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: BusinessProfilePage.borderColor,
-                              ),
-                            ),
-                            child: const Icon(
-                              Icons.notifications_active_outlined,
-                              color: BusinessProfilePage.goldColor,
-                            ),
-                          ),
-                          if (hasNotifications)
-                            Positioned(
-                              right: -4,
-                              top: -4,
-                              child: Container(
-                                width: 14,
-                                height: 14,
-                                decoration: BoxDecoration(
-                                  color: Colors.redAccent,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Business notifications',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              subtitle,
-                              style: const TextStyle(
-                                color: BusinessProfilePage.softTextColor,
-                                height: 1.35,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _NotificationPill(
-                        icon: Icons.mark_email_unread_outlined,
-                        text: openEnquiries == 0
-                            ? 'No open enquiries'
-                            : '$openEnquiries open enquiry${openEnquiries == 1 ? '' : 'ies'}',
-                        highlighted: openEnquiries > 0,
-                      ),
-                      _NotificationPill(
-                        icon: Icons.contact_support_outlined,
-                        text: pendingRequests == 0
-                            ? 'No pending Pro requests'
-                            : '$pendingRequests Pro request${pendingRequests == 1 ? '' : 's'} pending',
-                        highlighted: pendingRequests > 0,
-                      ),
-                      if (latestRequest != null && latestRequest.status != 'pending')
-                        _NotificationPill(
-                          icon: latestRequest.isApproved
-                              ? Icons.check_circle_outline
-                              : Icons.cancel_outlined,
-                          text: 'Latest Pro request: ${latestRequest.statusLabel}',
-                          highlighted: true,
-                        ),
-                      if (profile.premiumIsExpired)
-                        const _NotificationPill(
-                          icon: Icons.lock_clock_outlined,
-                          text: 'Business Pro expired',
-                          highlighted: true,
-                        )
-                      else if (profile.premiumExpiresSoon)
-                        const _NotificationPill(
-                          icon: Icons.schedule_outlined,
-                          text: 'Business Pro expires soon',
-                          highlighted: true,
-                        ),
-                    ],
-                  ),
-                ],
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.chevron_right,
+                color: BusinessProfilePage.goldColor,
               ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _BusinessEnquiriesBadge extends StatelessWidget {
-  const _BusinessEnquiriesBadge({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<BusinessEnquiry>>(
-      stream: BusinessProfileService().watchBusinessEnquiries(profile.id),
-      builder: (context, snapshot) {
-        final enquiries = snapshot.data ?? const <BusinessEnquiry>[];
-        final openCount =
-            enquiries.where((enquiry) => enquiry.status == 'open').length;
-
-        if (openCount <= 0) {
-          return const Icon(
-            Icons.chevron_right,
-            color: BusinessProfilePage.goldColor,
-          );
-        }
-
-        return _CountBadge(count: openCount);
-      },
-    );
-  }
-}
-
-class _BusinessProRequestsBadge extends StatelessWidget {
-  const _BusinessProRequestsBadge({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<BusinessProRequest>>(
-      stream: BusinessProfileService().watchBusinessProRequestsForBusiness(
-        profile.id,
-      ),
-      builder: (context, snapshot) {
-        final requests = snapshot.data ?? const <BusinessProRequest>[];
-        final pendingCount =
-            requests.where((request) => request.status == 'pending').length;
-
-        if (pendingCount <= 0) {
-          return const Icon(
-            Icons.chevron_right,
-            color: BusinessProfilePage.goldColor,
-          );
-        }
-
-        return _CountBadge(count: pendingCount);
-      },
-    );
-  }
-}
-
-class _CountBadge extends StatelessWidget {
-  const _CountBadge({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 26),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.redAccent,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        count > 99 ? '99+' : count.toString(),
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _NotificationPill extends StatelessWidget {
-  const _NotificationPill({
+
+class _BusinessLogoBadge extends StatelessWidget {
+  const _BusinessLogoBadge({required this.logoUrl});
+
+  final String logoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanLogoUrl = logoUrl.trim();
+
+    return Container(
+      width: 68,
+      height: 68,
+      decoration: BoxDecoration(
+        color: BusinessProfilePage.fieldColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: BusinessProfilePage.borderColor),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(21),
+        child: cleanLogoUrl.isEmpty
+            ? const Icon(
+                Icons.storefront_outlined,
+                color: BusinessProfilePage.goldColor,
+                size: 36,
+              )
+            : Image.network(
+                cleanLogoUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Icon(
+                    Icons.storefront_outlined,
+                    color: BusinessProfilePage.goldColor,
+                    size: 36,
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _HeroStatusChip extends StatelessWidget {
+  const _HeroStatusChip({
     required this.icon,
-    required this.text,
-    required this.highlighted,
+    required this.label,
+    required this.color,
+    required this.filled,
   });
 
   final IconData icon;
-  final String text;
-  final bool highlighted;
+  final String label;
+  final Color color;
+  final bool filled;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: highlighted
-            ? BusinessProfilePage.goldColor
-            : BusinessProfilePage.fieldColor,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: highlighted
-              ? BusinessProfilePage.goldColor
-              : BusinessProfilePage.borderColor,
+    return Expanded(
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        decoration: BoxDecoration(
+          color: filled
+              ? color.withValues(alpha: 0.16)
+              : BusinessProfilePage.fieldColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: filled ? color : BusinessProfilePage.borderColor,
+            width: 1.2,
+          ),
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            color: highlighted
-                ? BusinessProfilePage.backgroundColor
-                : BusinessProfilePage.goldColor,
-            size: 15,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            text,
-            style: TextStyle(
-              color: highlighted
-                  ? BusinessProfilePage.backgroundColor
-                  : Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 17),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: filled ? Colors.white : BusinessProfilePage.softTextColor,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -709,12 +576,24 @@ class _ProfileHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final location = profile.displayLocation.trim();
+    final businessName = profile.businessName.trim().isEmpty
+        ? 'Business profile'
+        : profile.businessName.trim();
     final isApproved = profile.status == 'approved';
     final isPending = profile.status == 'pending';
-    final location = profile.displayLocation;
+    final approvalLabel = isApproved
+        ? 'Approved'
+        : isPending
+            ? 'Pending'
+            : profile.status;
+    final approvalColor = isApproved
+        ? BusinessProfilePage.successColor
+        : BusinessProfilePage.warningColor;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: BusinessProfilePage.cardColor,
         borderRadius: BorderRadius.circular(24),
@@ -725,8 +604,8 @@ class _ProfileHeroCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.20),
-            blurRadius: 18,
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 16,
             offset: const Offset(0, 8),
           ),
         ],
@@ -735,231 +614,109 @@ class _ProfileHeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              CircleAvatar(
-                radius: 32,
-                backgroundColor: BusinessProfilePage.fieldColor,
-                child: profile.logoUrl.isEmpty
-                    ? const Icon(
-                        Icons.storefront_outlined,
-                        color: BusinessProfilePage.goldColor,
-                        size: 34,
-                      )
-                    : ClipOval(
-                        child: Image.network(
-                          profile.logoUrl,
-                          fit: BoxFit.cover,
-                          width: 64,
-                          height: 64,
-                          errorBuilder: (context, error, stackTrace) {
-                            return const Icon(
-                              Icons.storefront_outlined,
-                              color: BusinessProfilePage.goldColor,
-                              size: 34,
-                            );
-                          },
-                        ),
-                      ),
-              ),
-              const SizedBox(width: 14),
+              _BusinessLogoBadge(logoUrl: profile.logoUrl),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      profile.businessName.isEmpty
-                          ? 'Business profile'
-                          : profile.businessName,
+                      businessName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 23,
+                        fontSize: 24,
                         fontWeight: FontWeight.w900,
+                        height: 1.05,
                       ),
                     ),
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: [
-                        _SmallPill(
-                          text: isApproved
-                              ? 'Approved'
-                              : isPending
-                                  ? 'Pending'
-                                  : profile.status,
-                          color: isApproved
-                              ? BusinessProfilePage.successColor
-                              : BusinessProfilePage.warningColor,
-                          textColor: Colors.black,
+                    if (location.isNotEmpty) ...[
+                      const SizedBox(height: 9),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
                         ),
-                        if (profile.verified)
-                          const _SmallPill(
-                            text: 'Verified',
-                            color: BusinessProfilePage.goldColor,
-                            textColor: BusinessProfilePage.backgroundColor,
+                        decoration: BoxDecoration(
+                          color: BusinessProfilePage.fieldColor
+                              .withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: BusinessProfilePage.borderColor,
                           ),
-                        if (profile.premiumIsActive)
-                          const _SmallPill(
-                            text: 'Business Pro',
-                            color: BusinessProfilePage.goldColor,
-                            textColor: BusinessProfilePage.backgroundColor,
-                          )
-                        else
-                          const _SmallPill(
-                            text: 'Basic',
-                            color: BusinessProfilePage.fieldColor,
-                            textColor: Colors.white,
-                          ),
-                      ],
-                    ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.place_outlined,
+                              color: BusinessProfilePage.goldColor,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: Text(
+                                location,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: BusinessProfilePage.softTextColor,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
             ],
           ),
-          if (profile.description.isNotEmpty) ...[
-            const SizedBox(height: 15),
-            Text(
-              profile.description,
-              style: const TextStyle(
-                color: BusinessProfilePage.softTextColor,
-                height: 1.35,
+          const SizedBox(height: 13),
+          Row(
+            children: [
+              _HeroStatusChip(
+                icon: isApproved
+                    ? Icons.check_circle_outline
+                    : Icons.pending_actions_outlined,
+                label: approvalLabel,
+                color: approvalColor,
+                filled: isApproved,
               ),
-            ),
-          ],
-          if (location.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Icon(
-                  Icons.place_outlined,
-                  color: BusinessProfilePage.goldColor,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    location,
-                    style: const TextStyle(
-                      color: BusinessProfilePage.softTextColor,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+              const SizedBox(width: 7),
+              _HeroStatusChip(
+                icon: profile.verified
+                    ? Icons.verified_outlined
+                    : Icons.radio_button_unchecked,
+                label: profile.verified ? 'Verified' : 'Not verified',
+                color: profile.verified
+                    ? BusinessProfilePage.goldColor
+                    : BusinessProfilePage.softTextColor,
+                filled: profile.verified,
+              ),
+              const SizedBox(width: 7),
+              _HeroStatusChip(
+                icon: profile.premiumIsActive
+                    ? Icons.workspace_premium
+                    : Icons.lock_outline,
+                label: profile.premiumIsActive ? 'Pro active' : 'Pro inactive',
+                color: profile.premiumIsActive
+                    ? BusinessProfilePage.goldColor
+                    : BusinessProfilePage.softTextColor,
+                filled: profile.premiumIsActive,
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
-
-class _MenuCard extends StatelessWidget {
-  const _MenuCard({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: BusinessProfilePage.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: BusinessProfilePage.borderColor),
-      ),
-      child: Column(children: children),
-    );
-  }
-}
-
-class _MenuTile extends StatelessWidget {
-  const _MenuTile({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: BusinessProfilePage.fieldColor,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: iconColor),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: BusinessProfilePage.softTextColor,
-                      fontSize: 12,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            trailing ??
-                const Icon(
-                  Icons.chevron_right,
-                  color: BusinessProfilePage.goldColor,
-                ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MenuDivider extends StatelessWidget {
-  const _MenuDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Divider(
-      color: BusinessProfilePage.borderColor,
-      height: 1,
-      thickness: 1,
-      indent: 68,
-    );
-  }
-}
-
 class _ProfileDetailsCard extends StatelessWidget {
   const _ProfileDetailsCard({required this.profile});
 
@@ -1012,72 +769,6 @@ class _ProfileDetailsCard extends StatelessWidget {
     );
   }
 }
-
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final isApproved = profile.status == 'approved';
-
-    return _InfoCard(
-      children: [
-        _StatusLine(
-          icon: isApproved
-              ? Icons.check_circle_outline
-              : Icons.pending_actions_outlined,
-          iconColor: isApproved
-              ? BusinessProfilePage.successColor
-              : BusinessProfilePage.warningColor,
-          title: 'Profile approval',
-          value: isApproved ? 'Approved' : 'Pending approval',
-        ),
-        const SizedBox(height: 10),
-        _StatusLine(
-          icon: profile.verified
-              ? Icons.verified_outlined
-              : Icons.radio_button_unchecked,
-          iconColor: profile.verified
-              ? BusinessProfilePage.goldColor
-              : BusinessProfilePage.softTextColor,
-          title: 'Verified business',
-          value: profile.verified ? 'Verified' : 'Not verified yet',
-        ),
-        const SizedBox(height: 10),
-        _StatusLine(
-          icon: profile.premiumIsActive
-              ? Icons.workspace_premium
-              : Icons.lock_outline,
-          iconColor: profile.premiumIsActive
-              ? BusinessProfilePage.goldColor
-              : BusinessProfilePage.softTextColor,
-          title: 'Business Pro',
-          value: profile.premiumIsActive ? 'Active' : 'Not active',
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: BusinessProfilePage.fieldColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: BusinessProfilePage.borderColor),
-          ),
-          child: const Text(
-            'Users can edit profile details, but approval and premium settings are protected so users cannot give themselves premium access.',
-            style: TextStyle(
-              color: BusinessProfilePage.softTextColor,
-              fontSize: 12,
-              height: 1.35,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 
 class _DangerZoneCard extends StatelessWidget {
   const _DangerZoneCard({
@@ -1147,80 +838,6 @@ class _DangerZoneCard extends StatelessWidget {
               ),
               onPressed: onDelete,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BusinessProCard extends StatelessWidget {
-  const _BusinessProCard({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final premiumActive = profile.premiumIsActive;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: premiumActive
-            ? BusinessProfilePage.goldColor.withValues(alpha: 0.14)
-            : BusinessProfilePage.cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: premiumActive
-              ? BusinessProfilePage.goldColor
-              : BusinessProfilePage.borderColor,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.workspace_premium,
-                color: BusinessProfilePage.goldColor,
-                size: 28,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  premiumActive
-                      ? 'Business Pro active'
-                      : 'Business Pro not active',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Business Pro helps shops stand out to collectors using PocketChase.',
-            style: TextStyle(
-              color: BusinessProfilePage.softTextColor,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _FeatureLine(
-            enabled: profile.featuredShopEnabled && premiumActive,
-            text: 'Featured shop placement on the map',
-          ),
-          _FeatureLine(
-            enabled: profile.autoFeaturePosts && premiumActive,
-            text: 'Automatically featured community posts',
-          ),
-          _FeatureLine(
-            enabled: premiumActive,
-            text: 'Reviews, replies, analytics and Pro request/renewal support',
           ),
         ],
       ),
@@ -1445,45 +1062,6 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _StatusLine extends StatelessWidget {
-  const _StatusLine({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.value,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: iconColor, size: 22),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            color: BusinessProfilePage.softTextColor,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class _FeatureLine extends StatelessWidget {
   const _FeatureLine({
@@ -1518,37 +1096,6 @@ class _FeatureLine extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SmallPill extends StatelessWidget {
-  const _SmallPill({
-    required this.text,
-    required this.color,
-    required this.textColor,
-  });
-
-  final String text;
-  final Color color;
-  final Color textColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-        ),
       ),
     );
   }

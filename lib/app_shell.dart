@@ -6,11 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models/app_user_profile.dart';
 import 'models/business_profile.dart';
 import 'pages/business_profile_editor_page.dart';
+import 'pages/business_profile_page.dart';
 import 'pages/card_scanner_page.dart';
 import 'pages/card_search_page.dart';
 import 'pages/community_page.dart';
 import 'pages/master_sets_page.dart';
 import 'pages/profile_page.dart';
+import 'pages/pocketchase_onboarding_page.dart';
+import 'pages/send_feedback_page.dart';
 import 'pages/tcg_shop_map_page.dart';
 import 'services/business_profile_service.dart';
 import 'services/community_unread_private_message_service.dart';
@@ -18,6 +21,7 @@ import 'services/currency_settings.dart';
 import 'services/custom_binder_sync_service.dart';
 import 'services/friend_service.dart';
 import 'services/pokedex_sync_service.dart';
+import 'services/push_notification_service.dart';
 import 'widgets/pocketchase_banner_ad.dart';
 import 'widgets/profile_app_bar_button.dart';
 
@@ -56,10 +60,55 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _loadCommunityDisclaimerAcceptance();
+    PushNotificationService.initialiseForCurrentUser();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       PokedexSyncService.ensureCurrentUserPokedexReady();
       CustomBinderSyncService.ensureCurrentUserBindersReady();
+      _showOnboardingIfNeeded();
     });
+  }
+
+  String _onboardingPrefsKey() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
+    return 'pocketchase_onboarding_seen_$uid';
+  }
+
+  Future<void> _showOnboardingIfNeeded() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _onboardingPrefsKey();
+
+    if (prefs.getBool(key) == true || !mounted) return;
+
+    // Give the main shell a moment to finish opening before showing the
+    // first-time app guide. The guide is shown once per signed-in account.
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (!mounted) return;
+
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        fullscreenDialog: true,
+        builder: (_) => const PocketChaseOnboardingPage(),
+      ),
+    );
+
+    await prefs.setBool(key, true);
+  }
+
+  Future<void> _openOnboarding() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        fullscreenDialog: true,
+        builder: (_) => const PocketChaseOnboardingPage(),
+      ),
+    );
+  }
+
+  Future<void> _openFeedback(AppUserProfile profile) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SendFeedbackPage(profile: profile),
+      ),
+    );
   }
 
   String _communityDisclaimerPrefsKey() {
@@ -291,7 +340,30 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Widget _buildCurrentPage() {
+  AppUserProfile _effectiveProfileForBusiness(BusinessProfile? businessProfile) {
+    if (!widget.profile.isBusinessAccount || businessProfile == null) {
+      return widget.profile;
+    }
+
+    final businessName = businessProfile.businessName.trim();
+    final businessLogoUrl = businessProfile.logoUrl.trim();
+
+    return AppUserProfile(
+      uid: widget.profile.uid,
+      email: widget.profile.email,
+      username: businessName.isEmpty ? widget.profile.username : businessName,
+      createdAtMs: widget.profile.createdAtMs,
+      updatedAtMs: widget.profile.updatedAtMs,
+      accountType: widget.profile.accountType,
+      businessProfileCreated: widget.profile.businessProfileCreated,
+      dateOfBirthMs: widget.profile.dateOfBirthMs,
+      profileImageBase64: businessLogoUrl.isNotEmpty
+          ? businessLogoUrl
+          : widget.profile.profileImageBase64,
+    );
+  }
+
+  Widget _buildCurrentPage({AppUserProfile? effectiveProfile}) {
     switch (_currentIndex) {
       case _kScanIndex:
         return const CardScannerPage(showAppBar: false);
@@ -300,7 +372,7 @@ class _AppShellState extends State<AppShell> {
       case _kMapIndex:
         return const TcgShopMapPage();
       case _kCommunityIndex:
-        return CommunityPage(profile: widget.profile);
+        return CommunityPage(profile: effectiveProfile ?? widget.profile);
       case _kCardsIndex:
       default:
         return CardSearchPage(key: _cardSearchKey);
@@ -337,7 +409,9 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _buildGlassAppBarTitle() {
+  Widget _buildGlassAppBarTitle({AppUserProfile? effectiveProfile}) {
+    final appBarProfile = effectiveProfile ?? widget.profile;
+
     return Container(
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -396,13 +470,69 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            tooltip: 'Help and feedback',
+            icon: const Icon(
+              Icons.more_vert_rounded,
+              color: Colors.white70,
+            ),
+            color: const Color(0xFF102754),
+            onSelected: (value) {
+              if (value == 'feedback') {
+                _openFeedback(appBarProfile);
+              } else if (value == 'guide') {
+                _openOnboarding();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem<String>(
+                value: 'feedback',
+                child: Row(
+                  children: [
+                    Icon(Icons.feedback_outlined, color: Color(0xFFF7DE77)),
+                    SizedBox(width: 10),
+                    Text(
+                      'Report a problem',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'guide',
+                child: Row(
+                  children: [
+                    Icon(Icons.help_outline_rounded, color: Color(0xFFF7DE77)),
+                    SizedBox(width: 10),
+                    Text(
+                      'App guide',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
           ProfileAppBarButton(
-            profile: widget.profile,
+            profile: appBarProfile,
             onOpenProfile: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => ProfilePage(profile: widget.profile),
+                  builder: (_) {
+                    if (widget.profile.isBusinessAccount) {
+                      return const BusinessProfilePage();
+                    }
+
+                    return ProfilePage(profile: appBarProfile);
+                  },
                 ),
               );
             },
@@ -544,14 +674,16 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _buildMainAppShell() {
+  Widget _buildMainAppShell({BusinessProfile? businessProfile}) {
+    final effectiveProfile = _effectiveProfileForBusiness(businessProfile);
+
     return Scaffold(
       appBar: _currentIndex == _kMapIndex
           ? null
           : AppBar(
               titleSpacing: 12,
               toolbarHeight: 86,
-              title: _buildGlassAppBarTitle(),
+              title: _buildGlassAppBarTitle(effectiveProfile: effectiveProfile),
               backgroundColor: const Color(0xFF041B4A),
               foregroundColor: Colors.white,
               elevation: 0,
@@ -562,7 +694,7 @@ class _AppShellState extends State<AppShell> {
         builder: (context, _, __) {
           return Column(
             children: [
-              Expanded(child: _buildCurrentPage()),
+              Expanded(child: _buildCurrentPage(effectiveProfile: effectiveProfile)),
               if (_currentIndex != _kScanIndex) const PocketChaseBannerAd(),
             ],
           );
@@ -750,7 +882,7 @@ class _AppShellState extends State<AppShell> {
           return _buildBusinessSetupGate(businessProfile);
         }
 
-        return _buildMainAppShell();
+        return _buildMainAppShell(businessProfile: businessProfile);
       },
     );
   }

@@ -184,16 +184,18 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     });
   }
 
-  int _pageForCardId(String cardId, List<MasterSetCardSlot> visibleSlots) {
-    final slotIndex = visibleSlots.indexWhere((slot) => slot.card.id == cardId);
+  int _pageForSlot(MasterSetCardSlot targetSlot, List<MasterSetCardSlot> visibleSlots) {
+    final slotIndex = visibleSlots.indexWhere(
+      (slot) => slot.card.id == targetSlot.card.id && slot.kind == targetSlot.kind,
+    );
     if (slotIndex < 0) return _currentPage;
     return (slotIndex ~/ _cardsPerPage) + 1;
   }
 
   Route<dynamic> _buildCardDetailsRoute({
-    required TcgCard card,
+    required MasterSetCardSlot slot,
     required CardOwnership ownership,
-    required List<TcgCard> visibleCards,
+    required List<MasterSetCardSlot> visibleSlots,
     required int currentIndex,
     required bool slideFromRight,
   }) {
@@ -202,9 +204,11 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
       reverseTransitionDuration: Duration.zero,
       pageBuilder: (context, animation, secondaryAnimation) {
         return SetCardDetailsPage(
-          card: card,
+          card: slot.card,
           ownership: ownership,
-          navigationCards: visibleCards,
+          initialSlotKind: slot.kind,
+          navigationCards: visibleSlots.map((slot) => slot.card).toList(),
+          navigationSlotKinds: visibleSlots.map((slot) => slot.kind).toList(),
           navigationIndex: currentIndex,
         );
       },
@@ -229,29 +233,40 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     );
   }
 
+  Future<void> _quickAddSlot(MasterSetCardSlot slot) async {
+    final ownership = _ownershipFor(slot.card);
+    await _updateOwnership(slot.card, slot.addOne(ownership));
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${slot.label} added to Set Pokédex')),
+    );
+  }
+
   Future<void> _openCardDetailsFromSlot({
-    required List<TcgCard> visibleCards,
     required List<MasterSetCardSlot> visibleSlots,
     required MasterSetCardSlot slot,
   }) async {
-    if (visibleCards.isEmpty) return;
+    if (visibleSlots.isEmpty) return;
 
-    var currentIndex = visibleCards.indexWhere((card) => card.id == slot.card.id);
+    var currentIndex = visibleSlots.indexWhere(
+      (candidate) => candidate.card.id == slot.card.id && candidate.kind == slot.kind,
+    );
     if (currentIndex < 0) {
       currentIndex = 0;
     }
 
     var previousIndex = currentIndex;
 
-    while (mounted && currentIndex >= 0 && currentIndex < visibleCards.length) {
-      final card = visibleCards[currentIndex];
+    while (mounted && currentIndex >= 0 && currentIndex < visibleSlots.length) {
+      final currentSlot = visibleSlots[currentIndex];
       final slideFromRight = currentIndex >= previousIndex;
       if (!mounted) return;
       final result = await Navigator.of(context).push<dynamic>(
         _buildCardDetailsRoute(
-          card: card,
-          ownership: _ownershipFor(card),
-          visibleCards: visibleCards,
+          slot: currentSlot,
+          ownership: _ownershipFor(currentSlot.card),
+          visibleSlots: visibleSlots,
           currentIndex: currentIndex,
           slideFromRight: slideFromRight,
         ),
@@ -263,12 +278,12 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
         await _updateOwnershipForCardId(result.cardId, result.ownership);
 
         final nextIndex = result.nextIndex;
-        if (nextIndex != null && nextIndex >= 0 && nextIndex < visibleCards.length) {
-          final nextCard = visibleCards[nextIndex];
+        if (nextIndex != null && nextIndex >= 0 && nextIndex < visibleSlots.length) {
+          final nextSlot = visibleSlots[nextIndex];
           final totalPages = visibleSlots.isEmpty
               ? 1
               : ((visibleSlots.length - 1) ~/ _cardsPerPage) + 1;
-          _goToPokedexPage(_pageForCardId(nextCard.id, visibleSlots), totalPages);
+          _goToPokedexPage(_pageForSlot(nextSlot, visibleSlots), totalPages);
           previousIndex = currentIndex;
           currentIndex = nextIndex;
           continue;
@@ -277,7 +292,7 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
       }
 
       if (result is CardOwnership) {
-        await _updateOwnership(card, result);
+        await _updateOwnership(currentSlot.card, result);
       }
       break;
     }
@@ -590,14 +605,17 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                                       scale: 1,
                                       child: GestureDetector(
                                         onLongPress: () async {
-                                          await _updateOwnership(
-                                            card,
-                                            slot.toggleOwnership(ownership),
-                                          );
+                                          if (isOwned) {
+                                            await _openCardDetailsFromSlot(
+                                              visibleSlots: visibleSlots,
+                                              slot: slot,
+                                            );
+                                            return;
+                                          }
+                                          await _quickAddSlot(slot);
                                         },
                                         onTap: () async {
                                           await _openCardDetailsFromSlot(
-                                            visibleCards: visibleCards,
                                             visibleSlots: visibleSlots,
                                             slot: slot,
                                           );

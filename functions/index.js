@@ -1793,3 +1793,137 @@ exports.setAdminFeaturedCommunityPost = onCall(
   }
 );
 
+
+exports.adminDeleteUser = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const callerUid = readCallableAuthUid(request);
+    const targetUid = cleanString(request.data && request.data.uid);
+
+    if (!targetUid) {
+      throw new HttpsError("invalid-argument", "Missing user UID.");
+    }
+
+    if (targetUid === callerUid) {
+      throw new HttpsError(
+        "failed-precondition",
+        "You cannot delete your own admin account."
+      );
+    }
+
+    const callerRole = await getAppRole(callerUid);
+
+    if (callerRole !== "admin") {
+      throw new HttpsError(
+        "permission-denied",
+        "Only admins can delete users."
+      );
+    }
+
+    const targetUserSnapshot = await db.collection("users").doc(targetUid).get();
+    const targetUser = targetUserSnapshot.exists
+      ? targetUserSnapshot.data() || {}
+      : {};
+
+    const deletedUserAuditRef = db
+      .collection("admin_deleted_users")
+      .doc(targetUid);
+
+    await deletedUserAuditRef.set(
+      {
+        uid: targetUid,
+        email: cleanString(targetUser.email),
+        username:
+          cleanString(targetUser.username) ||
+          cleanString(targetUser.displayName) ||
+          cleanString(targetUser.businessName),
+        accountType: cleanString(targetUser.accountType),
+        deletedBy: callerUid,
+        deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    const deletePromises = [
+      db.recursiveDelete(db.collection("users").doc(targetUid)).catch((error) => {
+        logger.warn("Could not recursive-delete user Firestore document.", {
+          targetUid,
+          error: productCheckMessageFromError(error),
+        });
+      }),
+      db.collection("user_feature_flags").doc(targetUid).delete().catch(() => null),
+      db.collection("app_roles").doc(targetUid).delete().catch(() => null),
+      db
+        .collection("user_restock_alert_preferences")
+        .doc(targetUid)
+        .delete()
+        .catch(() => null),
+    ];
+
+    const friendRequestsSnapshot = await db
+      .collection("friend_requests")
+      .where("participants", "array-contains", targetUid)
+      .get()
+      .catch(() => null);
+
+    if (friendRequestsSnapshot) {
+      friendRequestsSnapshot.docs.forEach((doc) => {
+        deletePromises.push(doc.ref.delete().catch(() => null));
+      });
+    }
+
+    const communityPostsSnapshot = await db
+      .collection("community_posts")
+      .where("authorId", "==", targetUid)
+      .get()
+      .catch(() => null);
+
+    if (communityPostsSnapshot) {
+      communityPostsSnapshot.docs.forEach((doc) => {
+        deletePromises.push(doc.ref.delete().catch(() => null));
+      });
+    }
+
+    const shopSubmissionsSnapshot = await db
+      .collection("tcg_shop_submissions")
+      .where("submittedBy", "==", targetUid)
+      .get()
+      .catch(() => null);
+
+    if (shopSubmissionsSnapshot) {
+      shopSubmissionsSnapshot.docs.forEach((doc) => {
+        deletePromises.push(doc.ref.delete().catch(() => null));
+      });
+    }
+
+    await Promise.all(deletePromises);
+
+    try {
+      await admin.auth().deleteUser(targetUid);
+    } catch (error) {
+      if (error && error.code !== "auth/user-not-found") {
+        throw new HttpsError(
+          "internal",
+          `Could not delete Firebase Auth user: ${productCheckMessageFromError(error)}`
+        );
+      }
+    }
+
+    logger.info("Admin deleted user.", {
+      callerUid,
+      targetUid,
+    });
+
+    return {
+      ok: true,
+      uid: targetUid,
+    };
+  }
+);
+
+
+
+exports.lookupExternalPokemonCardPrice =
+  require("./lookup_external_pokemon_card_price").lookupExternalPokemonCardPrice;

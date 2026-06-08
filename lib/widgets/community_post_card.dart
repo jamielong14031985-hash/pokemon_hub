@@ -31,6 +31,7 @@ class CommunityPostCard extends StatelessWidget {
     this.onBlock,
     this.onSetMarketStatus,
     this.onBump,
+    this.compact = false,
     this.canUserFeature = false,
     this.canAdminFeature = false,
     this.onToggleUserFeatured,
@@ -51,6 +52,7 @@ class CommunityPostCard extends StatelessWidget {
   final VoidCallback? onBlock;
   final ValueChanged<String>? onSetMarketStatus;
   final VoidCallback? onBump;
+  final bool compact;
   final bool canUserFeature;
   final bool canAdminFeature;
   final VoidCallback? onToggleUserFeatured;
@@ -355,6 +357,291 @@ class CommunityPostCard extends StatelessWidget {
       }
 
       return items;
+    }
+
+    if (compact) {
+      Widget compactChip({
+        required String label,
+        required Color backgroundColor,
+        required Color foregroundColor,
+        IconData? icon,
+      }) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: foregroundColor.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 11, color: foregroundColor),
+                const SizedBox(width: 3),
+              ],
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: foregroundColor,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: post.isFeatured
+                ? const Color(0xFFF7DE77).withValues(alpha: 0.44)
+                : isNew
+                    ? const Color(0xFFF7DE77).withValues(alpha: 0.34)
+                    : Colors.white.withValues(alpha: 0.07),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Card(
+          color: const Color(0xFF102754),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onOpen,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        accentColor,
+                        const Color(0xFF143163),
+                      ],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ),
+                  ),
+                ),
+                if (post.hasImages)
+                  ClipRRect(
+                    borderRadius: BorderRadius.zero,
+                    child: CommunityImageStrip(
+                      imageBase64List: post.imageBase64List,
+                      height: 74,
+                    ),
+                  )
+                else
+                  Container(
+                    height: 44,
+                    width: double.infinity,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          accentColor.withValues(alpha: 0.18),
+                          const Color(0xFF143163).withValues(alpha: 0.65),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    child: Icon(
+                      isDiscussion
+                          ? Icons.forum_outlined
+                          : Icons.storefront_outlined,
+                      color: const Color(0xFFF7DE77),
+                      size: 24,
+                    ),
+                  ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CommunityUserAvatar(
+                              userId: post.authorId,
+                              displayName: post.authorName,
+                              size: 26,
+                              onTap: onAuthorTap,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    post.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900,
+                                      height: 1.1,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    formatCommunityRelativeTime(post.createdAt),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (canEdit || onReport != null || onBlock != null)
+                              SizedBox(
+                                width: 26,
+                                height: 26,
+                                child: PopupMenuButton<CommunityPostMenuAction>(
+                                  padding: EdgeInsets.zero,
+                                  iconSize: 17,
+                                  iconColor: Colors.white70,
+                                  color: const Color(0xFF143163),
+                                  onSelected: handleMenuAction,
+                                  itemBuilder: (_) => buildMenuItems(),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            compactChip(
+                              label: post.isMarketplace ? post.postType : 'Thread',
+                              backgroundColor: accentColor.withValues(alpha: 0.16),
+                              foregroundColor: const Color(0xFFF7DE77),
+                              icon: post.isMarketplace
+                                  ? Icons.sell_outlined
+                                  : Icons.forum_outlined,
+                            ),
+                            if (post.isMarketplace)
+                              compactChip(
+                                label: post.normalizedMarketStatus,
+                                backgroundColor: const Color(0xFF16366E),
+                                foregroundColor: const Color(0xFFC8D4F0),
+                              ),
+                            if (post.isFeatured)
+                              compactChip(
+                                label: 'Featured',
+                                backgroundColor: const Color(0xFFF7DE77),
+                                foregroundColor: Colors.black,
+                                icon: Icons.star_rounded,
+                              ),
+                            if (isNew)
+                              const CommunityNewBadge(compact: true),
+                          ],
+                        ),
+                        if (post.isMarketplace) ...[
+                          const SizedBox(height: 5),
+                          CommunitySellerRatingBadge(
+                            sellerId: post.authorId,
+                            compact: true,
+                          ),
+                        ],
+                        if (post.description.trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: Text(
+                              post.description.trim(),
+                              maxLines: post.hasImages ? 3 : 4,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFFD8E3FB),
+                                fontSize: 10,
+                                height: 1.22,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ] else
+                          const Spacer(),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: SizedBox(
+                                height: 30,
+                                child: OutlinedButton.icon(
+                                  onPressed: onOpen,
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                    side: BorderSide(
+                                      color: Colors.white.withValues(alpha: 0.14),
+                                    ),
+                                    backgroundColor: const Color(0xFF16366E),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  icon: const Icon(Icons.forum_outlined, size: 14),
+                                  label: Text(
+                                    isDiscussion ? 'Open' : 'Thread',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (canMessage) ...[
+                              const SizedBox(width: 6),
+                              SizedBox(
+                                width: 34,
+                                height: 30,
+                                child: FilledButton(
+                                  onPressed: onMessage,
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFFF7DE77),
+                                    foregroundColor: Colors.black,
+                                    padding: EdgeInsets.zero,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  child: const Icon(Icons.mail_outline_rounded, size: 15),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     return Container(

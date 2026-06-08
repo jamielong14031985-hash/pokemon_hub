@@ -25,6 +25,7 @@ class BusinessProfileService {
         _storage = storage ?? FirebaseStorage.instance;
 
   static const int maxFeaturedBannerImageBytes = 5 * 1024 * 1024;
+  static const int maxBusinessLogoImageBytes = 5 * 1024 * 1024;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -209,7 +210,6 @@ class BusinessProfileService {
   }
 
 
-
   Stream<List<BusinessProfile>> watchMapPremiumBusinessProfiles() {
     return _businessProfiles
         .where('status', isEqualTo: 'approved')
@@ -244,6 +244,40 @@ class BusinessProfileService {
       return profiles;
     });
   }
+
+  Stream<List<BusinessProfile>> watchApprovedMapBusinessProfiles() {
+    return _businessProfiles
+        .where('status', isEqualTo: 'approved')
+        .snapshots()
+        .map((snapshot) {
+      final profiles = snapshot.docs
+          .map(BusinessProfile.fromDoc)
+          .where((profile) {
+            final linkedPhysicalShop =
+                profile.hasPhysicalShop && profile.linkedShopId.trim().isNotEmpty;
+            final approvedOnlineShop = !profile.hasPhysicalShop;
+
+            return linkedPhysicalShop || approvedOnlineShop;
+          })
+          .toList();
+
+      profiles.sort((a, b) {
+        final aOnline = !a.hasPhysicalShop;
+        final bOnline = !b.hasPhysicalShop;
+
+        if (aOnline != bOnline) {
+          return aOnline ? 1 : -1;
+        }
+
+        return a.businessName.toLowerCase().compareTo(
+              b.businessName.toLowerCase(),
+            );
+      });
+
+      return profiles;
+    });
+  }
+
 
   Stream<List<BusinessProfile>> watchFeaturedOnlineBusinessProfiles() {
     return _businessProfiles
@@ -296,8 +330,6 @@ class BusinessProfileService {
       return profiles;
     });
   }
-
-
 
 
   DocumentReference<Map<String, dynamic>> _businessAnalyticsSummary(
@@ -361,6 +393,50 @@ class BusinessProfileService {
     } catch (_) {
       // Analytics should never block the main user action.
     }
+  }
+
+  Future<void> resetBusinessAnalytics({
+    required String businessId,
+  }) async {
+    final cleanBusinessId = businessId.trim();
+
+    if (cleanBusinessId.isEmpty) {
+      throw Exception('Missing business id.');
+    }
+
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('You must be signed in to reset analytics.');
+    }
+
+    final profileSnapshot = await _businessProfiles.doc(cleanBusinessId).get();
+    final profileData = profileSnapshot.data();
+
+    if (profileData == null) {
+      throw Exception('Business profile not found.');
+    }
+
+    final ownerUid = (profileData['ownerUid'] ?? '').toString();
+    final canReset = ownerUid == user.uid || await currentUserIsAdminOrModeratorOnce();
+
+    if (!canReset) {
+      throw Exception('You do not have permission to reset these analytics.');
+    }
+
+    await _businessAnalyticsSummary(cleanBusinessId).set(
+      <String, Object?>{
+        'profileViews': 0,
+        'websiteClicks': 0,
+        'phoneClicks': 0,
+        'mapViews': 0,
+        'offerViews': 0,
+        'eventViews': 0,
+        'productViews': 0,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
   }
 
   CollectionReference<Map<String, dynamic>> _businessEvents(
@@ -576,8 +652,6 @@ class BusinessProfileService {
 
     await _businessEvents(cleanBusinessId).doc(cleanEventId).delete();
   }
-
-
 
 
   CollectionReference<Map<String, dynamic>> get _businessProRequests =>
@@ -1644,6 +1718,9 @@ class BusinessProfileService {
     required String phone,
     required String town,
     required String county,
+    Uint8List? logoImageBytes,
+    String logoImageFileName = 'business_logo.jpg',
+    bool removeLogoImage = false,
     Uint8List? featuredImageBytes,
     String featuredImageFileName = 'featured_banner.jpg',
     bool removeFeaturedImage = false,
@@ -1680,6 +1757,11 @@ class BusinessProfileService {
 
     if (county.trim().isEmpty) {
       throw ArgumentError('Business county is required.');
+    }
+
+    if (logoImageBytes != null &&
+        logoImageBytes.lengthInBytes > maxBusinessLogoImageBytes) {
+      throw ArgumentError('The business profile picture must be 5MB or smaller.');
     }
 
     if (featuredImageBytes != null &&
@@ -1738,6 +1820,17 @@ class BusinessProfileService {
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
+      if (removeLogoImage) {
+        updateData['logoUrl'] = '';
+      } else if (logoImageBytes != null && logoImageBytes.isNotEmpty) {
+        updateData['logoUrl'] = await _uploadBusinessLogoImage(
+          userId: ownerUid.isEmpty ? user.uid : ownerUid,
+          businessProfileId: profileRef.id,
+          bytes: logoImageBytes,
+          fileName: logoImageFileName,
+        );
+      }
+
       if (removeFeaturedImage) {
         updateData['bannerUrl'] = '';
       } else if (featuredImageBytes != null && featuredImageBytes.isNotEmpty) {
@@ -1759,7 +1852,17 @@ class BusinessProfileService {
       return;
     }
 
+    String logoUrl = '';
     String bannerUrl = '';
+
+    if (!removeLogoImage && logoImageBytes != null && logoImageBytes.isNotEmpty) {
+      logoUrl = await _uploadBusinessLogoImage(
+        userId: user.uid,
+        businessProfileId: profileRef.id,
+        bytes: logoImageBytes,
+        fileName: logoImageFileName,
+      );
+    }
 
     if (!removeFeaturedImage &&
         featuredImageBytes != null &&
@@ -1789,7 +1892,7 @@ class BusinessProfileService {
       'countyLower': county.trim().toLowerCase(),
       'openingStatus': cleanOpeningStatus,
       'openingHours': cleanOpeningHours,
-      'logoUrl': '',
+      'logoUrl': logoUrl,
       'bannerUrl': bannerUrl,
       'status': 'approved',
       'verified': false,
@@ -1923,6 +2026,34 @@ class BusinessProfileService {
       'updatedAt': FieldValue.serverTimestamp(),
       'updatedBy': user.uid,
     });
+  }
+
+  Future<String> _uploadBusinessLogoImage({
+    required String userId,
+    required String businessProfileId,
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    final contentType =
+        lookupMimeType(fileName, headerBytes: bytes) ?? 'image/jpeg';
+    final extension = _extensionForContentType(contentType);
+    final storagePath =
+        'business_profiles/$userId/$businessProfileId/logo.$extension';
+
+    final ref = _storage.ref(storagePath);
+    final uploadTask = await ref.putData(
+      bytes,
+      SettableMetadata(
+        contentType: contentType,
+        customMetadata: <String, String>{
+          'userId': userId,
+          'businessProfileId': businessProfileId,
+          'feature': 'business_logo',
+        },
+      ),
+    );
+
+    return uploadTask.ref.getDownloadURL();
   }
 
   Future<String> _uploadFeaturedBannerImage({

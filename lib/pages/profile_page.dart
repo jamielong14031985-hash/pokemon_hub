@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,7 +8,6 @@ import 'package:image_picker/image_picker.dart';
 import '../models/app_user_profile.dart';
 import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
-import '../models/tcg_shop.dart';
 import '../models/wishlist_entry.dart';
 import '../services/account_deletion_service.dart';
 import '../services/collection_refresh_notifier.dart';
@@ -15,8 +15,6 @@ import '../services/community_image_services.dart';
 import '../services/currency_settings.dart';
 import '../services/local_image_store.dart';
 import '../services/pro_status_service.dart';
-import '../services/user_feature_flags_service.dart';
-import '../services/tcg_shop_service.dart';
 import '../services/user_profile_service.dart';
 import '../services/wishlist_service.dart';
 import '../utils/auth_input_decoration.dart';
@@ -24,17 +22,15 @@ import '../utils/profile_stats_helpers.dart';
 import '../widgets/achievement_badges.dart';
 import '../widgets/profile_collection_widgets.dart';
 import '../widgets/profile_stat_card.dart';
-import 'admin_business_profiles_page.dart';
-import 'admin_user_feature_flags_page.dart';
 import 'business_profile_page.dart';
 import 'card_details_page.dart';
 import 'featured_online_shops_page.dart';
 import 'friend_requests_page.dart';
 import 'friends_page.dart';
 import 'pro_upgrade_page.dart';
-import 'tcg_shop_submissions_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
+import 'admin_tools_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key, required this.profile});
@@ -48,14 +44,11 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _nameController = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
-  final TcgShopService _tcgShopService = TcgShopService();
-
   String? _profileImagePath;
   bool _loadingProfile = true;
   bool _savingName = false;
   bool _savingCurrency = false;
   final bool _deletingAccount = false;
-  bool _featuresExpanded = false;
   String _selectedCurrencyCode = CurrencySettings.selectedCode;
   late Future<ProfileStats> _statsFuture;
 
@@ -85,9 +78,9 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _saveName() async {
+  Future<bool> _saveName({bool showSnackBar = true}) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) return false;
 
     final newName = _nameController.text.trim();
     if (newName.isEmpty) {
@@ -100,7 +93,7 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
       );
-      return;
+      return false;
     }
 
     setState(() {
@@ -109,17 +102,19 @@ class _ProfilePageState extends State<ProfilePage> {
 
     try {
       await UserProfileService.upsertProfile(user: user, username: newName);
-      if (mounted) {
+      if (mounted && showSnackBar) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Name updated')),
         );
       }
+      return true;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not update your name')),
         );
       }
+      return false;
     } finally {
       if (mounted) {
         setState(() {
@@ -169,8 +164,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _updateCurrency(String? value) async {
-    if (value == null || value == _selectedCurrencyCode) return;
+  Future<bool> _updateCurrency(
+    String? value, {
+    bool showSnackBar = true,
+  }) async {
+    if (value == null || value == _selectedCurrencyCode) return true;
 
     setState(() {
       _savingCurrency = true;
@@ -178,21 +176,30 @@ class _ProfilePageState extends State<ProfilePage> {
 
     try {
       await CurrencySettings.setSelectedCode(value);
-      if (!mounted) return;
+      if (!mounted) return false;
 
       setState(() {
         _selectedCurrencyCode = CurrencySettings.selectedCode;
         _statsFuture = _loadStats();
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Currency changed to ${CurrencySettings.selectedCurrency.code}')),
-      );
+      if (showSnackBar) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Currency changed to ${CurrencySettings.selectedCurrency.code}',
+            ),
+          ),
+        );
+      }
+
+      return true;
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not update your currency right now')),
       );
+      return false;
     } finally {
       if (mounted) {
         setState(() {
@@ -232,6 +239,34 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _statsFuture = _loadStats();
     });
+  }
+
+
+  Stream<bool> _watchCurrentUserIsAdminOrModerator() {
+    final uid = FirebaseAuth.instance.currentUser?.uid.trim();
+
+    if (uid == null || uid.isEmpty) {
+      return Stream<bool>.value(false);
+    }
+
+    return FirebaseFirestore.instance
+        .collection('app_roles')
+        .doc(uid)
+        .snapshots()
+        .map((snapshot) {
+      final data = snapshot.data();
+      final role = (data?['role'] as String? ?? '').trim().toLowerCase();
+
+      return role == 'admin' || role == 'moderator';
+    });
+  }
+
+  Future<void> _openAdminTools() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const AdminToolsPage(),
+      ),
+    );
   }
 
   Future<void> _openFriends() async {
@@ -283,80 +318,6 @@ class _ProfilePageState extends State<ProfilePage> {
         builder: (_) => const FeaturedOnlineShopsPage(),
       ),
     );
-  }
-
-  Future<void> _openAdminBusinessProfiles() async {
-    try {
-      final canManage = await UserFeatureFlagsService
-          .watchCurrentUserCanManageFeatureFlags()
-          .first
-          .timeout(const Duration(seconds: 8));
-
-      if (!mounted) return;
-
-      if (canManage != true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Only admins and moderators can open Business Profiles.'),
-          ),
-        );
-        return;
-      }
-
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => const AdminBusinessProfilesPage(),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not check your staff permission right now.'),
-        ),
-      );
-    }
-  }
-
-  Future<void> _openTcgShopSubmissions() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const TcgShopSubmissionsPage(),
-      ),
-    );
-  }
-
-  Future<void> _openUserFeatures() async {
-    try {
-      final canManage = await UserFeatureFlagsService
-          .watchCurrentUserCanManageFeatureFlags()
-          .first
-          .timeout(const Duration(seconds: 8));
-
-      if (!mounted) return;
-
-      if (canManage != true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Only admins and moderators can open User Features.'),
-          ),
-        );
-        return;
-      }
-
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => const AdminUserFeatureFlagsPage(),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not check your staff permission right now.'),
-        ),
-      );
-    }
   }
 
   Future<void> _openCardDetails(TcgCard card) async {
@@ -512,7 +473,393 @@ class _ProfilePageState extends State<ProfilePage> {
     return null;
   }
 
+  InputDecoration _profileSheetInputDecoration(String labelText) {
+    return InputDecoration(
+      labelText: labelText,
+      labelStyle: const TextStyle(color: Colors.white70),
+      floatingLabelStyle: const TextStyle(
+        color: Color(0xFFF7DE77),
+        fontWeight: FontWeight.w900,
+      ),
+      filled: true,
+      fillColor: const Color(0xFF0E2A5E),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFF3F5C96)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFF3F5C96)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFF7DE77), width: 1.5),
+      ),
+    );
+  }
+
+  Future<void> _openProfileEditSheet() async {
+    var selectedCurrencyCode = _selectedCurrencyCode;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF102754),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      builder: (bottomSheetContext) {
+        var saving = false;
+
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final profileImageProvider = _profileImageProvider();
+
+            Future<void> saveChanges() async {
+              setSheetState(() {
+                saving = true;
+              });
+
+              final nameSaved = await _saveName(showSnackBar: false);
+
+              if (!nameSaved) {
+                if (sheetContext.mounted) {
+                  setSheetState(() {
+                    saving = false;
+                  });
+                }
+                return;
+              }
+
+              final currencySaved = await _updateCurrency(
+                selectedCurrencyCode,
+                showSnackBar: false,
+              );
+
+              if (!currencySaved) {
+                if (sheetContext.mounted) {
+                  setSheetState(() {
+                    saving = false;
+                  });
+                }
+                return;
+              }
+
+              if (!bottomSheetContext.mounted) return;
+              Navigator.of(bottomSheetContext).pop();
+
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Profile details updated')),
+              );
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 18,
+                  right: 18,
+                  top: 4,
+                  bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 18,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.edit_outlined,
+                            color: Color(0xFFF7DE77),
+                            size: 30,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              widget.profile.isBusinessAccount
+                                  ? 'Edit business details'
+                                  : 'Edit profile details',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Center(
+                        child: Stack(
+                          children: [
+                            CircleAvatar(
+                              radius: 44,
+                              backgroundColor: Colors.white12,
+                              backgroundImage: profileImageProvider,
+                              child: profileImageProvider == null
+                                  ? const Icon(
+                                      Icons.person,
+                                      color: Colors.white,
+                                      size: 44,
+                                    )
+                                  : null,
+                            ),
+                            Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF7DE77),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFF041B4A),
+                                    width: 2,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.edit,
+                                  color: Colors.black,
+                                  size: 17,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFF7DE77),
+                          side: const BorderSide(color: Color(0xFFF7DE77)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                await _pickImage();
+                                if (sheetContext.mounted) {
+                                  setSheetState(() {});
+                                }
+                              },
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: const Text(
+                          'Change picture',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _nameController,
+                        enabled: !saving,
+                        textCapitalization: TextCapitalization.words,
+                        style: const TextStyle(color: Colors.white),
+                        cursorColor: const Color(0xFFF7DE77),
+                        decoration: _profileSheetInputDecoration(
+                          widget.profile.isBusinessAccount
+                              ? 'Business name'
+                              : 'Trainer name',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: true,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: _profileSheetInputDecoration('Email').copyWith(
+                          hintText: widget.profile.email,
+                          hintStyle: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCurrencyCode,
+                        dropdownColor: const Color(0xFF102754),
+                        iconEnabledColor: const Color(0xFFC8D4F0),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: _profileSheetInputDecoration(
+                          'Display currency',
+                        ),
+                        items: CurrencySettings.supportedCurrencies.values
+                            .map(
+                              (currency) => DropdownMenuItem<String>(
+                                value: currency.code,
+                                child: Text(
+                                  '${currency.code} • ${currency.label}',
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: saving
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+                                setSheetState(() {
+                                  selectedCurrencyCode = value;
+                                });
+                              },
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Card prices update across the app when you change this setting.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                      if (_savingName || _savingCurrency || saving) ...[
+                        const SizedBox(height: 12),
+                        const LinearProgressIndicator(
+                          color: Color(0xFFF7DE77),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFF7DE77),
+                          foregroundColor: const Color(0xFF041B4A),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        onPressed: saving ? null : saveChanges,
+                        icon: saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.save_outlined),
+                        label: Text(
+                          saving ? 'Saving...' : 'Save changes',
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+
+  Widget _buildAdminToolsCard() {
+    return StreamBuilder<bool>(
+      stream: _watchCurrentUserIsAdminOrModerator(),
+      builder: (context, snapshot) {
+        final canUseAdminTools = snapshot.data == true;
+
+        if (!canUseAdminTools) {
+          return const SizedBox.shrink();
+        }
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: RepaintBoundary(
+            child: Card(
+              color: const Color(0xFF102754),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: BorderSide(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.42),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: const Color(0xFFF7DE77).withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.admin_panel_settings_outlined,
+                            color: Color(0xFFF7DE77),
+                            size: 30,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Admin tools',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Manage reports, Pro users, shop requests and business approvals.',
+                                style: TextStyle(
+                                  color: Color(0xFFC8D4F0),
+                                  fontSize: 12,
+                                  height: 1.35,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _openAdminTools,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFF7DE77),
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        icon: const Icon(Icons.dashboard_customize_outlined),
+                        label: const Text(
+                          'Open Admin Tools',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildProfileSettingsCard(ImageProvider? profileImageProvider) {
+    final displayName = _nameController.text.trim().isEmpty
+        ? widget.profile.displayName
+        : _nameController.text.trim();
+
     return RepaintBoundary(
       child: Card(
         color: const Color(0xFF102754),
@@ -524,7 +871,7 @@ class _ProfilePageState extends State<ProfilePage> {
           child: Column(
             children: [
               GestureDetector(
-                onTap: _pickImage,
+                onTap: _openProfileEditSheet,
                 child: Stack(
                   children: [
                     CircleAvatar(
@@ -548,110 +895,45 @@ class _ProfilePageState extends State<ProfilePage> {
                         decoration: BoxDecoration(
                           color: const Color(0xFFF7DE77),
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF041B4A), width: 2),
+                          border: Border.all(
+                            color: const Color(0xFF041B4A),
+                            width: 2,
+                          ),
                         ),
-                        child: const Icon(Icons.edit, color: Colors.black, size: 18),
+                        child: const Icon(
+                          Icons.edit,
+                          color: Colors.black,
+                          size: 18,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
+              Text(
+                displayName,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 7),
               Text(
                 widget.profile.isBusinessAccount
-                    ? 'This picture will show beside your business posts and comments.'
-                    : 'This picture will show beside your community posts and comments.',
+                    ? 'Tap the pencil to edit your business name, email, currency and profile picture.'
+                    : 'Tap the pencil to edit your trainer name, email, currency and profile picture.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: widget.profile.isBusinessAccount
-                      ? 'Business Name'
-                      : 'Trainer Name',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: const Color(0xFF0E2A5E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                  height: 1.35,
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                readOnly: true,
-                style: const TextStyle(color: Colors.white70),
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  hintText: widget.profile.email,
-                  hintStyle: const TextStyle(color: Colors.white70),
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: const Color(0xFF0E2A5E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _selectedCurrencyCode,
-                dropdownColor: const Color(0xFF102754),
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'Display Currency',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: const Color(0xFF0E2A5E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                items: CurrencySettings.supportedCurrencies.values
-                    .map(
-                      (currency) => DropdownMenuItem<String>(
-                        value: currency.code,
-                        child: Text(
-                          '${currency.code} • ${currency.label}',
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _savingCurrency ? null : _updateCurrency,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Card prices update across the app when you change this setting.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              if (_savingCurrency) ...[
-                const SizedBox(height: 10),
-                const LinearProgressIndicator(),
-              ],
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _pickImage,
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text('Choose Picture'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _savingName ? null : _saveName,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_savingName ? 'Saving...' : 'Save Name'),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -659,7 +941,6 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
-
   Widget _buildFriendsCard() {
     return RepaintBoundary(
       child: Card(
@@ -865,359 +1146,6 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildFeatureAccessSection() {
-    return StreamBuilder<bool>(
-      stream: UserFeatureFlagsService.watchCurrentUserCanManageFeatureFlags(),
-      builder: (context, managerSnapshot) {
-        final canManageFeatures = managerSnapshot.data == true;
-        final isBusinessAccount = widget.profile.isBusinessAccount;
-        final toolCount = 1 +
-            (isBusinessAccount ? 1 : 0) +
-            (canManageFeatures ? 3 : 0);
-
-        if (!canManageFeatures) {
-          return _buildFeatureAccessCard(
-            canManageFeatures: false,
-            toolCount: toolCount,
-            pendingSubmissionCount: 0,
-          );
-        }
-
-        return StreamBuilder<List<TcgShop>>(
-          stream: _tcgShopService.watchPendingSubmissions(),
-          builder: (context, submissionsSnapshot) {
-            final pendingSubmissionCount =
-                (submissionsSnapshot.data ?? const []).length;
-
-            return _buildFeatureAccessCard(
-              canManageFeatures: true,
-              toolCount: toolCount,
-              pendingSubmissionCount: pendingSubmissionCount,
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildFeatureAccessCard({
-    required bool canManageFeatures,
-    required int toolCount,
-    required int pendingSubmissionCount,
-  }) {
-    final hasPendingSubmissions = pendingSubmissionCount > 0;
-    final collapsedSubtitle = hasPendingSubmissions
-        ? '$pendingSubmissionCount shop submission${pendingSubmissionCount == 1 ? '' : 's'} waiting. Tap to show.'
-        : '$toolCount tool${toolCount == 1 ? '' : 's'} hidden. Tap to show.';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SizedBox(height: 16),
-        RepaintBoundary(
-          child: Card(
-            color: const Color(0xFF102754),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(24),
-                  onTap: () {
-                    setState(() {
-                      _featuresExpanded = !_featuresExpanded;
-                    });
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFFF7DE77)
-                                .withValues(alpha: 0.14),
-                            border: Border.all(
-                              color: const Color(0xFFF7DE77)
-                                  .withValues(alpha: 0.28),
-                            ),
-                          ),
-                          child: Icon(
-                            hasPendingSubmissions
-                                ? Icons.notifications_active_outlined
-                                : Icons.tune_outlined,
-                            color: const Color(0xFFF7DE77),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Text(
-                                    'Features',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  if (hasPendingSubmissions) ...[
-                                    const SizedBox(width: 8),
-                                    _buildPendingSubmissionBadge(
-                                      pendingSubmissionCount,
-                                      compact: true,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _featuresExpanded
-                                    ? 'Tap to hide PocketChase tools.'
-                                    : collapsedSubtitle,
-                                style: const TextStyle(
-                                  color: Color(0xFFD8E3FB),
-                                  height: 1.35,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        AnimatedRotation(
-                          turns: _featuresExpanded ? 0.5 : 0,
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeOut,
-                          child: const Icon(
-                            Icons.keyboard_arrow_down_rounded,
-                            color: Colors.white70,
-                            size: 30,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                AnimatedCrossFade(
-                  firstChild: const SizedBox.shrink(),
-                  secondChild: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Manage business and admin tools for PocketChase.',
-                          style: TextStyle(
-                            color: Color(0xFFD8E3FB),
-                            height: 1.35,
-                          ),
-                        ),
-                        if (hasPendingSubmissions) ...[
-                          const SizedBox(height: 12),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF7DE77)
-                                  .withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: const Color(0xFFF7DE77)
-                                    .withValues(alpha: 0.40),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.storefront_outlined,
-                                  color: Color(0xFFF7DE77),
-                                  size: 22,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    pendingSubmissionCount == 1
-                                        ? '1 TCG shop submission needs review.'
-                                        : '$pendingSubmissionCount TCG shop submissions need review.',
-                                    style: const TextStyle(
-                                      color: Color(0xFFF7DE77),
-                                      fontWeight: FontWeight.w900,
-                                      height: 1.25,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                        _buildFeatureTile(
-                          icon: Icons.language,
-                          iconColor: const Color(0xFFF7DE77),
-                          title: 'Featured Online Shops',
-                          subtitle: 'Browse premium online-only TCG businesses',
-                          onTap: _openFeaturedOnlineShops,
-                        ),
-                        if (widget.profile.isBusinessAccount)
-                          _buildFeatureTile(
-                            icon: Icons.storefront_outlined,
-                            iconColor: const Color(0xFFF7DE77),
-                            title: 'Business Profile',
-                            subtitle: 'Create, edit, or delete your business profile',
-                            onTap: _openBusinessProfile,
-                          ),
-                        if (canManageFeatures)
-                          _buildFeatureTile(
-                            icon: hasPendingSubmissions
-                                ? Icons.mark_email_unread_outlined
-                                : Icons.storefront_outlined,
-                            iconColor: hasPendingSubmissions
-                                ? const Color(0xFFF7DE77)
-                                : const Color(0xFF54D39A),
-                            title: 'TCG Shop Submissions',
-                            subtitle: hasPendingSubmissions
-                                ? 'Review $pendingSubmissionCount pending shop submission${pendingSubmissionCount == 1 ? '' : 's'}'
-                                : 'Approve or reject user-submitted card shops',
-                            notificationCount: pendingSubmissionCount,
-                            onTap: _openTcgShopSubmissions,
-                          ),
-                        if (canManageFeatures)
-                          _buildFeatureTile(
-                            icon: Icons.business_center_outlined,
-                            iconColor: const Color(0xFF54D39A),
-                            title: 'Business Profiles',
-                            subtitle: 'Approve, edit, or delete business profiles',
-                            onTap: _openAdminBusinessProfiles,
-                          ),
-                        if (canManageFeatures)
-                          _buildFeatureTile(
-                            icon: Icons.admin_panel_settings_outlined,
-                            iconColor: const Color(0xFF54D39A),
-                            title: 'User Features',
-                            subtitle: 'Turn PocketChase Pro and admin permissions on or off for users',
-                            onTap: _openUserFeatures,
-                          ),
-                      ],
-                    ),
-                  ),
-                  crossFadeState: _featuresExpanded
-                      ? CrossFadeState.showSecond
-                      : CrossFadeState.showFirst,
-                  duration: const Duration(milliseconds: 220),
-                  reverseDuration: const Duration(milliseconds: 160),
-                  firstCurve: Curves.easeOut,
-                  secondCurve: Curves.easeOut,
-                  sizeCurve: Curves.easeOut,
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  Widget _buildPendingSubmissionBadge(
-    int count, {
-    bool compact = false,
-  }) {
-    if (count <= 0) return const SizedBox.shrink();
-
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 7 : 9,
-        vertical: compact ? 3 : 5,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF7DE77),
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Text(
-        count > 99 ? '99+' : '$count',
-        style: TextStyle(
-          color: Colors.black,
-          fontSize: compact ? 10 : 11,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeatureTile({
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-    int notificationCount = 0,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Material(
-        color: const Color(0xFF0E2A5E),
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Icon(icon, color: iconColor, size: 24),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle,
-                        style: const TextStyle(
-                          color: Color(0xFFC8D4F0),
-                          fontSize: 12,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (notificationCount > 0) ...[
-                  const SizedBox(width: 8),
-                  _buildPendingSubmissionBadge(notificationCount),
-                ],
-                const SizedBox(width: 8),
-                const Icon(Icons.chevron_right, color: Colors.white54),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -1703,13 +1631,13 @@ class _ProfilePageState extends State<ProfilePage> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           _buildProfileSettingsCard(profileImageProvider),
+                          _buildAdminToolsCard(),
                           const SizedBox(height: 16),
                           if (widget.profile.isBusinessAccount) ...[
                             _buildBusinessDashboardCard(),
                             const SizedBox(height: 16),
                             _buildBusinessProInfoCard(),
                             const SizedBox(height: 16),
-                            _buildFeatureAccessSection(),
                             _buildAccountSecurityCard(),
                           ] else ...[
                             _buildFriendsCard(),
@@ -1717,7 +1645,6 @@ class _ProfilePageState extends State<ProfilePage> {
                             _buildWishlistCard(),
                             const SizedBox(height: 16),
                             _buildProUpgradeCard(),
-                            _buildFeatureAccessSection(),
                             _buildAccountSecurityCard(),
                             const SizedBox(height: 16),
                             _buildStatsSection(profileImageProvider),
