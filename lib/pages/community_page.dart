@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_user_profile.dart';
 import '../models/community_models.dart';
-import '../services/community_image_services.dart';
 import '../services/community_safety_service.dart';
 import '../services/friend_service.dart';
 import '../services/community_unread_private_message_service.dart';
@@ -16,7 +15,6 @@ import '../services/pro_status_service.dart';
 import '../utils/community_dialog_helpers.dart';
 import '../utils/community_market_helpers.dart';
 import '../utils/community_private_helpers.dart';
-import '../widgets/community_active_filter_pill.dart';
 import '../widgets/community_filter_chip.dart';
 import '../widgets/community_post_card.dart';
 import '../widgets/community_seller_trust_widgets.dart';
@@ -63,6 +61,11 @@ class _CommunityPageState extends State<CommunityPage> {
   final Set<String> _featureBusyPostIds = <String>{};
   bool _savedVisitMarker = false;
   late final int _visitStartedAtMs;
+  final TextEditingController _archiveSearchController = TextEditingController();
+  final FocusNode _archiveSearchFocusNode = FocusNode();
+  Timer? _archiveSearchDebounce;
+  String _archiveSearchQuery = '';
+  DateTime? _archiveDeletedDateFilter;
 
   Stream<QuerySnapshot<Map<String, dynamic>>> get _postsStream =>
       FirebaseFirestore.instance
@@ -248,6 +251,9 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   void dispose() {
     _blockedUsersSub?.cancel();
+    _archiveSearchDebounce?.cancel();
+    _archiveSearchFocusNode.dispose();
+    _archiveSearchController.dispose();
     super.dispose();
   }
 
@@ -323,15 +329,6 @@ class _CommunityPageState extends State<CommunityPage> {
     }
   }
 
-  CommunityReply? _safeReplyFromDoc(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
-  ) {
-    try {
-      return CommunityReply.fromDoc(doc);
-    } catch (_) {
-      return null;
-    }
-  }
 
   String _normaliseAreaKey(String value) {
     return value
@@ -404,6 +401,130 @@ class _CommunityPageState extends State<CommunityPage> {
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _postIsArchivedForAdmin(Map<String, dynamic> data) {
+    return data['archivedForAdmin'] == true ||
+        data['hiddenFromUsers'] == true ||
+        data['deletedForUsers'] == true;
+  }
+
+  bool get _hasActiveArchiveFilters {
+    return _archiveSearchQuery.trim().isNotEmpty ||
+        _archiveDeletedDateFilter != null;
+  }
+
+  DateTime _dateOnly(DateTime value) {
+    return DateTime(value.year, value.month, value.day);
+  }
+
+  String _formatArchiveDate(DateTime dateTime) {
+    final day = dateTime.day.toString().padLeft(2, '0');
+    final month = dateTime.month.toString().padLeft(2, '0');
+    final year = dateTime.year.toString();
+    return '$day/$month/$year';
+  }
+
+  int? _deletedAtMsFromArchiveData(Map<String, dynamic>? data) {
+    if (data == null) return null;
+
+    final deletedAtMs = data['deletedAtMs'];
+    if (deletedAtMs is num) return deletedAtMs.toInt();
+
+    final deletedAt = data['deletedAt'];
+    if (deletedAt is Timestamp) {
+      return deletedAt.millisecondsSinceEpoch;
+    }
+
+    return null;
+  }
+
+  bool _matchesArchiveDeletedDate(Map<String, dynamic>? data) {
+    final selectedDate = _archiveDeletedDateFilter;
+    if (selectedDate == null) return true;
+
+    final deletedAtMs = _deletedAtMsFromArchiveData(data);
+    if (deletedAtMs == null || deletedAtMs <= 0) return false;
+
+    final deletedDate = _dateOnly(
+      DateTime.fromMillisecondsSinceEpoch(deletedAtMs),
+    );
+    return deletedDate == _dateOnly(selectedDate);
+  }
+
+  bool _matchesArchiveSearch(CommunityPost post, Map<String, dynamic>? data) {
+    final query = _archiveSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) return true;
+
+    final searchableText = <String>[
+      post.title,
+      post.authorName,
+      post.authorId,
+      (data?['authorName'] ?? '').toString(),
+      (data?['businessName'] ?? '').toString(),
+      (data?['shopName'] ?? '').toString(),
+      (data?['ownerName'] ?? '').toString(),
+      (data?['deletedByName'] ?? '').toString(),
+      (data?['deletedByEmail'] ?? '').toString(),
+    ].join(' ').toLowerCase();
+
+    return searchableText.contains(query);
+  }
+
+  bool _archivePostMatchesFilters(
+    CommunityPost post,
+    Map<String, dynamic>? data,
+  ) {
+    return _matchesArchiveSearch(post, data) &&
+        _matchesArchiveDeletedDate(data);
+  }
+
+  Future<void> _pickArchiveDeletedDateFilter() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _archiveDeletedDateFilter ?? now,
+      firstDate: DateTime(now.year - 5, 1, 1),
+      lastDate: now,
+      helpText: 'Search archive by deleted date',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFFF7DE77),
+              brightness: Brightness.dark,
+            ),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+    );
+
+    if (picked == null || !mounted) return;
+    setState(() {
+      _archiveDeletedDateFilter = _dateOnly(picked);
+    });
+  }
+
+  void _clearArchiveFilters() {
+    _archiveSearchDebounce?.cancel();
+    setState(() {
+      _archiveSearchController.clear();
+      _archiveSearchQuery = '';
+      _archiveDeletedDateFilter = null;
+    });
+  }
+
+  void _handleArchiveSearchChanged(String value) {
+    _archiveSearchDebounce?.cancel();
+    _archiveSearchDebounce = Timer(const Duration(milliseconds: 320), () {
+      if (!mounted || _section != 'Admin archive') return;
+      final nextQuery = value.trim();
+      if (nextQuery == _archiveSearchQuery) return;
+      setState(() {
+        _archiveSearchQuery = nextQuery;
+      });
+    });
   }
 
   Future<void> _openTradeSafetyGuide() async {
@@ -707,13 +828,25 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Future<void> _deletePost(CommunityPost post) async {
-    final shouldDelete = await showDialog<bool>(
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final currentUid = (currentUser?.uid ?? widget.profile.uid).trim();
+    final isOwnPost = post.authorId.trim() == currentUid;
+
+    if (currentUid.isEmpty || (!isOwnPost && !_isAdminOrModerator)) {
+      _showMessage('Only the post owner or an admin can remove this post.');
+      return;
+    }
+
+    final shouldArchive = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF102754),
-        title: const Text('Delete post', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Delete post?',
+          style: TextStyle(color: Colors.white),
+        ),
         content: const Text(
-          'This will remove the post and all replies from the community forum.',
+          'This will delete the post from the community and move it into the admin archive for review.',
           style: TextStyle(color: Color(0xFFC8D4F0)),
         ),
         actions: [
@@ -727,37 +860,36 @@ class _CommunityPageState extends State<CommunityPage> {
               backgroundColor: const Color(0xFFB13B59),
               foregroundColor: Colors.white,
             ),
-            child: const Text('Delete'),
+            child: const Text('Delete post'),
           ),
         ],
       ),
     );
 
-    if (shouldDelete != true) return;
+    if (shouldArchive != true) return;
 
     try {
+      final now = DateTime.now().millisecondsSinceEpoch;
       final postRef =
           FirebaseFirestore.instance.collection('community_posts').doc(post.id);
-      final replies = await postRef.collection('replies').get();
-      final replyImageRefs = replies.docs
-          .map(_safeReplyFromDoc)
-          .whereType<CommunityReply>()
-          .map((reply) => reply.imageBase64)
-          .whereType<String>()
-          .toList();
 
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in replies.docs) {
-        batch.delete(doc.reference);
-      }
-      batch.delete(postRef);
-      await batch.commit();
+      await postRef.set(
+        <String, dynamic>{
+          'archivedForAdmin': true,
+          'hiddenFromUsers': true,
+          'deletedForUsers': true,
+          'deleteReason': post.isMarketplace
+              ? 'Completed / removed marketplace post'
+              : 'Deleted discussion post',
+          'deletedAtMs': now,
+          'deletedByUid': currentUid,
+          'deletedByName': widget.profile.displayName,
+          'updatedAtMs': now,
+        },
+        SetOptions(merge: true),
+      );
 
-      for (final imageRef in <String>[...post.imageBase64List, ...replyImageRefs]) {
-        unawaited(FirebaseImageStorageService.deleteByDownloadUrl(imageRef));
-      }
-
-      _showMessage('Post deleted.');
+      _showMessage('Post deleted and moved to the admin archive.');
     } on FirebaseException catch (error) {
       _showMessage(error.message ?? 'Could not delete post.');
     } catch (_) {
@@ -963,16 +1095,26 @@ class _CommunityPageState extends State<CommunityPage> {
     Map<String, String> areaKeysByPostId,
   ) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? widget.profile.uid;
-    final unblockedPosts = posts
-        .where(
-          (post) =>
-              post.authorId == currentUid || !_blockedUserIds.contains(post.authorId),
-        )
-        .toList();
+
+    final basePosts = _section == 'Admin archive'
+        ? posts
+        : posts
+            .where(
+              (post) =>
+                  post.authorId == currentUid ||
+                  !_blockedUserIds.contains(post.authorId),
+            )
+            .toList();
+
+    if (_section == 'Admin archive') {
+      final visible = basePosts.toList()
+        ..sort((a, b) => b.lastActivityAtMs.compareTo(a.lastActivityAtMs));
+      return visible;
+    }
 
     final sectionPosts = _section == 'Discussions'
-        ? unblockedPosts.where((post) => post.isDiscussion).toList()
-        : unblockedPosts.where((post) => post.isMarketplace).toList();
+        ? basePosts.where((post) => post.isDiscussion).toList()
+        : basePosts.where((post) => post.isMarketplace).toList();
 
     Iterable<CommunityPost> filtered = sectionPosts;
     if (_section == 'Marketplace' && _filter != 'All') {
@@ -1438,6 +1580,8 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Widget _buildHeaderCard({required bool hasNewPosts}) {
+    final showingArchive = _section == 'Admin archive';
+
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -1471,24 +1615,24 @@ class _CommunityPageState extends State<CommunityPage> {
                       color: const Color(0xFFF7DE77).withValues(alpha: 0.24),
                     ),
                   ),
-                  child: const Icon(
-                    Icons.forum_rounded,
-                    color: Color(0xFFF7DE77),
+                  child: Icon(
+                    showingArchive ? Icons.archive_outlined : Icons.forum_rounded,
+                    color: const Color(0xFFF7DE77),
                     size: 17,
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Community forum',
-                    style: TextStyle(
+                    showingArchive ? 'Admin post archive' : 'Community forum',
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 16,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
                 ),
-                if (hasNewPosts)
+                if (hasNewPosts && !showingArchive)
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
@@ -1521,10 +1665,13 @@ class _CommunityPageState extends State<CommunityPage> {
                   child: SizedBox(
                     height: 38,
                     child: FilledButton.icon(
-                      onPressed: () => _openCreatePostSheet(
-                        initialPostType:
-                            _section == 'Discussions' ? 'Thread' : null,
-                      ),
+                      onPressed: showingArchive
+                          ? null
+                          : () => _openCreatePostSheet(
+                                initialPostType: _section == 'Discussions'
+                                    ? 'Thread'
+                                    : null,
+                              ),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFFF7DE77),
                         foregroundColor: Colors.black,
@@ -1535,13 +1682,20 @@ class _CommunityPageState extends State<CommunityPage> {
                         ),
                       ),
                       icon: Icon(
-                        _section == 'Discussions'
-                            ? Icons.forum_outlined
-                            : Icons.add_comment_outlined,
+                        showingArchive
+                            ? Icons.archive_outlined
+                            : _section == 'Discussions'
+                                ? Icons.forum_outlined
+                                : Icons.add_comment_outlined,
                         size: 16,
                       ),
-                      label:
-                          Text(_section == 'Discussions' ? 'Start thread' : 'Post'),
+                      label: Text(
+                        showingArchive
+                            ? 'Archive'
+                            : _section == 'Discussions'
+                                ? 'Start thread'
+                                : 'Post',
+                      ),
                     ),
                   ),
                 ),
@@ -1577,171 +1731,56 @@ class _CommunityPageState extends State<CommunityPage> {
             Row(
               children: [
                 Expanded(
-                  child: CommunityFilterChip(
+                  child: _CommunitySectionTab(
                     label: 'Marketplace',
                     selected: _section == 'Marketplace',
-                    minWidth: 140,
-                    onTap: () => setState(() {
-                      _section = 'Marketplace';
-                    }),
+                    onTap: () => setState(() => _section = 'Marketplace'),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: CommunityFilterChip(
+                  child: _CommunitySectionTab(
                     label: 'Discussions',
                     selected: _section == 'Discussions',
-                    minWidth: 140,
                     onTap: () => setState(() => _section = 'Discussions'),
                   ),
                 ),
+                if (_isAdminOrModerator) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CommunitySectionTab(
+                      label: 'Archive',
+                      selected: showingArchive,
+                      onTap: () => setState(() => _section = 'Admin archive'),
+                    ),
+                  ),
+                ],
               ],
             ),
-            if (_section == 'Marketplace') ...[
-              const SizedBox(height: 10),
+            const SizedBox(height: 8),
+            if (_section == 'Marketplace')
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(22),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Color(0xFF183A78),
-                      Color(0xFF102754),
-                      Color(0xFF0B214F),
-                    ],
-                  ),
-                  border: Border.all(
-                    color: _hasActiveMarketplaceFilters
-                        ? const Color(0xFFF7DE77).withValues(alpha: 0.55)
-                        : Colors.white.withValues(alpha: 0.10),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFFF7DE77)
-                                .withValues(alpha: 0.14),
-                            border: Border.all(
-                              color: const Color(0xFFF7DE77)
-                                  .withValues(alpha: 0.35),
-                            ),
-                          ),
-                          child: Icon(
-                            _hasActiveMarketplaceFilters
-                                ? Icons.filter_alt_rounded
-                                : Icons.tune_rounded,
-                            color: const Color(0xFFF7DE77),
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Marketplace filters',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                _marketplaceFilterSummary,
-                                style: const TextStyle(
-                                  color: Color(0xFFC8D4F0),
-                                  fontSize: 12,
-                                  height: 1.25,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _hasActiveMarketplaceFilters
-                                ? const Color(0xFFF7DE77)
-                                : Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: _hasActiveMarketplaceFilters
-                                  ? const Color(0xFFF7DE77)
-                                  : Colors.white.withValues(alpha: 0.12),
-                            ),
-                          ),
-                          child: Text(
-                            _hasActiveMarketplaceFilters ? 'Active' : 'All',
-                            style: TextStyle(
-                              color: _hasActiveMarketplaceFilters
-                                  ? Colors.black
-                                  : const Color(0xFFE4ECFF),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ],
+                    Text(
+                      _marketplaceFilterSummary,
+                      style: const TextStyle(
+                        color: Color(0xFFC8D4F0),
+                        fontSize: 12,
+                        height: 1.35,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                    const SizedBox(height: 14),
-                    if (_hasActiveMarketplaceFilters) ...[
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          if (_filter != 'All')
-                            CommunityActiveFilterPill(
-                              label: _filter,
-                              onRemove: () => setState(() => _filter = 'All'),
-                            ),
-                          if (_marketStatusFilter != 'All')
-                            CommunityActiveFilterPill(
-                              label: _marketStatusFilter,
-                              onRemove: () => setState(
-                                () => _marketStatusFilter = 'All',
-                              ),
-                            ),
-                          if (_areaFilter != 'All')
-                            CommunityActiveFilterPill(
-                              label: _areaLabelForKey(_areaFilter),
-                              onRemove: () => setState(() => _areaFilter = 'All'),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                    ] else ...[
-                      const Text(
-                        'Use filters to quickly find swaps, sales, wanted posts, available listings, pending deals, sold items, or local county listings.',
-                        style: TextStyle(
-                          color: Color(0xFFAFC0E6),
-                          fontSize: 12,
-                          height: 1.35,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
@@ -1750,10 +1789,7 @@ class _CommunityPageState extends State<CommunityPage> {
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xFFF7DE77),
                               foregroundColor: Colors.black,
-                              minimumSize: const Size.fromHeight(46),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
+                              minimumSize: const Size.fromHeight(42),
                             ),
                             icon: const Icon(Icons.tune_rounded, size: 18),
                             label: const Text(
@@ -1764,24 +1800,19 @@ class _CommunityPageState extends State<CommunityPage> {
                         ),
                         if (_hasActiveMarketplaceFilters) ...[
                           const SizedBox(width: 10),
-                          SizedBox(
-                            height: 46,
-                            child: TextButton.icon(
-                              onPressed: () => setState(() {
-                                _filter = 'All';
-                                _marketStatusFilter = 'All';
-                                _areaFilter = 'All';
-                              }),
-                              style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xFFFFF2B3),
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
-                              ),
-                              icon: const Icon(Icons.close_rounded, size: 18),
-                              label: const Text(
-                                'Clear',
-                                style: TextStyle(fontWeight: FontWeight.w800),
-                              ),
+                          TextButton.icon(
+                            onPressed: () => setState(() {
+                              _filter = 'All';
+                              _marketStatusFilter = 'All';
+                              _areaFilter = 'All';
+                            }),
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFFFF2B3),
+                            ),
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            label: const Text(
+                              'Clear',
+                              style: TextStyle(fontWeight: FontWeight.w800),
                             ),
                           ),
                         ],
@@ -1789,9 +1820,148 @@ class _CommunityPageState extends State<CommunityPage> {
                     ),
                   ],
                 ),
-              ),
-            ] else ...[
-              const SizedBox(height: 8),
+              )
+            else if (showingArchive)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFB13B59).withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: const Color(0xFFB13B59).withValues(alpha: 0.36),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Search deleted posts by post title, user or business name, or deleted date.',
+                      style: TextStyle(
+                        color: Color(0xFFFFCDD2),
+                        fontSize: 12,
+                        height: 1.35,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _archiveSearchController,
+                      focusNode: _archiveSearchFocusNode,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      cursorColor: const Color(0xFFF7DE77),
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        hintText: 'Search title, user or business name',
+                        hintStyle: const TextStyle(color: Color(0xFFAFC0E6)),
+                        prefixIcon: const Icon(
+                          Icons.search_rounded,
+                          color: Color(0xFFF7DE77),
+                          size: 20,
+                        ),
+                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _archiveSearchController,
+                          builder: (context, value, _) {
+                            if (value.text.trim().isEmpty) {
+                              return const SizedBox(width: 48, height: 48);
+                            }
+
+                            return IconButton(
+                              tooltip: 'Clear search',
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: Color(0xFFC8D4F0),
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                _archiveSearchDebounce?.cancel();
+                                setState(() {
+                                  _archiveSearchController.clear();
+                                  _archiveSearchQuery = '';
+                                });
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (!context.mounted) return;
+                                  _archiveSearchFocusNode.requestFocus();
+                                });
+                              },
+                            );
+                          },
+                        ),
+                        filled: true,
+                        fillColor: const Color(0xFF102754),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(13),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3F5C96),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(13),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3F5C96),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(13),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFF7DE77),
+                            width: 1.4,
+                          ),
+                        ),
+                      ),
+                      onChanged: _handleArchiveSearchChanged,
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _pickArchiveDeletedDateFilter,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFF7DE77),
+                              side: const BorderSide(color: Color(0xFFF7DE77)),
+                              minimumSize: const Size.fromHeight(42),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                            label: Text(
+                              _archiveDeletedDateFilter == null
+                                  ? 'Deleted date'
+                                  : _formatArchiveDate(_archiveDeletedDateFilter!),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
+                        if (_hasActiveArchiveFilters) ...[
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            onPressed: _clearArchiveFilters,
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            label: const Text(
+                              'Clear',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            else
               Container(
                 width: double.infinity,
                 padding:
@@ -1799,9 +1969,7 @@ class _CommunityPageState extends State<CommunityPage> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.10),
-                  ),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
                 ),
                 child: const Text(
                   'Discussion threads stay separate from sale and swap listings so it is easier to chat, ask questions, and meet new collectors.',
@@ -1812,7 +1980,6 @@ class _CommunityPageState extends State<CommunityPage> {
                   ),
                 ),
               ),
-            ],
           ],
         ),
       ),
@@ -1821,16 +1988,22 @@ class _CommunityPageState extends State<CommunityPage> {
 
   Widget _buildEmptyStateCard() {
     final areaLabel = _areaFilter == 'All' ? '' : ' in ${_areaLabelForKey(_areaFilter)}';
-    final emptyTitle = _section == 'Discussions'
-        ? 'No discussion threads yet'
-        : _marketStatusFilter == 'All'
-            ? 'No listings match this view yet'
-            : 'No ${_marketStatusFilter.toLowerCase()} listings yet';
-    final emptyMessage = _section == 'Discussions'
-        ? 'Start a thread to chat about cards, collecting, trades, and making friends.'
-        : _areaFilter == 'All'
-            ? 'Create a professional swap or sale listing with status, condition, and delivery details.'
-            : 'No matching listings were found$areaLabel. Try another county or clear the area filter.';
+    final emptyTitle = _section == 'Admin archive'
+        ? (_hasActiveArchiveFilters ? 'No archived posts found' : 'No archived posts yet')
+        : _section == 'Discussions'
+            ? 'No discussion threads yet'
+            : _marketStatusFilter == 'All'
+                ? 'No listings match this view yet'
+                : 'No ${_marketStatusFilter.toLowerCase()} listings yet';
+    final emptyMessage = _section == 'Admin archive'
+        ? (_hasActiveArchiveFilters
+            ? 'Try another title, user/business name, or deleted date.'
+            : 'When users delete completed posts, they will disappear from the community feed and appear here for admins.')
+        : _section == 'Discussions'
+            ? 'Start a thread to chat about cards, collecting, trades, and making friends.'
+            : _areaFilter == 'All'
+                ? 'Create a professional swap or sale listing with status, condition, and delivery details.'
+                : 'No matching listings were found$areaLabel. Try another county or clear the area filter.';
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1842,9 +2015,11 @@ class _CommunityPageState extends State<CommunityPage> {
       child: Column(
         children: [
           Icon(
-            _section == 'Discussions'
-                ? Icons.forum_outlined
-                : Icons.storefront_outlined,
+            _section == 'Admin archive'
+                ? Icons.archive_outlined
+                : _section == 'Discussions'
+                    ? Icons.forum_outlined
+                    : Icons.storefront_outlined,
             color: const Color(0xFFF7DE77),
             size: 36,
           ),
@@ -1908,18 +2083,61 @@ class _CommunityPageState extends State<CommunityPage> {
             final docs = snapshot.data?.docs ??
                 const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
-            final areaKeysByPostId = <String, String>{
-              for (final doc in docs) doc.id: _postAreaKeyFromData(doc.data()),
+            final feedDocs = docs
+                .where((doc) => !_postIsArchivedForAdmin(doc.data()))
+                .toList();
+            final archivedDocs = docs
+                .where((doc) => _postIsArchivedForAdmin(doc.data()))
+                .toList();
+            final sourceDocs = _section == 'Admin archive' && _isAdminOrModerator
+                ? archivedDocs
+                : feedDocs;
+
+            final archiveDataByPostId = <String, Map<String, dynamic>>{
+              for (final doc in archivedDocs) doc.id: doc.data(),
             };
 
-            final allPosts = docs
+            final areaKeysByPostId = <String, String>{
+              for (final doc in sourceDocs) doc.id: _postAreaKeyFromData(doc.data()),
+            };
+
+            final allPosts = sourceDocs
                 .map(_safePostFromDoc)
                 .whereType<CommunityPost>()
                 .toList();
 
-            final posts = _visiblePosts(allPosts, areaKeysByPostId);
+            final visiblePosts = _visiblePosts(allPosts, areaKeysByPostId);
+            final posts = _section == 'Admin archive' && _isAdminOrModerator
+                ? visiblePosts
+                    .where(
+                      (post) => _archivePostMatchesFilters(
+                        post,
+                        archiveDataByPostId[post.id],
+                      ),
+                    )
+                    .toList()
+                : visiblePosts;
+            final feedPosts = feedDocs
+                .map(_safePostFromDoc)
+                .whereType<CommunityPost>()
+                .toList();
             final hasNewPosts = _lastSeenAtMs != null &&
-                allPosts.any((post) => post.createdAtMs > (_lastSeenAtMs ?? 0));
+                feedPosts.any((post) => post.createdAtMs > (_lastSeenAtMs ?? 0));
+
+            int? deletedAtMsForPost(CommunityPost post) {
+              return _deletedAtMsFromArchiveData(archiveDataByPostId[post.id]);
+            }
+
+            Future<void> openPost(CommunityPost post) async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CommunityPostThreadPage(
+                    post: post,
+                    currentProfile: widget.profile,
+                  ),
+                ),
+              );
+            }
 
             Widget buildPostCard(CommunityPost post) {
               final isNew =
@@ -1930,56 +2148,51 @@ class _CommunityPageState extends State<CommunityPage> {
                 builder: (context, isProActive, _) {
                   final isOwnPost = post.authorId == currentUid;
                   final isFeatureBusy = _featureBusyPostIds.contains(post.id);
+                  final viewingArchive = _section == 'Admin archive';
 
                   return CommunityPostCard(
                     post: post,
                     currentProfile: widget.profile,
-                    canEdit: isOwnPost || _isAdminOrModerator,
-                    canMessage:
+                    canEdit: !viewingArchive && (isOwnPost || _isAdminOrModerator),
+                    canMessage: !viewingArchive &&
                         post.authorId.isNotEmpty && post.authorId != currentUid,
                     isNew: isNew,
                     compact: true,
-                    canUserFeature: isOwnPost && isProActive && !isFeatureBusy,
-                    canAdminFeature: _isAdminOrModerator && !isFeatureBusy,
+                    canUserFeature:
+                        !viewingArchive && isOwnPost && isProActive && !isFeatureBusy,
+                    canAdminFeature:
+                        !viewingArchive && _isAdminOrModerator && !isFeatureBusy,
                     onToggleUserFeatured:
-                        isOwnPost && isProActive && !isFeatureBusy
+                        !viewingArchive && isOwnPost && isProActive && !isFeatureBusy
                             ? () => _toggleUserFeaturedPost(post)
                             : null,
-                    onToggleAdminFeatured: _isAdminOrModerator && !isFeatureBusy
-                        ? () => _toggleAdminFeaturedPost(post)
-                        : null,
+                    onToggleAdminFeatured:
+                        !viewingArchive && _isAdminOrModerator && !isFeatureBusy
+                            ? () => _toggleAdminFeaturedPost(post)
+                            : null,
                     onEdit: () => _openEditPostSheet(post),
                     onDelete: () => _deletePost(post),
                     onMessage: () => _openPrivateMessageForPost(post),
-                    onReport: post.authorId == currentUid
+                    onReport: viewingArchive || post.authorId == currentUid
                         ? null
                         : () => _reportPost(post),
-                    onBlock: post.authorId == currentUid
+                    onBlock: viewingArchive || post.authorId == currentUid
                         ? null
                         : () => _blockCommunityMember(
                               memberId: post.authorId,
                               memberName: post.authorName,
                             ),
-                    onSetMarketStatus: isOwnPost
+                    onSetMarketStatus: !viewingArchive && isOwnPost
                         ? (status) => _updateMarketStatus(post, status)
                         : null,
-                    onBump: isOwnPost && post.isMarketplace
+                    onBump: !viewingArchive && isOwnPost && post.isMarketplace
                         ? () => _bumpPost(post)
                         : null,
                     onAuthorTap: post.authorId.trim().isEmpty ||
                             post.authorId == currentUid
                         ? null
                         : () => _openCommunityMemberSheet(post),
-                    onOpen: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => CommunityPostThreadPage(
-                            post: post,
-                            currentProfile: widget.profile,
-                          ),
-                        ),
-                      );
-                    },
+                    onOpen: () => openPost(post),
                   );
                 },
               );
@@ -1998,6 +2211,25 @@ class _CommunityPageState extends State<CommunityPage> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
                     sliver: SliverToBoxAdapter(child: _buildEmptyStateCard()),
+                  )
+                else if (_section == 'Admin archive' && _isAdminOrModerator)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) => Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == posts.length - 1 ? 0 : 6,
+                          ),
+                          child: _ArchivePostListTile(
+                            post: posts[index],
+                            deletedAtMs: deletedAtMsForPost(posts[index]),
+                            onOpen: () => openPost(posts[index]),
+                          ),
+                        ),
+                        childCount: posts.length,
+                      ),
+                    ),
                   )
                 else
                   SliverPadding(
@@ -2018,6 +2250,183 @@ class _CommunityPageState extends State<CommunityPage> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+
+class _ArchivePostListTile extends StatelessWidget {
+  const _ArchivePostListTile({
+    required this.post,
+    required this.deletedAtMs,
+    required this.onOpen,
+  });
+
+  final CommunityPost post;
+  final int? deletedAtMs;
+  final VoidCallback onOpen;
+
+  String _formatDate(DateTime dateTime) {
+    final day = dateTime.day.toString().padLeft(2, '0');
+    final month = dateTime.month.toString().padLeft(2, '0');
+    final year = dateTime.year.toString();
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
+  }
+
+  String get _deletedDateText {
+    final deletedMs = deletedAtMs;
+    if (deletedMs == null || deletedMs <= 0) {
+      return 'Deleted date unavailable';
+    }
+
+    return 'Deleted ${_formatDate(DateTime.fromMillisecondsSinceEpoch(deletedMs))}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authorName = post.authorName.trim().isEmpty
+        ? 'Unknown user'
+        : post.authorName.trim();
+
+    return Material(
+      color: const Color(0xFF102754),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onOpen,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF3F5C96)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFB13B59).withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.delete_outline,
+                  color: Color(0xFFFFCDD2),
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      post.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14.5,
+                        height: 1.15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'By $authorName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFF7DE77),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _deletedDateText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFC8D4F0),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFFF7DE77),
+                size: 22,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CommunitySectionTab extends StatelessWidget {
+  const _CommunitySectionTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = selected
+        ? const Color(0xFFF7DE77)
+        : const Color(0xFF102754);
+    final foregroundColor = selected ? Colors.black : Colors.white;
+    final borderColor = selected
+        ? const Color(0xFFF7DE77)
+        : const Color(0xFF3F5C96);
+
+    return SizedBox(
+      height: 48,
+      child: Material(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Container(
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: borderColor, width: 1.3),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: foregroundColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

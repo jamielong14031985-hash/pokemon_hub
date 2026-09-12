@@ -13,6 +13,7 @@ import '../models/business_product.dart';
 import '../models/business_pro_request.dart';
 import '../models/business_profile.dart';
 import '../models/business_review.dart';
+import 'currency_settings.dart';
 import 'user_profile_service.dart';
 
 class BusinessProfileService {
@@ -1707,6 +1708,26 @@ class BusinessProfileService {
     return 'PocketChase user';
   }
 
+  Future<Map<String, Object?>> _currentUserCurrencyPreferenceData(String uid) async {
+    try {
+      final snapshot = await _firestore.collection('users').doc(uid).get();
+      final data = snapshot.data() ?? <String, dynamic>{};
+      final rawCurrencyCode = data['preferredCurrencyCode'] ??
+          data['displayCurrencyCode'] ??
+          data['currencyCode'];
+      final rawMarketplaceCode = data['preferredMarketplaceCode'] ??
+          data['marketplaceCode'] ??
+          data['ebayMarketplaceCode'];
+
+      return CurrencySettings.preferenceDataForCurrency(
+        rawCurrencyCode?.toString(),
+        marketplaceCode: rawMarketplaceCode?.toString(),
+      );
+    } catch (_) {
+      return CurrencySettings.preferenceDataForCurrency('GBP');
+    }
+  }
+
   Future<void> saveMyBusinessProfile({
     String? businessProfileId,
     required String businessName,
@@ -1780,6 +1801,7 @@ class BusinessProfileService {
 
     final cleanOpeningHours = _cleanOpeningHours(openingHours);
     final cleanOpeningStatus = _cleanOpeningStatus(openingStatus);
+    final currencyPreferenceData = await _currentUserCurrencyPreferenceData(user.uid);
 
     final existingProfile = cleanBusinessProfileId.isEmpty
         ? await getMyBusinessProfileOnce()
@@ -1817,6 +1839,8 @@ class BusinessProfileService {
         'countyLower': county.trim().toLowerCase(),
         'openingStatus': cleanOpeningStatus,
         'openingHours': cleanOpeningHours,
+        'preferredCurrencyCode': currencyPreferenceData['preferredCurrencyCode'],
+        'preferredMarketplaceCode': currencyPreferenceData['preferredMarketplaceCode'],
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
@@ -1892,6 +1916,8 @@ class BusinessProfileService {
       'countyLower': county.trim().toLowerCase(),
       'openingStatus': cleanOpeningStatus,
       'openingHours': cleanOpeningHours,
+      'preferredCurrencyCode': currencyPreferenceData['preferredCurrencyCode'],
+      'preferredMarketplaceCode': currencyPreferenceData['preferredMarketplaceCode'],
       'logoUrl': logoUrl,
       'bannerUrl': bannerUrl,
       'status': 'approved',

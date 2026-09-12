@@ -769,7 +769,8 @@ class AdminShopRequestsPage extends StatelessWidget {
   static const Color _successColor = _AdminToolsPageState._successColor;
 
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
-  String get _currentUid => FirebaseAuth.instance.currentUser?.uid.trim() ?? '';
+  FirebaseFunctions get _functions =>
+      FirebaseFunctions.instanceFor(region: 'europe-west2');
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _stream() {
     return _firestore
@@ -779,50 +780,126 @@ class AdminShopRequestsPage extends StatelessWidget {
         .snapshots();
   }
 
-  Future<void> _approve(BuildContext context, QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
-    final data = doc.data();
-    final now = FieldValue.serverTimestamp();
+  void _showMessage(BuildContext context, String message) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _runWithLoading(
+    BuildContext context, {
+    required String loadingMessage,
+    required Future<void> Function() action,
+  }) async {
+    var dialogShown = false;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        dialogShown = true;
+        return AlertDialog(
+          backgroundColor: _cardColor,
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: _goldColor,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  loadingMessage,
+                  style: const TextStyle(
+                    color: _softTextColor,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
 
     try {
-      final shopData = Map<String, dynamic>.from(data)
-        ..remove('submittedBy')
-        ..remove('submittedByEmail')
-        ..remove('updatedAt')
-        ..remove('createdAt')
-        ..['status'] = 'approved'
-        ..['updatedAt'] = now
-        ..['createdAt'] = data['createdAt'] ?? now;
-
-      final batch = _firestore.batch();
-      batch.set(_firestore.collection('tcg_shops').doc(doc.id), shopData, SetOptions(merge: true));
-      batch.delete(doc.reference);
-      await batch.commit();
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shop request approved and removed.')),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not approve shop: $error')),
-      );
+      await action();
+    } finally {
+      if (context.mounted && dialogShown) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
     }
   }
 
-  Future<void> _reject(BuildContext context, QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
+  Future<void> _approve(
+    BuildContext context,
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
     try {
-      await doc.reference.delete();
+      await _runWithLoading(
+        context,
+        loadingMessage: 'Approving shop request...',
+        action: () async {
+          final callable = _functions.httpsCallable(
+            'adminApproveTcgShopSubmission',
+          );
+
+          await callable.call(<String, dynamic>{
+            'submissionId': doc.id,
+          });
+        },
+      );
 
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shop request rejected and removed.')),
+      _showMessage(context, 'Shop request approved and removed.');
+    } on FirebaseFunctionsException catch (error) {
+      if (!context.mounted) return;
+      _showMessage(
+        context,
+        error.message ?? 'Could not approve shop request.',
       );
     } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not reject shop: $error')),
+      _showMessage(context, 'Could not approve shop: $error');
+    }
+  }
+
+  Future<void> _reject(
+    BuildContext context,
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
+    try {
+      await _runWithLoading(
+        context,
+        loadingMessage: 'Rejecting shop request...',
+        action: () async {
+          final callable = _functions.httpsCallable(
+            'adminRejectTcgShopSubmission',
+          );
+
+          await callable.call(<String, dynamic>{
+            'submissionId': doc.id,
+          });
+        },
       );
+
+      if (!context.mounted) return;
+      _showMessage(context, 'Shop request rejected and removed.');
+    } on FirebaseFunctionsException catch (error) {
+      if (!context.mounted) return;
+      _showMessage(
+        context,
+        error.message ?? 'Could not reject shop request.',
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      _showMessage(context, 'Could not reject shop: $error');
     }
   }
 
@@ -1755,11 +1832,12 @@ class _AdminCollectionPage extends StatelessWidget {
 
           return LayoutBuilder(
             builder: (context, constraints) {
-              final crossAxisCount = constraints.maxWidth >= 900
-                  ? 3
-                  : constraints.maxWidth >= 300
-                      ? 2
-                      : 1;
+              final useOneColumn = constraints.maxWidth < 680;
+              final crossAxisCount = useOneColumn
+                  ? 1
+                  : constraints.maxWidth >= 1000
+                      ? 3
+                      : 2;
 
               return GridView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
@@ -1768,7 +1846,7 @@ class _AdminCollectionPage extends StatelessWidget {
                   crossAxisCount: crossAxisCount,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  mainAxisExtent: 255,
+                  mainAxisExtent: useOneColumn ? 310 : 275,
                 ),
                 itemBuilder: (context, index) => itemBuilder(context, docs[index]),
               );

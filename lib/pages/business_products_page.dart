@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/business_product.dart';
 import '../models/business_profile.dart';
 import '../services/business_post_service.dart';
+import '../widgets/business_enquiry_button.dart';
 
 class BusinessProductsPage extends StatefulWidget {
   const BusinessProductsPage({
@@ -215,6 +216,18 @@ class _BusinessProductsPageState extends State<BusinessProductsPage> {
               return _ProductCard(
                 product: product,
                 canManage: _canManage,
+                onView: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _BusinessProductDetailsPage(
+                        product: product,
+                        profile: widget.profile,
+                        canManage: _canManage,
+                        onEdit: () => _openEditor(existingProduct: product),
+                      ),
+                    ),
+                  );
+                },
                 onEdit: () => _openEditor(existingProduct: product),
                 onDelete: () => _deleteProduct(product),
               );
@@ -569,14 +582,237 @@ class _ProductCard extends StatelessWidget {
   const _ProductCard({
     required this.product,
     required this.canManage,
+    required this.onView,
     required this.onEdit,
     required this.onDelete,
   });
 
   final BusinessProduct product;
   final bool canManage;
+  final VoidCallback onView;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = product.imageUrl.trim();
+    final price = product.price.trim();
+    final description = product.description.trim();
+
+    return Material(
+      color: _BusinessProductsPageState._cardColor,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onView,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: product.featured
+                  ? _BusinessProductsPageState._goldColor
+                  : _BusinessProductsPageState._borderColor,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 98,
+                child: imageUrl.isNotEmpty
+                    ? Image.network(
+                        imageUrl,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const _PostImageFallback(
+                            icon: Icons.inventory_2_outlined,
+                          );
+                        },
+                      )
+                    : const _PostImageFallback(
+                        icon: Icons.inventory_2_outlined,
+                      ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(9),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.category_outlined,
+                            color: _BusinessProductsPageState._goldColor,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              product.categoryLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _BusinessProductsPageState._softTextColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (product.featured)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(
+                                Icons.star_rounded,
+                                color: _BusinessProductsPageState._goldColor,
+                                size: 16,
+                              ),
+                            ),
+                          if (canManage)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Icon(
+                                product.active
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                color: product.active
+                                    ? _BusinessProductsPageState._successColor
+                                    : _BusinessProductsPageState._softTextColor,
+                                size: 15,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        product.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14.5,
+                          height: 1.12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if (price.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          price,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _BusinessProductsPageState._goldColor,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _BusinessProductsPageState._softTextColor,
+                            fontSize: 11.5,
+                            height: 1.2,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      const Spacer(),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.touch_app_outlined,
+                            color: _BusinessProductsPageState._goldColor,
+                            size: 15,
+                          ),
+                          const SizedBox(width: 4),
+                          const Expanded(
+                            child: Text(
+                              'Tap to view',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: _BusinessProductsPageState._goldColor,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          if (canManage) ...[
+                            _CompactCardAction(
+                              icon: Icons.edit_outlined,
+                              tooltip: 'Edit product',
+                              color: Colors.white,
+                              onPressed: onEdit,
+                            ),
+                            const SizedBox(width: 6),
+                            _CompactCardAction(
+                              icon: Icons.delete_outline,
+                              tooltip: 'Delete product',
+                              color: _BusinessProductsPageState._dangerColor,
+                              onPressed: onDelete,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BusinessProductDetailsPage extends StatelessWidget {
+  const _BusinessProductDetailsPage({
+    required this.product,
+    required this.profile,
+    required this.canManage,
+    required this.onEdit,
+  });
+
+  final BusinessProduct product;
+  final BusinessProfile profile;
+  final bool canManage;
+  final VoidCallback onEdit;
+
+  String _productEnquirySubject() {
+    final title = product.name.trim().isEmpty ? 'Product enquiry' : product.name.trim();
+    return 'Product enquiry: $title';
+  }
+
+  String _productEnquiryMessage() {
+    final businessName = profile.businessName.trim();
+    final productName = product.name.trim().isEmpty ? 'this product' : product.name.trim();
+    final price = product.price.trim();
+    final description = product.description.trim();
+
+    final lines = <String>[
+      businessName.isEmpty ? 'Hi,' : 'Hi $businessName,',
+      '',
+      'I am interested in this product:',
+      'Product: $productName',
+      'Category: ${product.categoryLabel}',
+      if (price.isNotEmpty) 'Price: $price',
+      if (description.isNotEmpty) '',
+      if (description.isNotEmpty) 'Product details: $description',
+      '',
+      'Please could you let me know if this is still available?',
+    ];
+
+    return lines.join('\n');
+  }
 
   Future<void> _openBuyLink(BuildContext context) async {
     final cleanUrl = product.buyUrl.trim();
@@ -606,165 +842,344 @@ class _ProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final imageUrl = product.imageUrl.trim();
+    final title = product.name.trim().isEmpty ? 'Product details' : product.name.trim();
     final price = product.price.trim();
     final description = product.description.trim();
+    final businessName = profile.businessName.trim();
+    final buyUrl = product.buyUrl.trim();
 
-    return Material(
-      color: _BusinessProductsPageState._cardColor,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: product.featured
-                ? _BusinessProductsPageState._goldColor
-                : _BusinessProductsPageState._borderColor,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              height: 98,
-              child: imageUrl.isNotEmpty
-                  ? Image.network(
-                      imageUrl,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const _PostImageFallback(
-                          icon: Icons.inventory_2_outlined,
-                        );
-                      },
-                    )
-                  : const _PostImageFallback(
-                      icon: Icons.inventory_2_outlined,
-                    ),
+    return Scaffold(
+      backgroundColor: _BusinessProductsPageState._backgroundColor,
+      appBar: AppBar(
+        title: const Text('Product Details'),
+        backgroundColor: _BusinessProductsPageState._backgroundColor,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          if (canManage)
+            IconButton(
+              tooltip: 'Edit product',
+              onPressed: () {
+                Navigator.of(context).pop();
+                onEdit();
+              },
+              icon: const Icon(Icons.edit_outlined),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(9),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+        children: [
+          _ProductImageHero(imageUrl: imageUrl),
+          const SizedBox(height: 14),
+          _ProductSectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.category_outlined,
-                          color: _BusinessProductsPageState._goldColor,
-                          size: 14,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            product.categoryLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: _BusinessProductsPageState._softTextColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (product.featured)
-                          const Padding(
-                            padding: EdgeInsets.only(left: 4),
-                            child: Icon(
-                              Icons.star_rounded,
-                              color: _BusinessProductsPageState._goldColor,
-                              size: 16,
-                            ),
-                          ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4),
-                          child: Icon(
-                            product.active
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                            color: product.active
-                                ? _BusinessProductsPageState._successColor
-                                : _BusinessProductsPageState._softTextColor,
-                            size: 15,
-                          ),
-                        ),
-                      ],
+                    _DetailBadge(
+                      icon: Icons.category_outlined,
+                      label: product.categoryLabel,
                     ),
-                    const SizedBox(height: 7),
-                    Text(
-                      product.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14.5,
-                        height: 1.12,
-                        fontWeight: FontWeight.w900,
+                    if (product.featured)
+                      const _DetailBadge(
+                        icon: Icons.star_rounded,
+                        label: 'Featured',
                       ),
-                    ),
-                    if (price.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        price,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _BusinessProductsPageState._goldColor,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w900,
-                        ),
+                    if (canManage)
+                      _DetailBadge(
+                        icon: product.active
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        label: product.active ? 'Visible' : 'Hidden',
                       ),
-                    ],
-                    if (description.isNotEmpty) ...[
-                      const SizedBox(height: 5),
-                      Text(
-                        description,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _BusinessProductsPageState._softTextColor,
-                          fontSize: 11.5,
-                          height: 1.2,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    const Spacer(),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (product.buyUrl.trim().isNotEmpty)
-                          _CompactCardAction(
-                            icon: Icons.open_in_new,
-                            tooltip: 'Open product link',
-                            color: _BusinessProductsPageState._goldColor,
-                            onPressed: () => _openBuyLink(context),
-                          ),
-                        if (canManage) ...[
-                          const SizedBox(width: 6),
-                          _CompactCardAction(
-                            icon: Icons.edit_outlined,
-                            tooltip: 'Edit product',
-                            color: Colors.white,
-                            onPressed: onEdit,
-                          ),
-                          const SizedBox(width: 6),
-                          _CompactCardAction(
-                            icon: Icons.delete_outline,
-                            tooltip: 'Delete product',
-                            color: _BusinessProductsPageState._dangerColor,
-                            onPressed: onDelete,
-                          ),
-                        ],
-                      ],
-                    ),
                   ],
                 ),
+                const SizedBox(height: 14),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                if (businessName.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    businessName,
+                    style: const TextStyle(
+                      color: _BusinessProductsPageState._softTextColor,
+                      fontSize: 13,
+                      height: 1.3,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+                if (price.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    price,
+                    style: const TextStyle(
+                      color: _BusinessProductsPageState._goldColor,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ProductSectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _ProductSectionTitle(
+                  icon: Icons.description_outlined,
+                  title: 'Description',
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  description.isEmpty
+                      ? 'This business has not added any extra product details yet.'
+                      : description,
+                  style: const TextStyle(
+                    color: _BusinessProductsPageState._softTextColor,
+                    fontSize: 14,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ProductSectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _ProductSectionTitle(
+                  icon: Icons.chat_bubble_outline,
+                  title: 'Ask about this product',
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Send the business a product enquiry without leaving PocketChase.',
+                  style: TextStyle(
+                    color: _BusinessProductsPageState._softTextColor,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                BusinessEnquiryButton(
+                  profile: profile,
+                  buttonLabel: 'Message about this product',
+                  initialEnquiryType: 'product',
+                  initialSubject: _productEnquirySubject(),
+                  initialMessage: _productEnquiryMessage(),
+                ),
+              ],
+            ),
+          ),
+          if (buyUrl.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _ProductSectionCard(
+              child: _ProductActionButton(
+                icon: Icons.open_in_new,
+                label: 'Open product website',
+                onPressed: () => _openBuyLink(context),
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ProductImageHero extends StatelessWidget {
+  const _ProductImageHero({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: imageUrl.isEmpty ? 165 : 220,
+      decoration: BoxDecoration(
+        color: _BusinessProductsPageState._cardColor,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _BusinessProductsPageState._borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 14,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: imageUrl.isNotEmpty
+          ? Image.network(
+              imageUrl,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return const _ProductImageFallback();
+              },
+            )
+          : const _ProductImageFallback(),
+    );
+  }
+}
+
+class _ProductImageFallback extends StatelessWidget {
+  const _ProductImageFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: _BusinessProductsPageState._fieldColor,
+      child: const Center(
+        child: Icon(
+          Icons.inventory_2_outlined,
+          color: _BusinessProductsPageState._goldColor,
+          size: 52,
         ),
+      ),
+    );
+  }
+}
+
+class _ProductSectionCard extends StatelessWidget {
+  const _ProductSectionCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: _BusinessProductsPageState._cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _BusinessProductsPageState._borderColor),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _ProductSectionTitle extends StatelessWidget {
+  const _ProductSectionTitle({
+    required this.icon,
+    required this.title,
+  });
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: _BusinessProductsPageState._goldColor, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProductActionButton extends StatelessWidget {
+  const _ProductActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _BusinessProductsPageState._goldColor,
+          side: const BorderSide(color: _BusinessProductsPageState._goldColor),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailBadge extends StatelessWidget {
+  const _DetailBadge({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _BusinessProductsPageState._fieldColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _BusinessProductsPageState._borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            color: _BusinessProductsPageState._goldColor,
+            size: 15,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -8,9 +8,15 @@ class BusinessEnquiryFormPage extends StatefulWidget {
   const BusinessEnquiryFormPage({
     super.key,
     required this.profile,
+    this.initialEnquiryType,
+    this.initialSubject,
+    this.initialMessage,
   });
 
   final BusinessProfile profile;
+  final String? initialEnquiryType;
+  final String? initialSubject;
+  final String? initialMessage;
 
   @override
   State<BusinessEnquiryFormPage> createState() =>
@@ -46,9 +52,18 @@ class _BusinessEnquiryFormPageState extends State<BusinessEnquiryFormPage> {
     super.initState();
 
     final user = FirebaseAuth.instance.currentUser;
+    final requestedType = widget.initialEnquiryType?.trim() ?? '';
 
-    _subjectController = TextEditingController();
-    _messageController = TextEditingController();
+    if (_enquiryTypeLabels.containsKey(requestedType)) {
+      _selectedType = requestedType;
+    }
+
+    _subjectController = TextEditingController(
+      text: widget.initialSubject?.trim() ?? '',
+    );
+    _messageController = TextEditingController(
+      text: widget.initialMessage?.trim() ?? '',
+    );
     _contactEmailController = TextEditingController(text: user?.email ?? '');
   }
 

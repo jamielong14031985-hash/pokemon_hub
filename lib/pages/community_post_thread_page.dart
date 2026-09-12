@@ -319,25 +319,23 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
         (currentUid == livePost.authorId.trim() || _isAdmin);
 
     if (!canDeletePost) {
-      _showThreadMessage('Only the post author or an admin can delete this post.');
+      _showThreadMessage('Only the post author or an admin can remove this post.');
       return;
     }
 
-    final shouldDelete = await showDialog<bool>(
+    final shouldArchive = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF102754),
         title: Text(
           _isAdmin && currentUid != livePost.authorId.trim()
               ? 'Admin delete post'
-              : 'Delete post',
+              : 'Delete post?',
           style: const TextStyle(color: Colors.white),
         ),
-        content: Text(
-          _isAdmin && currentUid != livePost.authorId.trim()
-              ? 'This will permanently remove this post and all replies for everyone.'
-              : 'This will permanently remove your post and all replies.',
-          style: const TextStyle(color: Color(0xFFC8D4F0)),
+        content: const Text(
+          'This will delete the post from the community and move the post and replies into the admin archive.',
+          style: TextStyle(color: Color(0xFFC8D4F0)),
         ),
         actions: [
           TextButton(
@@ -350,39 +348,35 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
               backgroundColor: const Color(0xFFB13B59),
               foregroundColor: Colors.white,
             ),
-            child: const Text('Delete'),
+            child: const Text('Delete post'),
           ),
         ],
       ),
     );
 
-    if (shouldDelete != true) return;
+    if (shouldArchive != true) return;
 
     try {
-      final replies = await _repliesRef.get();
-      final replyImageRefs = replies.docs
-          .map(_safeReplyFromDoc)
-          .whereType<CommunityReply>()
-          .map((reply) => reply.imageBase64)
-          .whereType<String>()
-          .toList();
+      final now = DateTime.now().millisecondsSinceEpoch;
 
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in replies.docs) {
-        batch.delete(doc.reference);
-      }
-      batch.delete(_postRef);
-      await batch.commit();
-
-      for (final imageRef in <String>[
-        ...livePost.imageBase64List,
-        ...replyImageRefs,
-      ]) {
-        unawaited(FirebaseImageStorageService.deleteByDownloadUrl(imageRef));
-      }
+      await _postRef.set(
+        <String, dynamic>{
+          'archivedForAdmin': true,
+          'hiddenFromUsers': true,
+          'deletedForUsers': true,
+          'deleteReason': livePost.isMarketplace
+              ? 'Completed / removed marketplace post'
+              : 'Deleted discussion post',
+          'deletedAtMs': now,
+          'deletedByUid': currentUid,
+          'deletedByName': widget.currentProfile.displayName,
+          'updatedAtMs': now,
+        },
+        SetOptions(merge: true),
+      );
 
       if (!mounted) return;
-      _showThreadMessage('Post deleted.');
+      _showThreadMessage('Post deleted and moved to the admin archive.');
       Navigator.of(context).pop();
     } on FirebaseException catch (error) {
       _showThreadMessage(error.message ?? 'Could not delete post.');

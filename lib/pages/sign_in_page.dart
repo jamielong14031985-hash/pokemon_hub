@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models/tcg_shop.dart';
+import '../services/currency_settings.dart';
 import '../services/tcg_shop_service.dart';
 import '../utils/date_helpers.dart';
 import '../widgets/auth_mode_chip.dart';
@@ -47,6 +48,7 @@ class _SignInPageState extends State<SignInPage> {
   bool _obscureConfirmPassword = true;
   bool _acceptedTerms = false;
   String _selectedAccountType = _kPersonalAccountType;
+  String _selectedCurrencyCode = CurrencySettings.selectedCode;
   DateTime? _selectedDateOfBirth;
 
   @override
@@ -127,6 +129,26 @@ class _SignInPageState extends State<SignInPage> {
     }
   }
 
+  Map<String, Object?> _selectedCurrencyPreferenceData() {
+    return CurrencySettings.preferenceDataForCurrency(_selectedCurrencyCode);
+  }
+
+  Future<void> _syncCurrencySettingsFromUser(User user) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      await CurrencySettings.applyStoredPreferenceData(snapshot.data());
+      if (!mounted) return;
+      setState(() {
+        _selectedCurrencyCode = CurrencySettings.selectedCode;
+      });
+    } catch (_) {
+      // Sign-in should not fail if preference loading fails.
+    }
+  }
+
   Future<void> _saveNewUserProfile({
     required User user,
     required String email,
@@ -138,6 +160,8 @@ class _SignInPageState extends State<SignInPage> {
     if (dateOfBirth == null) {
       throw StateError('Missing date of birth.');
     }
+
+    final currencyPreferenceData = _selectedCurrencyPreferenceData();
 
     await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
       'uid': user.uid,
@@ -153,6 +177,8 @@ class _SignInPageState extends State<SignInPage> {
           ? _kBusinessAccountType
           : _kPersonalAccountType,
       'businessProfileCreated': businessProfileCreated,
+      'preferredCurrencyCode': currencyPreferenceData['preferredCurrencyCode'],
+      'preferredMarketplaceCode': currencyPreferenceData['preferredMarketplaceCode'],
     }, SetOptions(merge: true));
   }
 
@@ -163,6 +189,7 @@ class _SignInPageState extends State<SignInPage> {
     final businessName = _businessNameController.text.trim();
     final town = _businessTownController.text.trim();
     final county = _businessCountyController.text.trim();
+    final currencyPreferenceData = _selectedCurrencyPreferenceData();
 
     await FirebaseFirestore.instance
         .collection('business_profiles')
@@ -182,6 +209,8 @@ class _SignInPageState extends State<SignInPage> {
       'townLower': town.toLowerCase(),
       'county': county,
       'countyLower': county.toLowerCase(),
+      'preferredCurrencyCode': currencyPreferenceData['preferredCurrencyCode'],
+      'preferredMarketplaceCode': currencyPreferenceData['preferredMarketplaceCode'],
       'logoUrl': '',
       'bannerUrl': '',
       'status': 'approved',
@@ -302,16 +331,24 @@ class _SignInPageState extends State<SignInPage> {
           await _createBusinessProfileForNewUser(user: user, email: email);
         }
 
+        await CurrencySettings.setPreferredCurrencyAndMarketplace(
+          currencyCode: _selectedCurrencyCode,
+        );
+
         try {
           await user.sendEmailVerification();
         } catch (_) {
           // Account creation should still complete if the verification email fails.
         }
       } else {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
+        final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
           password: password,
         );
+        final user = credential.user;
+        if (user != null) {
+          await _syncCurrencySettingsFromUser(user);
+        }
       }
     } on FirebaseAuthException catch (error) {
       _showMessage(_friendlyAuthError(error));
@@ -706,6 +743,98 @@ class _SignInPageState extends State<SignInPage> {
     );
   }
 
+  Widget _buildCurrencyPreferenceSelector() {
+    final selectedCurrency = CurrencySettings.supportedCurrencies[
+            CurrencySettings.normalizeCurrencyCode(_selectedCurrencyCode)] ??
+        CurrencySettings.supportedCurrencies['GBP']!;
+    final marketplace = CurrencySettings.supportedMarketplaces[
+            selectedCurrency.defaultMarketplaceCode] ??
+        CurrencySettings.supportedMarketplaces['UK']!;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16366E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF3F5C96)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.payments_outlined,
+                color: Color(0xFFF7DE77),
+                size: 22,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Price and marketplace preference',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Choose the currency you want raw card prices shown in. Graded card searches will use the matching eBay region.',
+            style: TextStyle(
+              color: Color(0xFFC8D4F0),
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: CurrencySettings.normalizeCurrencyCode(_selectedCurrencyCode),
+            dropdownColor: const Color(0xFF102754),
+            iconEnabledColor: const Color(0xFFC8D4F0),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+            decoration: _authInputDecoration('Preferred currency'),
+            items: CurrencySettings.supportedCurrencies.values
+                .map(
+                  (currency) => DropdownMenuItem<String>(
+                    value: currency.code,
+                    child: Text(
+                      '${currency.symbol} ${currency.code} • ${currency.label}',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: _submitting
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _selectedCurrencyCode = value;
+                    });
+                  },
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Current choice: raw prices in ${selectedCurrency.code}; graded searches open ${marketplace.label}.',
+            style: const TextStyle(
+              color: Color(0xFFF7DE77),
+              fontSize: 12,
+              height: 1.35,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAccountTypeSelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -846,6 +975,8 @@ class _SignInPageState extends State<SignInPage> {
                           const SizedBox(height: 14),
                           _buildBusinessDetailsForm(),
                         ],
+                        const SizedBox(height: 14),
+                        _buildCurrencyPreferenceSelector(),
                         const SizedBox(height: 14),
                       ],
                       TextField(

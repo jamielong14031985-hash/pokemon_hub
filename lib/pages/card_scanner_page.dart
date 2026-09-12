@@ -681,6 +681,121 @@ class _CardScannerPageState extends State<CardScannerPage>
     }
   }
 
+  String _normaliseScannerMatchText(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('é', 'e')
+        .replaceAll('’', "'")
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  Set<String> _scannerNumberKeys(String value) {
+    final keys = <String>{};
+
+    for (final match in RegExp(r'\d+').allMatches(value)) {
+      final raw = match.group(0) ?? '';
+      if (raw.isEmpty) continue;
+
+      keys.add(raw);
+      final withoutLeadingZeros = raw.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+      if (withoutLeadingZeros.isNotEmpty) {
+        keys.add(withoutLeadingZeros);
+      }
+    }
+
+    return keys;
+  }
+
+  List<TcgCard> _rankMatchesFromScannerClues({
+    required List<TcgCard> matches,
+    required String? scannedCardName,
+    required String? scannedPokemonName,
+    required String? scannedCollectorNumber,
+    required String? scannedPrintedTotal,
+    required String? scannedSetName,
+    required String? scannedSetCode,
+  }) {
+    if (matches.length < 2) return matches;
+
+    final scanName = _normaliseScannerMatchText(
+      '${scannedCardName ?? ''} ${scannedPokemonName ?? ''}',
+    );
+    final scanSetName = _normaliseScannerMatchText(scannedSetName ?? '');
+    final scanSetCode = _normaliseScannerMatchText(scannedSetCode ?? '');
+    final collectorNumberKeys = _scannerNumberKeys(
+      scannedCollectorNumber ?? '',
+    );
+    final printedTotalKeys = _scannerNumberKeys(scannedPrintedTotal ?? '');
+
+    // Keep the backend order when the image did not produce any useful clues.
+    if (scanName.isEmpty &&
+        scanSetName.isEmpty &&
+        scanSetCode.isEmpty &&
+        collectorNumberKeys.isEmpty &&
+        printedTotalKeys.isEmpty) {
+      return matches;
+    }
+
+    final scored = <({TcgCard card, int score, int originalIndex})>[];
+
+    for (var index = 0; index < matches.length; index++) {
+      final card = matches[index];
+      var score = 0;
+
+      // The collector number is the most reliable way to separate cards with
+      // the same Pokémon name, artwork family, HP, or set.
+      final cardNumberKeys = _scannerNumberKeys(card.number);
+      if (cardNumberKeys.intersection(collectorNumberKeys).isNotEmpty) {
+        score += 4200;
+      } else if (cardNumberKeys.intersection(printedTotalKeys).isNotEmpty) {
+        // A set total such as 191 is useful supporting evidence, but it must
+        // never outrank the actual collector number such as 238.
+        score += 120;
+      }
+
+      final cardName = _normaliseScannerMatchText(card.name);
+      if (scanName.isNotEmpty && cardName.isNotEmpty) {
+        if (scanName == cardName) {
+          score += 500;
+        } else if (scanName.contains(cardName) || cardName.contains(scanName)) {
+          score += 280;
+        }
+      }
+
+      final cardSetName = _normaliseScannerMatchText(card.setName);
+      if (scanSetName.isNotEmpty && cardSetName.isNotEmpty) {
+        if (scanSetName == cardSetName) {
+          score += 900;
+        } else if (scanSetName.contains(cardSetName) ||
+            cardSetName.contains(scanSetName)) {
+          score += 520;
+        }
+      }
+
+      final cardSetId = _normaliseScannerMatchText(card.setId);
+      if (scanSetCode.isNotEmpty && cardSetId.isNotEmpty) {
+        if (scanSetCode == cardSetId) {
+          score += 1100;
+        } else if (scanSetCode.contains(cardSetId) ||
+            cardSetId.contains(scanSetCode)) {
+          score += 650;
+        }
+      }
+
+      scored.add((card: card, score: score, originalIndex: index));
+    }
+
+    scored.sort((a, b) {
+      final scoreComparison = b.score.compareTo(a.score);
+      if (scoreComparison != 0) return scoreComparison;
+      return a.originalIndex.compareTo(b.originalIndex);
+    });
+
+    return scored.map((item) => item.card).toList();
+  }
+
   Future<CardScanAnalysis> _buildVisionAnalysis(String imagePath) async {
     final vision = await _visionClient.scanImage(imagePath);
 
@@ -711,8 +826,10 @@ class _CardScannerPageState extends State<CardScannerPage>
     if (vision.exactConfirmed && vision.bestMatch != null) {
       matches = <TcgCard>[await resolveCard(vision.bestMatch!)];
     } else if (orderedResolved.isNotEmpty) {
+      // Resolve a larger shortlist so a correct lower-ranked backend candidate
+      // is still available for the app to rerank locally.
       matches =
-          await Future.wait<TcgCard>(orderedResolved.take(4).map(resolveCard));
+          await Future.wait<TcgCard>(orderedResolved.take(8).map(resolveCard));
     }
 
     final candidateNames = <String>{
@@ -729,6 +846,16 @@ class _CardScannerPageState extends State<CardScannerPage>
           (vision.extraction.printedTotal ?? '').trim().isNotEmpty)
         '${vision.extraction.collectorNumber!.trim()}/${vision.extraction.printedTotal!.trim()}',
     }.toList();
+
+    matches = _rankMatchesFromScannerClues(
+      matches: matches,
+      scannedCardName: vision.extraction.cardName,
+      scannedPokemonName: vision.extraction.pokemonName,
+      scannedCollectorNumber: vision.extraction.collectorNumber,
+      scannedPrintedTotal: vision.extraction.printedTotal,
+      scannedSetName: vision.extraction.setName,
+      scannedSetCode: vision.extraction.setCode,
+    );
 
     final promoScanText = <String>[
       vision.extraction.cardName ?? '',
@@ -1017,91 +1144,67 @@ class _CardScannerPageState extends State<CardScannerPage>
     return RepaintBoundary(
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: const Color(0xFF102754),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
           children: [
-            SizedBox(
-              width: 108,
-              height: 108,
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      Colors.white.withValues(alpha: 0.09),
-                      Colors.white.withValues(alpha: 0.025),
-                      Colors.transparent,
-                    ],
-                  ),
+            Container(
+              width: 54,
+              height: 54,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.03),
+                border: Border.all(
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.62),
+                  width: 1.8,
                 ),
-                alignment: Alignment.center,
-                child: Container(
-                  width: 82,
-                  height: 82,
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.03),
-                    border: Border.all(
-                      color: const Color(0xFFF7DE77).withValues(alpha: 0.55),
-                      width: 2.2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFF7DE77).withValues(alpha: 0.24),
-                        blurRadius: 18,
-                        spreadRadius: 2,
-                      ),
-                      BoxShadow(
-                        color: Colors.white.withValues(alpha: 0.08),
-                        blurRadius: 8,
-                        spreadRadius: 1,
-                      ),
-                    ],
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
+                    blurRadius: 12,
                   ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      kCustomAppLogoAsset,
-                      fit: BoxFit.cover,
-                      filterQuality: FilterQuality.high,
-                      errorBuilder: (_, __, ___) {
-                        return const Center(
-                          child: Icon(
-                            Icons.style,
-                            color: Color(0xFFF7DE77),
-                            size: 40,
-                          ),
-                        );
-                      },
-                    ),
+                ],
+              ),
+              child: ClipOval(
+                child: Image.asset(
+                  kCustomAppLogoAsset,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.center_focus_strong_rounded,
+                    color: Color(0xFFF7DE77),
+                    size: 28,
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            const Text(
-              'Scan Card',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Line up one card, tap to focus, then scan for a quick price.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 12,
-                height: 1.3,
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Scan a Pokémon card',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Keep one full card inside the frame, then press Scan card.',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12.5,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1141,7 +1244,7 @@ class _CardScannerPageState extends State<CardScannerPage>
             padding: const EdgeInsets.symmetric(horizontal: 22),
             child: Text(
               _cameraErrorMessage ??
-                  'Use Scan Now or Gallery below to scan a card.',
+                  'Use Scan card or Gallery below to scan a card.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white70,
@@ -1190,67 +1293,106 @@ class _CardScannerPageState extends State<CardScannerPage>
               IgnorePointer(
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(22),
                     border: Border.all(
-                      color: const Color(0xFFF7DE77).withValues(alpha: 0.38),
+                      color: const Color(0xFFF7DE77).withValues(alpha: 0.42),
                       width: 2,
                     ),
                   ),
                 ),
               ),
               Positioned(
-                left: 18,
-                right: 18,
-                top: 18,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.42),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _autoScanEnabled
-                            ? Icons.center_focus_strong_rounded
-                            : Icons.pause_circle_outline_rounded,
-                        color: const Color(0xFFF7DE77),
-                        size: 18,
+                left: 16,
+                right: 16,
+                top: 16,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 13,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.50),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.13),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _focusMessage ??
-                              (_scanning
-                                  ? 'Checking card...'
-                                  : 'Tap to focus, then scan price'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.touch_app_outlined,
+                          color: Color(0xFFF7DE77),
+                          size: 17,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _focusMessage ??
+                                (_scanning
+                                    ? 'Checking your card...'
+                                    : 'Tap the card to focus'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
               Positioned.fill(
-                child: Center(
-                  child: Container(
-                    width: 190,
-                    height: 268,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: const Color(0xFFF7DE77).withValues(alpha: 0.48),
-                        width: 2,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Container(
+                      width: 202,
+                      height: 284,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: const Color(0xFFF7DE77).withValues(alpha: 0.72),
+                          width: 2.2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.20),
+                            blurRadius: 18,
+                          ),
+                        ],
                       ),
-                      color: Colors.black.withValues(alpha: 0.02),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.50),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      'Keep the whole card visible and avoid glare.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
@@ -1267,72 +1409,58 @@ class _CardScannerPageState extends State<CardScannerPage>
         _capturedImage != null ? File(_capturedImage!.path) : null;
 
     return RepaintBoundary(
-      child: Card(
-        color: const Color(0xFF102754),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF102754),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: const Color(0xFFF7DE77).withValues(alpha: 0.26),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 16,
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: AspectRatio(
-          aspectRatio: 0.82,
-          child: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF122D63), Color(0xFF0A1E47)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    previewFile == null
-                        ? 'Live scanner'
-                        : 'Last scanned image',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+          aspectRatio: 0.72,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              previewFile == null
+                  ? _buildCameraPreview()
+                  : Image.file(
+                      previewFile,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      filterQuality: FilterQuality.low,
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    previewFile == null
-                        ? 'Hold one full card in the guide. Scan when the name and number are clear.'
-                        : 'This is the image used for the latest scan.',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                      height: 1.4,
+              if (previewFile != null)
+                Positioned(
+                  top: 14,
+                  left: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 7,
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.08),
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.56),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Text(
+                      'Latest scan photo',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
                       ),
-                      clipBehavior: Clip.antiAlias,
-                      child: previewFile == null
-                          ? _buildCameraPreview()
-                          : Image.file(
-                              previewFile,
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                              filterQuality: FilterQuality.low,
-                            ),
                     ),
                   ),
-                ],
-              ),
-            ),
+                ),
+            ],
           ),
         ),
       ),
@@ -1340,97 +1468,53 @@ class _CardScannerPageState extends State<CardScannerPage>
   }
 
   Widget _buildScannerActions() {
+    final hasPreviousScan =
+        _capturedImage != null || _analysis != null || _errorMessage != null;
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF102754),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        FilledButton.icon(
+          onPressed: _scanning ? null : _captureAndScanFromLivePreview,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFF7DE77),
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(vertical: 17),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
           ),
-          child: const Row(
-            children: [
-              Icon(
-                Icons.touch_app_outlined,
-                color: Color(0xFFF7DE77),
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'At a show: scan, check the price, then tap Scan next card.',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    height: 1.25,
-                  ),
-                ),
-              ),
-            ],
+          icon: const Icon(Icons.center_focus_strong_rounded),
+          label: Text(
+            hasPreviousScan ? 'Scan another card' : 'Scan card',
+            style: const TextStyle(fontWeight: FontWeight.w800),
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _scanning ? null : _captureAndScanFromLivePreview,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFF7DE77),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-                icon: const Icon(Icons.center_focus_strong_rounded),
-                label: Text(
-                  _analysis != null || _capturedImage != null
-                      ? 'Scan next card'
-                      : 'Scan price',
-                ),
-              ),
+        OutlinedButton.icon(
+          onPressed: _scanning ? null : _scanFromGallery,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
+            padding: const EdgeInsets.symmetric(vertical: 15),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _scanning ? null : _scanFromGallery,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  backgroundColor: const Color(0xFF102754),
-                ),
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Gallery'),
-              ),
-            ),
-          ],
+            backgroundColor: const Color(0xFF102754),
+          ),
+          icon: const Icon(Icons.photo_library_outlined),
+          label: const Text('Choose photo from gallery'),
         ),
-        if (_capturedImage != null ||
-            _analysis != null ||
-            _errorMessage != null) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _scanning ? null : _resetScanner,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                backgroundColor: const Color(0xFF102754),
-              ),
-              icon: const Icon(Icons.replay_rounded),
-              label: const Text('Reset scanner'),
+        if (hasPreviousScan) ...[
+          const SizedBox(height: 4),
+          TextButton.icon(
+            onPressed: _scanning ? null : _resetScanner,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white70,
+              padding: const EdgeInsets.symmetric(vertical: 10),
             ),
+            icon: const Icon(Icons.replay_rounded),
+            label: const Text('Start over'),
           ),
         ],
       ],
@@ -1491,6 +1575,7 @@ class _CardScannerPageState extends State<CardScannerPage>
     final scanTime = _lastScanDurationMs == null
         ? ''
         : 'Found in ${(_lastScanDurationMs! / 1000).toStringAsFixed(1)}s';
+    final exactMatch = _analysis?.exactConfirmed == true;
 
     return Container(
       decoration: BoxDecoration(
@@ -1522,8 +1607,10 @@ class _CardScannerPageState extends State<CardScannerPage>
                     color: Color(0xFFF7DE77),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.price_check_rounded,
+                  child: Icon(
+                    exactMatch
+                        ? Icons.verified_rounded
+                        : Icons.price_check_rounded,
                     color: Colors.black,
                     size: 27,
                   ),
@@ -1533,9 +1620,9 @@ class _CardScannerPageState extends State<CardScannerPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Quick price result',
-                        style: TextStyle(
+                      Text(
+                        exactMatch ? 'Exact card match' : 'Card found',
+                        style: const TextStyle(
                           color: Color(0xFFF7DE77),
                           fontSize: 12.5,
                           fontWeight: FontWeight.w900,
@@ -1544,7 +1631,9 @@ class _CardScannerPageState extends State<CardScannerPage>
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        scanTime.isEmpty ? 'Ready for the next card' : scanTime,
+                        scanTime.isEmpty
+                            ? 'Check the details below before saving.'
+                            : scanTime,
                         style: const TextStyle(
                           color: Colors.white60,
                           fontSize: 12,
@@ -1616,48 +1705,21 @@ class _CardScannerPageState extends State<CardScannerPage>
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _scanning ? null : _captureAndScanFromLivePreview,
-                    icon: const Icon(Icons.center_focus_strong_rounded),
-                    label: const Text('Scan next card'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF7DE77),
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _scanning ? null : _captureAndScanFromLivePreview,
+                icon: const Icon(Icons.center_focus_strong_rounded),
+                label: const Text('Scan another card'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF7DE77),
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _scanSaveBusy || _isLocalPromoFallbackCard(card)
-                        ? null
-                        : () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => CardDetailsPage(card: card),
-                              ),
-                            );
-                          },
-                    icon: const Icon(Icons.open_in_new_rounded),
-                    label: const Text('Details'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.18),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: const Color(0xFF16366E),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),
@@ -1815,7 +1877,7 @@ class _CardScannerPageState extends State<CardScannerPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Quick save this scan',
+                  'Save this card',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -1824,7 +1886,7 @@ class _CardScannerPageState extends State<CardScannerPage>
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Choose the finish, then save it straight to your collection or wishlist.',
+                  'Choose the finish, then add it to your collection, binder or wishlist.',
                   style: TextStyle(
                     color: Color(0xFFD8E3FB),
                     height: 1.35,
@@ -1987,7 +2049,7 @@ class _CardScannerPageState extends State<CardScannerPage>
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Text(
-          'Choose the correct card below. Showing top ${count.clamp(1, 4)} likely matches.',
+          'The scan found $count possible ${count == 1 ? 'card' : 'cards'}. Results are ordered using the card number and set when they can be read. Choose yours before saving.',
           style: const TextStyle(
             color: Color(0xFFD8E3FB),
             height: 1.35,
@@ -2002,128 +2064,113 @@ class _CardScannerPageState extends State<CardScannerPage>
     final hasNumberHints = _analysis?.candidateNumbers.isNotEmpty ?? false;
     final hasNameHints = _analysis?.candidateNames.isNotEmpty ?? false;
 
-    return Card(
-      color: const Color(0xFF102754),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: () {
-          setState(() {
-            _showExtractedTextDetails = !_showExtractedTextDetails;
-          });
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() {
+                _showExtractedTextDetails = !_showExtractedTextDetails;
+              });
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFD8E3FB),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            icon: Icon(
+              _showExtractedTextDetails
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.help_outline_rounded,
+            ),
+            label: Text(
+              _showExtractedTextDetails
+                  ? 'Hide scan details'
+                  : 'Having trouble finding your card?',
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox.shrink(),
+          secondChild: Card(
+            color: const Color(0xFF102754),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color:
-                            const Color(0xFFF7DE77).withValues(alpha: 0.25),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.document_scanner_rounded,
-                      color: Color(0xFFF7DE77),
-                      size: 20,
+                  const Text(
+                    'Scanner details',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _showExtractedTextDetails
-                          ? 'Hide scanner text'
-                          : 'What the scanner read',
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Use these hints to check why a card was not matched exactly.',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      height: 1.35,
+                    ),
+                  ),
+                  if (hasNumberHints) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'Card number hints: ${_analysis!.candidateNumbers.join(', ')}',
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
+                        color: Color(0xFFF7DE77),
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ),
-                  AnimatedRotation(
-                    duration: const Duration(milliseconds: 180),
-                    turns: _showExtractedTextDetails ? 0.5 : 0,
-                    child: const Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      color: Colors.white70,
-                      size: 30,
+                  ],
+                  if (hasNameHints) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Name hints: ${_analysis!.candidateNames.take(3).join(' • ')}',
+                      style: const TextStyle(
+                        color: Color(0xFFD8E3FB),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF071B3F),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Text(
+                      _analysis!.extractedText,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],
               ),
-              AnimatedCrossFade(
-                firstChild: const SizedBox.shrink(),
-                secondChild: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 14),
-                    Divider(color: Colors.white.withValues(alpha: 0.12)),
-                    const SizedBox(height: 10),
-                    if (hasNumberHints)
-                      Text(
-                        'Card number hints: ${_analysis!.candidateNumbers.join(', ')}',
-                        style: const TextStyle(
-                          color: Color(0xFFF7DE77),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    if (hasNameHints) ...[
-                      if (hasNumberHints) const SizedBox(height: 8),
-                      Text(
-                        'Name hints: ${_analysis!.candidateNames.take(3).join(' • ')}',
-                        style: const TextStyle(
-                          color: Color(0xFFD8E3FB),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    if (hasNumberHints || hasNameHints)
-                      const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF071B3F),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.08),
-                        ),
-                      ),
-                      child: Text(
-                        _analysis!.extractedText,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                crossFadeState: _showExtractedTextDetails
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                duration: const Duration(milliseconds: 180),
-                sizeCurve: Curves.easeInOut,
-              ),
-            ],
+            ),
           ),
+          crossFadeState: _showExtractedTextDetails
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 180),
+          sizeCurve: Curves.easeInOut,
         ),
-      ),
+      ],
     );
   }
-
 
   bool _shouldUseCapturedImageForMatch(TcgCard card) {
     return card.id.toLowerCase().startsWith('mep-') &&
@@ -2181,10 +2228,18 @@ class _CardScannerPageState extends State<CardScannerPage>
     final autoBestMatch = _analysis?.bestMatch;
     final matches = _analysis?.matches ?? const <TcgCard>[];
     final confirmedMatch = _findConfirmedMatch(matches);
-    final primaryMatch = confirmedMatch ?? autoBestMatch;
+    final hasExactAutomaticMatch =
+        _analysis?.exactConfirmed == true && autoBestMatch != null;
+
+    // Only show a result automatically when the scanner has actually confirmed it.
+    // Otherwise the user chooses from every returned candidate before anything
+    // can be saved to their Pokédex or wishlist.
+    final primaryMatch = confirmedMatch ??
+        (hasExactAutomaticMatch ? autoBestMatch : null);
     final requiresConfirmation = !_scanning &&
         _errorMessage == null &&
-        primaryMatch == null &&
+        confirmedMatch == null &&
+        !hasExactAutomaticMatch &&
         matches.isNotEmpty;
     final extractedText = _analysis?.extractedText.trim() ?? '';
 
@@ -2222,47 +2277,15 @@ class _CardScannerPageState extends State<CardScannerPage>
       ]);
     }
 
-    if (primaryMatch != null) {
-      children.addAll(<Widget>[
-        const SizedBox(height: 18),
-        Text(
-          _analysis?.exactConfirmed == true
-              ? 'Confirmed match'
-              : 'Selected card',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 8),
-        RepaintBoundary(
-          child: ScanResultMatchCard(
-            card: primaryMatch,
-            capturedImagePath: _capturedImagePathForMatch(primaryMatch),
-            highlight: true,
-            rank: 1,
-            confidenceLabel: _analysis?.exactConfirmed == true
-                ? 'Exact scanner match'
-                : 'Selected by you',
-            actionLabel:
-                _isLocalPromoFallbackCard(primaryMatch) ? null : 'View details',
-            onActionTap: _isLocalPromoFallbackCard(primaryMatch)
-                ? null
-                : () => _openDetailsOrSelectMatch(primaryMatch),
-            onTap: () => _openDetailsOrSelectMatch(primaryMatch),
-          ),
-        ),
-      ]);
-    }
-
     if (requiresConfirmation) {
+      final candidateMatches = matches.take(8).toList();
+
       children.addAll(<Widget>[
         const SizedBox(height: 14),
-        _buildChooseMatchCard(matches.length),
+        _buildChooseMatchCard(candidateMatches.length),
         const SizedBox(height: 18),
         const Text(
-          'Choose the correct card',
+          'Choose your card',
           style: TextStyle(
             color: Colors.white,
             fontSize: 18,
@@ -2272,9 +2295,8 @@ class _CardScannerPageState extends State<CardScannerPage>
         const SizedBox(height: 8),
       ]);
 
-      final rankedMatches = matches.take(4).toList();
-      for (var index = 0; index < rankedMatches.length; index++) {
-        final card = rankedMatches[index];
+      for (var index = 0; index < candidateMatches.length; index++) {
+        final card = candidateMatches[index];
         children.add(
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -2283,8 +2305,7 @@ class _CardScannerPageState extends State<CardScannerPage>
                 card: card,
                 capturedImagePath: _capturedImagePathForMatch(card),
                 rank: index + 1,
-                confidenceLabel:
-                    index == 0 ? 'Best visual match' : 'Possible match',
+                confidenceLabel: 'Possible match',
                 actionLabel: 'This is my card',
                 onActionTap: () => _confirmMatch(card),
                 onTap: () => _openDetailsOrSelectMatch(card),
@@ -2295,43 +2316,43 @@ class _CardScannerPageState extends State<CardScannerPage>
       }
     }
 
-    final alternativeMatches = primaryMatch == null
-        ? matches.skip(4).take(5)
-        : matches.where((card) => card.id != primaryMatch.id).take(7);
+    if (!requiresConfirmation && primaryMatch != null) {
+      final alternativeMatches =
+          matches.where((card) => card.id != primaryMatch.id).take(7);
 
-    if (alternativeMatches.isNotEmpty) {
-      children.addAll(<Widget>[
-        const SizedBox(height: 18),
-        Text(
-          requiresConfirmation ? 'More likely matches' : 'Other likely matches',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 8),
-      ]);
-
-      var alternativeRank = primaryMatch == null ? 5 : 2;
-      for (final card in alternativeMatches) {
-        children.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: RepaintBoundary(
-              child: ScanResultMatchCard(
-                card: card,
-                capturedImagePath: _capturedImagePathForMatch(card),
-                rank: alternativeRank++,
-                confidenceLabel:
-                    primaryMatch == null ? 'Possible match' : 'Alternative match',
-                actionLabel: 'This is my card',
-                onActionTap: () => _confirmMatch(card),
-                onTap: () => _openDetailsOrSelectMatch(card),
-              ),
+      if (alternativeMatches.isNotEmpty) {
+        children.addAll(<Widget>[
+          const SizedBox(height: 18),
+          const Text(
+            'Other possible cards',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
             ),
           ),
-        );
+          const SizedBox(height: 8),
+        ]);
+
+        var alternativeRank = 2;
+        for (final card in alternativeMatches) {
+          children.add(
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: RepaintBoundary(
+                child: ScanResultMatchCard(
+                  card: card,
+                  capturedImagePath: _capturedImagePathForMatch(card),
+                  rank: alternativeRank++,
+                  confidenceLabel: 'Alternative match',
+                  actionLabel: 'Use this card instead',
+                  onActionTap: () => _confirmMatch(card),
+                  onTap: () => _openDetailsOrSelectMatch(card),
+                ),
+              ),
+            ),
+          );
+        }
       }
     }
 

@@ -67,6 +67,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _loadProfile() async {
     _nameController.text = widget.profile.username.trim();
+
+    final preferredCurrencyCode = widget.profile.preferredCurrencyCode.trim();
+    if (preferredCurrencyCode.isNotEmpty) {
+      await CurrencySettings.setPreferredCurrencyAndMarketplace(
+        currencyCode: preferredCurrencyCode,
+        marketplaceCode: widget.profile.preferredMarketplaceCode,
+      );
+    }
+
     final imagePath = await LocalProfileImageStore.loadForUser(widget.profile.uid);
 
     if (mounted) {
@@ -175,7 +184,39 @@ class _ProfilePageState extends State<ProfilePage> {
     });
 
     try {
-      await CurrencySettings.setSelectedCode(value);
+      final preferenceData = CurrencySettings.preferenceDataForCurrency(value);
+
+      await CurrencySettings.setPreferredCurrencyAndMarketplace(
+        currencyCode: value,
+        marketplaceCode: preferenceData['preferredMarketplaceCode']?.toString(),
+      );
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'preferredCurrencyCode': preferenceData['preferredCurrencyCode'],
+          'preferredMarketplaceCode': preferenceData['preferredMarketplaceCode'],
+          'updatedAtMs': now,
+        }, SetOptions(merge: true));
+
+        if (widget.profile.isBusinessAccount) {
+          final businessSnapshot = await FirebaseFirestore.instance
+              .collection('business_profiles')
+              .where('ownerUid', isEqualTo: user.uid)
+              .limit(1)
+              .get();
+
+          if (businessSnapshot.docs.isNotEmpty) {
+            await businessSnapshot.docs.first.reference.set({
+              'preferredCurrencyCode': preferenceData['preferredCurrencyCode'],
+              'preferredMarketplaceCode': preferenceData['preferredMarketplaceCode'],
+              'updatedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+          }
+        }
+      }
+
       if (!mounted) return false;
 
       setState(() {
@@ -708,7 +749,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Card prices update across the app when you change this setting.',
+                        'Raw card prices update across the app. Graded card searches use the matching eBay region.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
@@ -926,8 +967,8 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: 7),
               Text(
                 widget.profile.isBusinessAccount
-                    ? 'Tap the pencil to edit your business name, email, currency and profile picture.'
-                    : 'Tap the pencil to edit your trainer name, email, currency and profile picture.',
+                    ? 'Tap the pencil to edit your business name, email, currency, eBay region and profile picture.'
+                    : 'Tap the pencil to edit your trainer name, email, currency, eBay region and profile picture.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.white54,

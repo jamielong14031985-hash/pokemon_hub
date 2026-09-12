@@ -8,7 +8,6 @@ import '../models/tcg_card.dart';
 import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/wishlist_service.dart';
-import '../services/external_card_price_service.dart';
 import '../utils/auth_input_decoration.dart';
 import '../utils/card_condition_helpers.dart';
 import '../utils/ebay_sold_search.dart';
@@ -18,6 +17,329 @@ import '../widgets/graded_prices_button.dart';
 import '../widgets/price_lookup_card.dart';
 import '../widgets/set_logo_widgets.dart';
 import 'graded_prices_page.dart';
+
+
+class _ElementalCardImageStage extends StatelessWidget {
+  const _ElementalCardImageStage({
+    required this.card,
+    required this.imageUrl,
+  });
+
+  final TcgCard card;
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = _ElementalCardTheme.forCard(card);
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 360),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.gradientColors,
+        ),
+        border: Border.all(color: theme.glowColor.withValues(alpha: 0.50)),
+        boxShadow: [
+          BoxShadow(
+            color: theme.glowColor.withValues(alpha: 0.30),
+            blurRadius: 28,
+            spreadRadius: 2,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(child: _ElementalBackdrop(theme: theme)),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cardWidth = (constraints.maxWidth * 0.82).clamp(240.0, 430.0);
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(18, 28, 18, 28),
+                child: Align(
+                  alignment: Alignment.center,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Image.network(
+                      imageUrl,
+                      fit: BoxFit.contain,
+                      width: cardWidth,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ElementalBackdrop extends StatelessWidget {
+  const _ElementalBackdrop({required this.theme});
+
+  final _ElementalCardTheme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset(
+          theme.assetPath,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: theme.gradientColors,
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  theme.icon,
+                  color: theme.highlightColor.withValues(alpha: 0.35),
+                  size: 90,
+                ),
+              ),
+            );
+          },
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.04),
+                Colors.black.withValues(alpha: 0.12),
+                Colors.black.withValues(alpha: 0.30),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ElementalCardTheme {
+  const _ElementalCardTheme({
+    required this.patternKey,
+    required this.icon,
+    required this.gradientColors,
+    required this.glowColor,
+    required this.accentColor,
+    required this.highlightColor,
+    required this.assetPath,
+  });
+
+  final String patternKey;
+  final IconData icon;
+  final List<Color> gradientColors;
+  final Color glowColor;
+  final Color accentColor;
+  final Color highlightColor;
+  final String assetPath;
+
+  static _ElementalCardTheme forCard(TcgCard card) {
+    final key = _elementKeyForCard(card);
+    switch (key) {
+      case 'grass':
+        return const _ElementalCardTheme(
+          patternKey: 'grass',
+          icon: Icons.energy_savings_leaf_rounded,
+          gradientColors: [Color(0xFF061B18), Color(0xFF0A5A33), Color(0xFF9AD05C)],
+          glowColor: Color(0xFF70FF87),
+          accentColor: Color(0xFF184B25),
+          highlightColor: Color(0xFFD8FF8E),
+          assetPath: 'assets/card_backgrounds/grass.jpg',
+        );
+      case 'fire':
+        return const _ElementalCardTheme(
+          patternKey: 'fire',
+          icon: Icons.local_fire_department_rounded,
+          gradientColors: [Color(0xFF26070A), Color(0xFFB72E16), Color(0xFFFFB13B)],
+          glowColor: Color(0xFFFF6A3D),
+          accentColor: Color(0xFF8F1D16),
+          highlightColor: Color(0xFFFFE28A),
+          assetPath: 'assets/card_backgrounds/fire.jpg',
+        );
+      case 'water':
+        return const _ElementalCardTheme(
+          patternKey: 'water',
+          icon: Icons.water_drop_rounded,
+          gradientColors: [Color(0xFF041635), Color(0xFF0766A3), Color(0xFF7FE7FF)],
+          glowColor: Color(0xFF54D8FF),
+          accentColor: Color(0xFF0A4779),
+          highlightColor: Color(0xFFCFF8FF),
+          assetPath: 'assets/card_backgrounds/water.jpg',
+        );
+      case 'lightning':
+        return const _ElementalCardTheme(
+          patternKey: 'lightning',
+          icon: Icons.bolt_rounded,
+          gradientColors: [Color(0xFF211900), Color(0xFFB38300), Color(0xFFFFEC6C)],
+          glowColor: Color(0xFFFFE14A),
+          accentColor: Color(0xFF7A5800),
+          highlightColor: Color(0xFFFFFFB4),
+          assetPath: 'assets/card_backgrounds/lightning.jpg',
+        );
+      case 'psychic':
+        return const _ElementalCardTheme(
+          patternKey: 'psychic',
+          icon: Icons.auto_awesome_rounded,
+          gradientColors: [Color(0xFF170A2E), Color(0xFF6D2BC5), Color(0xFFFF86D7)],
+          glowColor: Color(0xFFD778FF),
+          accentColor: Color(0xFF4D227C),
+          highlightColor: Color(0xFFFFD2F1),
+          assetPath: 'assets/card_backgrounds/psychic.jpg',
+        );
+      case 'fighting':
+        return const _ElementalCardTheme(
+          patternKey: 'fighting',
+          icon: Icons.terrain_rounded,
+          gradientColors: [Color(0xFF231207), Color(0xFF8F5523), Color(0xFFE6B16A)],
+          glowColor: Color(0xFFE5964B),
+          accentColor: Color(0xFF6F3D18),
+          highlightColor: Color(0xFFFFD9A3),
+          assetPath: 'assets/card_backgrounds/fighting.jpg',
+        );
+      case 'darkness':
+        return const _ElementalCardTheme(
+          patternKey: 'darkness',
+          icon: Icons.dark_mode_rounded,
+          gradientColors: [Color(0xFF05070E), Color(0xFF18213B), Color(0xFF58627F)],
+          glowColor: Color(0xFF9EA9D6),
+          accentColor: Color(0xFF151B2E),
+          highlightColor: Color(0xFFD6DCFF),
+          assetPath: 'assets/card_backgrounds/darkness.jpg',
+        );
+      case 'metal':
+        return const _ElementalCardTheme(
+          patternKey: 'metal',
+          icon: Icons.hexagon_rounded,
+          gradientColors: [Color(0xFF121821), Color(0xFF56616E), Color(0xFFC7D1DA)],
+          glowColor: Color(0xFFCCD7E5),
+          accentColor: Color(0xFF38414C),
+          highlightColor: Color(0xFFFFFFFF),
+          assetPath: 'assets/card_backgrounds/metal.jpg',
+        );
+      case 'fairy':
+        return const _ElementalCardTheme(
+          patternKey: 'fairy',
+          icon: Icons.favorite_rounded,
+          gradientColors: [Color(0xFF2A0A24), Color(0xFFD95EA9), Color(0xFFFFC9EA)],
+          glowColor: Color(0xFFFF8CD8),
+          accentColor: Color(0xFF923B72),
+          highlightColor: Color(0xFFFFE3F5),
+          assetPath: 'assets/card_backgrounds/fairy.jpg',
+        );
+      case 'dragon':
+        return const _ElementalCardTheme(
+          patternKey: 'dragon',
+          icon: Icons.auto_awesome_rounded,
+          gradientColors: [Color(0xFF0E1025), Color(0xFF4249B7), Color(0xFFFFC857)],
+          glowColor: Color(0xFFFFC857),
+          accentColor: Color(0xFF31359C),
+          highlightColor: Color(0xFFFFF1A5),
+          assetPath: 'assets/card_backgrounds/dragon.jpg',
+        );
+      default:
+        return const _ElementalCardTheme(
+          patternKey: 'colorless',
+          icon: Icons.style_rounded,
+          gradientColors: [Color(0xFF07183D), Color(0xFF16366E), Color(0xFF6E8BC5)],
+          glowColor: Color(0xFF86A7F3),
+          accentColor: Color(0xFF102754),
+          highlightColor: Color(0xFFE2EBFF),
+          assetPath: 'assets/card_backgrounds/colorless.jpg',
+        );
+    }
+  }
+}
+
+String _elementKeyForCard(TcgCard card) {
+  final values = <String>[
+    ...card.types,
+    card.name,
+  ].map((value) => value.toLowerCase()).join(' ');
+
+  bool hasAny(List<String> needles) => needles.any(values.contains);
+
+  final jpName = card.name;
+  bool nameHasAny(List<String> needles) => needles.any(jpName.contains);
+
+  if (nameHasAny(<String>[
+    'フシギダネ', 'フシギソウ', 'フシギバナ', 'キャタピー', 'トランセル', 'バタフリー',
+    'ビードル', 'コクーン', 'スピアー', 'ナゾノクサ', 'クサイハナ', 'ラフレシア',
+    'パラス', 'パラセクト', 'コンパン', 'モルフォン', 'マダツボミ', 'ウツドン',
+    'ウツボット', 'タマタマ', 'ナッシー', 'モンジャラ', 'ストライク', 'カイロス',
+  ])) {
+    return 'grass';
+  }
+  if (nameHasAny(<String>[
+    'ヒトカゲ', 'リザード', 'リザードン', 'ロコン', 'キュウコン', 'ガーディ',
+    'ウインディ', 'ポニータ', 'ギャロップ', 'ブーバー', 'ブースター', 'ファイヤー',
+  ])) {
+    return 'fire';
+  }
+  if (nameHasAny(<String>[
+    'ゼニガメ', 'カメール', 'カメックス', 'コダック', 'ゴルダック', 'ニョロモ',
+    'ニョロゾ', 'ニョロボン', 'メノクラゲ', 'ドククラゲ', 'ヤドン', 'ヤドラン',
+    'パウワウ', 'ジュゴン', 'シェルダー', 'パルシェン', 'クラブ', 'キングラー',
+    'タッツー', 'シードラ', 'トサキント', 'アズマオウ', 'ヒトデマン', 'スターミー',
+    'コイキング', 'ギャラドス', 'ラプラス', 'シャワーズ', 'オムナイト', 'オムスター',
+    'カブト', 'カブトプス', 'フリーザー',
+  ])) {
+    return 'water';
+  }
+  if (nameHasAny(<String>[
+    'ピカチュウ', 'ライチュウ', 'コイル', 'レアコイル', 'ビリリダマ', 'マルマイン',
+    'エレブー', 'サンダース', 'サンダー',
+  ])) {
+    return 'lightning';
+  }
+  if (nameHasAny(<String>[
+    'ケーシィ', 'ユンゲラー', 'フーディン', 'スリープ', 'スリーパー', 'バリヤード',
+    'ルージュラ', 'ミュウ', 'ミュウツー', 'ゴース', 'ゴースト', 'ゲンガー',
+    'ニドラン', 'ニドリーナ', 'ニドクイン', 'ニドリーノ', 'ニドキング',
+  ])) {
+    return 'psychic';
+  }
+  if (nameHasAny(<String>[
+    'サンド', 'サンドパン', 'ディグダ', 'ダグトリオ', 'マンキー', 'オコリザル',
+    'ワンリキー', 'ゴーリキー', 'カイリキー', 'イシツブテ', 'ゴローン', 'ゴローニャ',
+    'イワーク', 'カラカラ', 'ガラガラ', 'サワムラー', 'エビワラー', 'サイホーン',
+    'サイドン',
+  ])) {
+    return 'fighting';
+  }
+  if (nameHasAny(<String>['ミニリュウ', 'ハクリュー', 'カイリュー'])) return 'dragon';
+
+  if (hasAny(<String>['grass', 'leaf', 'plant', '草', 'くさ', 'リーフ'])) return 'grass';
+  if (hasAny(<String>['fire', 'flame', '炎', 'ほのお', 'ファイヤー'])) return 'fire';
+  if (hasAny(<String>['water', 'aqua', '水', 'みず', 'ウォーター'])) return 'water';
+  if (hasAny(<String>['lightning', 'electric', 'thunder', '雷', 'でんき', '電'])) return 'lightning';
+  if (hasAny(<String>['psychic', '超', 'エスパー'])) return 'psychic';
+  if (hasAny(<String>['fighting', 'rock', 'ground', '闘', 'かくとう'])) return 'fighting';
+  if (hasAny(<String>['darkness', 'dark', '悪', 'あく'])) return 'darkness';
+  if (hasAny(<String>['metal', 'steel', '鋼', 'はがね'])) return 'metal';
+  if (hasAny(<String>['fairy', '妖', 'フェアリー'])) return 'fairy';
+  if (hasAny(<String>['dragon', '竜', 'ドラゴン'])) return 'dragon';
+  return 'colorless';
+}
 
 class SetCardDetailsPage extends StatefulWidget {
   const SetCardDetailsPage({
@@ -57,8 +379,6 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
   bool _setWishlistBusy = false;
   bool _cardDetailsActionsVisible = true;
   bool _savingOwnership = false;
-  bool _refreshingPrice = false;
-  late TcgCard _pricedCard;
 
   Future<void> _addToCustomBinder() async {
     await addCardToCustomBinderFlow(context, widget.card);
@@ -67,7 +387,6 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
   @override
   void initState() {
     super.initState();
-    _pricedCard = widget.card;
     normalCopies = widget.ownership.normalCount;
     reverseHoloCopies = widget.ownership.reverseHoloCount;
     holoCopies = widget.ownership.holoCount;
@@ -76,58 +395,6 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
     gradingCompany = widget.ownership.gradingCompany.trim();
     _gradeController = TextEditingController(text: formatCardGrade(widget.ownership.grade));
     _conditionNotesController = TextEditingController(text: widget.ownership.conditionNotes);
-    _refreshExternalPriceIfMissing();
-  }
-
-
-  Future<void> _refreshExternalPriceIfMissing() async {
-    // Do not call JustTCG automatically when a card screen opens.
-    // The JustTCG free tier is rate limited, so external pricing is now
-    // checked only when the user presses Refresh Raw Price.
-    return;
-  }
-
-  Future<void> _refreshExternalPrice({bool showMessageWhenMissing = true}) async {
-    if (_refreshingPrice) return;
-
-    setState(() {
-      _refreshingPrice = true;
-    });
-
-    try {
-      final enrichedCard = await ExternalCardPriceService.enrichCardWithExternalPrice(
-        _pricedCard,
-        rethrowErrors: showMessageWhenMissing,
-      );
-      if (!mounted) return;
-      setState(() {
-        _pricedCard = enrichedCard;
-      });
-      if (showMessageWhenMissing) {
-        final hasPrice = (enrichedCard.marketPrice ?? 0) > 0;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              hasPrice
-                  ? 'Raw price updated from ${enrichedCard.marketPriceSource}'
-                  : 'No raw price found from JustTCG yet',
-            ),
-          ),
-        );
-      }
-    } catch (error) {
-      if (showMessageWhenMissing && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ExternalCardPriceService.friendlyErrorMessage(error))),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _refreshingPrice = false;
-        });
-      }
-    }
   }
 
   @override
@@ -271,14 +538,43 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
     );
   }
 
+  MasterSetSlotKind? _firstOwnedSlotKind() {
+    if (normalCopies > 0) return MasterSetSlotKind.normal;
+    if (reverseHoloCopies > 0) return MasterSetSlotKind.reverseHolo;
+    if (holoCopies > 0) return MasterSetSlotKind.holo;
+    return null;
+  }
+
+  MasterSetSlotKind? _firstOwnedSlotKindOtherThan(MasterSetSlotKind kind) {
+    for (final option in MasterSetSlotKind.values) {
+      if (option == kind) continue;
+      if (_countForKind(option) > 0) return option;
+    }
+    return null;
+  }
+
   Future<void> _removeSelectedCard() async {
-    if (widget.readOnly || _savingOwnership || _countForKind(selectedSlotKind) <= 0) return;
+    if (widget.readOnly || _savingOwnership || _totalCopies <= 0) return;
+
+    final kindToRemove = _countForKind(selectedSlotKind) > 0
+        ? selectedSlotKind
+        : _firstOwnedSlotKind();
+
+    if (kindToRemove == null) return;
 
     setState(() {
-      _setCountForKind(selectedSlotKind, _countForKind(selectedSlotKind) - 1);
+      selectedSlotKind = kindToRemove;
+      _setCountForKind(kindToRemove, _countForKind(kindToRemove) - 1);
+
+      if (_countForKind(selectedSlotKind) <= 0) {
+        final nextKind = _firstOwnedSlotKindOtherThan(selectedSlotKind);
+        if (nextKind != null) {
+          selectedSlotKind = nextKind;
+        }
+      }
     });
 
-    await _saveCurrentOwnershipNow('${_labelForKind(selectedSlotKind)} count updated');
+    await _saveCurrentOwnershipNow('${_labelForKind(kindToRemove)} count updated');
   }
 
   void _finishDetails({int? nextIndex}) {
@@ -553,7 +849,7 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final card = _pricedCard;
+    final card = widget.card;
     final selectedLabel = _labelForKind(selectedSlotKind);
     final selectedCount = _countForKind(selectedSlotKind);
 
@@ -580,25 +876,14 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
                     children: [
                       SetLogoTile(setId: card.setId, setName: card.setName, logoUrl: card.setLogoUrl),
                       if (card.largeImageUrl != null)
-                        Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(28),
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFFBECBE1), Color(0xFF879CC4)],
-                            ),
-                          ),
-                          padding: const EdgeInsets.all(7),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(22),
-                            child: Image.network(card.largeImageUrl!),
-                          ),
+                        _ElementalCardImageStage(
+                          card: card,
+                          imageUrl: card.largeImageUrl!,
                         ),
                       const SizedBox(height: 16),
                       PriceLookupCard(
                         card: card,
                         onOpenRawSold: () => openEbaySoldSearch(context: context, card: card),
-                        onRefreshPrice: () => _refreshExternalPrice(),
-                        refreshingPrice: _refreshingPrice,
                       ),
                       GradedPricesButton(
                         card: card,
@@ -679,7 +964,7 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
                                 children: [
                                   Expanded(
                                     child: OutlinedButton(
-                                      onPressed: widget.readOnly || selectedCount <= 0 || _savingOwnership
+                                      onPressed: widget.readOnly || _totalCopies <= 0 || _savingOwnership
                                           ? null
                                           : _removeSelectedCard,
                                       child: const Text('- Remove'),

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/card_ownership.dart';
 import '../models/tcg_card.dart';
@@ -7,13 +8,13 @@ import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/wishlist_service.dart';
 import '../services/external_card_price_service.dart';
+import '../services/currency_settings.dart';
 import '../utils/ebay_sold_search.dart';
 import '../widgets/card_image_with_fallback.dart';
 import '../widgets/custom_binder_sheets.dart';
 import '../widgets/graded_prices_button.dart';
 import '../widgets/price_lookup_card.dart';
 import '../widgets/set_logo_widgets.dart';
-import 'graded_prices_page.dart';
 import 'set_card_details_page.dart';
 
 class CardDetailsPage extends StatefulWidget {
@@ -223,6 +224,30 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
     });
   }
 
+  Future<void> _openRegionalGradedSearch() async {
+    final card = _pricedCard;
+    final uri = CurrencySettings.buildGradedCardEbaySearchUri(
+      cardName: card.name,
+      setName: card.setName,
+      number: card.number,
+    );
+
+    final launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open ${CurrencySettings.selectedMarketplace.label}.',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _toggleWishlist(bool isInWishlist) async {
     final ownerUid = FirebaseAuth.instance.currentUser?.uid;
     if (ownerUid == null || _wishlistBusy) return;
@@ -297,13 +322,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                   ),
                   GradedPricesButton(
                     card: card,
-                    onOpenGradedPrices: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => GradedPricesPage(card: card),
-                        ),
-                      );
-                    },
+                    onOpenGradedPrices: _openRegionalGradedSearch,
                   ),
                   const SizedBox(height: 12),
                   Card(

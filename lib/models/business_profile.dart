@@ -111,6 +111,8 @@ class BusinessProfile {
     this.premiumAdminNotes = '',
     this.openingStatus = 'auto',
     this.openingHours = const <String, BusinessOpeningHours>{},
+    this.preferredCurrencyCode = '',
+    this.preferredMarketplaceCode = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -138,6 +140,8 @@ class BusinessProfile {
   final String premiumAdminNotes;
   final String openingStatus;
   final Map<String, BusinessOpeningHours> openingHours;
+  final String preferredCurrencyCode;
+  final String preferredMarketplaceCode;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -169,8 +173,49 @@ class BusinessProfile {
     };
   }
 
+
+  static String cleanPreferredCurrencyCode(dynamic value) {
+    final text = cleanString(value).toUpperCase();
+    if (text == 'GBP' || text == 'USD' || text == 'EUR' || text == 'CAD' || text == 'AUD') {
+      return text;
+    }
+    return '';
+  }
+
+  static String marketplaceCodeForCurrency(String currencyCode) {
+    switch (currencyCode.trim().toUpperCase()) {
+      case 'USD':
+        return 'US';
+      case 'EUR':
+        return 'IE';
+      case 'CAD':
+        return 'CA';
+      case 'AUD':
+        return 'AU';
+      case 'GBP':
+      default:
+        return 'UK';
+    }
+  }
+
+  static String cleanPreferredMarketplaceCode(dynamic value, {String currencyCode = ''}) {
+    final text = cleanString(value).toUpperCase();
+    if (text == 'UK' || text == 'US' || text == 'IE' || text == 'CA' || text == 'AU') {
+      return text;
+    }
+    if (currencyCode.trim().isEmpty) return '';
+    return marketplaceCodeForCurrency(currencyCode);
+  }
+
   factory BusinessProfile.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
+    final preferredCurrencyCode = cleanPreferredCurrencyCode(
+      data['preferredCurrencyCode'] ?? data['displayCurrencyCode'] ?? data['currencyCode'],
+    );
+    final preferredMarketplaceCode = cleanPreferredMarketplaceCode(
+      data['preferredMarketplaceCode'] ?? data['marketplaceCode'] ?? data['ebayMarketplaceCode'],
+      currencyCode: preferredCurrencyCode,
+    );
 
     return BusinessProfile(
       id: doc.id,
@@ -198,6 +243,8 @@ class BusinessProfile {
       premiumAdminNotes: cleanString(data['premiumAdminNotes']),
       openingStatus: cleanOpeningStatus(data['openingStatus']),
       openingHours: cleanOpeningHours(data['openingHours']),
+      preferredCurrencyCode: preferredCurrencyCode,
+      preferredMarketplaceCode: preferredMarketplaceCode,
       createdAt: cleanTimestamp(data['createdAt']),
       updatedAt: cleanTimestamp(data['updatedAt']),
     );
@@ -228,6 +275,19 @@ class BusinessProfile {
   }
 
   bool get setupComplete => setupIsComplete;
+
+  String get effectivePreferredCurrencyCode {
+    final clean = cleanPreferredCurrencyCode(preferredCurrencyCode);
+    return clean.isEmpty ? 'GBP' : clean;
+  }
+
+  String get effectivePreferredMarketplaceCode {
+    final clean = cleanPreferredMarketplaceCode(
+      preferredMarketplaceCode,
+      currencyCode: effectivePreferredCurrencyCode,
+    );
+    return clean.isEmpty ? marketplaceCodeForCurrency(effectivePreferredCurrencyCode) : clean;
+  }
 
   List<String> get setupMissingReasons {
     final missing = <String>[];

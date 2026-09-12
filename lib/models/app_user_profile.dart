@@ -29,6 +29,39 @@ String _cleanAccountType(dynamic value) {
   return 'personal';
 }
 
+String _cleanPreferredCurrencyCode(dynamic value) {
+  final text = (value ?? '').toString().trim().toUpperCase();
+  if (text == 'GBP' || text == 'USD' || text == 'EUR' || text == 'CAD' || text == 'AUD') {
+    return text;
+  }
+  return '';
+}
+
+String _marketplaceCodeForCurrency(String currencyCode) {
+  switch (currencyCode.trim().toUpperCase()) {
+    case 'USD':
+      return 'US';
+    case 'EUR':
+      return 'IE';
+    case 'CAD':
+      return 'CA';
+    case 'AUD':
+      return 'AU';
+    case 'GBP':
+    default:
+      return 'UK';
+  }
+}
+
+String _cleanPreferredMarketplaceCode(dynamic value, {String currencyCode = ''}) {
+  final text = (value ?? '').toString().trim().toUpperCase();
+  if (text == 'UK' || text == 'US' || text == 'IE' || text == 'CA' || text == 'AU') {
+    return text;
+  }
+  if (currencyCode.trim().isEmpty) return '';
+  return _marketplaceCodeForCurrency(currencyCode);
+}
+
 class AppUserProfile {
   const AppUserProfile({
     required this.uid,
@@ -40,6 +73,8 @@ class AppUserProfile {
     this.businessProfileCreated = false,
     this.dateOfBirthMs,
     this.profileImageBase64,
+    this.preferredCurrencyCode = '',
+    this.preferredMarketplaceCode = '',
   });
 
   final String uid;
@@ -51,6 +86,8 @@ class AppUserProfile {
   final bool businessProfileCreated;
   final int? dateOfBirthMs;
   final String? profileImageBase64;
+  final String preferredCurrencyCode;
+  final String preferredMarketplaceCode;
 
   String get displayName => username.trim().isEmpty ? 'Trainer' : username.trim();
 
@@ -72,6 +109,19 @@ class AppUserProfile {
 
   String get accountTypeLabel => isBusinessAccount ? 'Business' : 'Personal';
 
+  String get effectivePreferredCurrencyCode {
+    final clean = _cleanPreferredCurrencyCode(preferredCurrencyCode);
+    return clean.isEmpty ? 'GBP' : clean;
+  }
+
+  String get effectivePreferredMarketplaceCode {
+    final clean = _cleanPreferredMarketplaceCode(
+      preferredMarketplaceCode,
+      currencyCode: effectivePreferredCurrencyCode,
+    );
+    return clean.isEmpty ? _marketplaceCodeForCurrency(effectivePreferredCurrencyCode) : clean;
+  }
+
   Map<String, dynamic> toJson() => {
         'uid': uid,
         'email': email,
@@ -80,6 +130,10 @@ class AppUserProfile {
         'updatedAtMs': updatedAtMs,
         'accountType': isBusinessAccount ? 'business' : 'personal',
         'businessProfileCreated': businessProfileCreated,
+        if (preferredCurrencyCode.trim().isNotEmpty)
+          'preferredCurrencyCode': effectivePreferredCurrencyCode,
+        if (preferredMarketplaceCode.trim().isNotEmpty)
+          'preferredMarketplaceCode': effectivePreferredMarketplaceCode,
         if (dateOfBirthMs != null) 'dateOfBirthMs': dateOfBirthMs,
         if (hasProfileImage) 'profileImageRef': profileImageBase64!.trim(),
         if (hasProfileImage &&
@@ -94,6 +148,14 @@ class AppUserProfile {
       json['profileImageBase64'],
     ]);
 
+    final preferredCurrencyCode = _cleanPreferredCurrencyCode(
+      json['preferredCurrencyCode'] ?? json['displayCurrencyCode'] ?? json['currencyCode'],
+    );
+    final preferredMarketplaceCode = _cleanPreferredMarketplaceCode(
+      json['preferredMarketplaceCode'] ?? json['marketplaceCode'] ?? json['ebayMarketplaceCode'],
+      currencyCode: preferredCurrencyCode,
+    );
+
     return AppUserProfile(
       uid: (json['uid'] ?? '').toString(),
       email: (json['email'] ?? '').toString(),
@@ -104,6 +166,8 @@ class AppUserProfile {
       businessProfileCreated: json['businessProfileCreated'] == true,
       dateOfBirthMs: (json['dateOfBirthMs'] as num?)?.toInt(),
       profileImageBase64: profileImageRef.isEmpty ? null : profileImageRef,
+      preferredCurrencyCode: preferredCurrencyCode,
+      preferredMarketplaceCode: preferredMarketplaceCode,
     );
   }
 }

@@ -1927,3 +1927,12 @@ exports.adminDeleteUser = onCall(
 
 exports.lookupExternalPokemonCardPrice =
   require("./lookup_external_pokemon_card_price").lookupExternalPokemonCardPrice;
+
+exports.lookupEbaySealedProducts =
+  require('./lookup_ebay_sealed_products').lookupEbaySealedProducts;
+
+exports.adminApproveTcgShopSubmission =
+  require("./admin_tcg_shop_submissions").adminApproveTcgShopSubmission;
+
+exports.adminRejectTcgShopSubmission =
+  require("./admin_tcg_shop_submissions").adminRejectTcgShopSubmission;

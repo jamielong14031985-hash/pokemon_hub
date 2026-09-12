@@ -150,8 +150,8 @@ class _OnlineShopsPageState extends State<OnlineShopsPage> {
                         const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 10,
-                      mainAxisSpacing: 10,
-                      childAspectRatio: 0.58,
+                      mainAxisSpacing: 12,
+                      mainAxisExtent: 350,
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) => _OnlineShopCard(
@@ -249,7 +249,9 @@ class _OnlineShopCard extends StatelessWidget {
             color: _onlineCardColor,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: profile.premiumIsActive ? _onlineGoldColor : _onlineBorderColor,
+              color: profile.premiumIsActive
+                  ? _onlineGoldColor
+                  : _onlineBorderColor,
             ),
             boxShadow: [
               BoxShadow(
@@ -342,7 +344,11 @@ class _OnlineShopCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.place_outlined, color: _onlineGoldColor, size: 15),
+                    const Icon(
+                      Icons.place_outlined,
+                      color: _onlineGoldColor,
+                      size: 15,
+                    ),
                     const SizedBox(width: 5),
                     Expanded(
                       child: Text(
@@ -377,6 +383,8 @@ class _OnlineShopCard extends StatelessWidget {
                         onPressed: () => _openPublicProfile(context),
                         child: const Text(
                           'Profile',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w900,
@@ -402,6 +410,8 @@ class _OnlineShopCard extends StatelessWidget {
                           onPressed: () => _openWebsite(context, website),
                           child: const Text(
                             'Website',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w900,
@@ -440,10 +450,10 @@ class _OnlineShopCard extends StatelessWidget {
     final cleanWebsite = website.trim();
     if (cleanWebsite.isEmpty) return;
 
-    final url = cleanWebsite.startsWith('http://') ||
-            cleanWebsite.startsWith('https://')
-        ? cleanWebsite
-        : 'https://$cleanWebsite';
+    final url =
+        cleanWebsite.startsWith('http://') || cleanWebsite.startsWith('https://')
+            ? cleanWebsite
+            : 'https://$cleanWebsite';
 
     final uri = Uri.tryParse(url);
     if (uri == null) {

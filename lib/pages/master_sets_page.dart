@@ -14,6 +14,7 @@ import '../widgets/custom_binder_cover.dart';
 import '../widgets/custom_binder_sheets.dart';
 import '../widgets/set_logo_widgets.dart';
 import 'custom_binder_page.dart';
+import 'japanese_sets_page.dart';
 import 'set_pokedex_page.dart';
 
 class MasterSetsPage extends StatefulWidget {
@@ -24,7 +25,7 @@ class MasterSetsPage extends StatefulWidget {
 }
 
 class MasterSetsPageState extends State<MasterSetsPage> {
-  late Future<List<TcgSet>> _futureSets;
+  late Future<_SetCatalogue> _futureSetCatalogue;
   final Map<String, int> _savedCopyCountsBySetId = <String, int>{};
   bool _loadedCollectionState = false;
   bool _loadingCustomBinders = false;
@@ -35,7 +36,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
   @override
   void initState() {
     super.initState();
-    _futureSets = PokemonTcgService.fetchSets();
+    _futureSetCatalogue = _loadSetCatalogue();
     _loadSetCollectionState();
     _loadCustomBinderState();
     collectionRefreshNotifier.addListener(_handleCollectionRefresh);
@@ -54,7 +55,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
   Future<void> refreshSets() async {
     setState(() {
       _loadedCollectionState = false;
-      _futureSets = PokemonTcgService.fetchSets();
+      _futureSetCatalogue = _loadSetCatalogue(forceRefresh: true);
     });
 
     try {
@@ -70,6 +71,24 @@ class MasterSetsPageState extends State<MasterSetsPage> {
         });
       }
     }
+  }
+
+
+  Future<_SetCatalogue> _loadSetCatalogue({bool forceRefresh = false}) async {
+    final englishSetsFuture = PokemonTcgService.fetchSets();
+    final japaneseSetsFuture = JapaneseTcgDexService.fetchSets(
+      forceRefresh: forceRefresh,
+    );
+
+    final results = await Future.wait<dynamic>([
+      englishSetsFuture,
+      japaneseSetsFuture,
+    ]);
+
+    return _SetCatalogue(
+      englishSets: List<TcgSet>.from(results[0] as List),
+      japaneseSets: List<JapaneseTcgSet>.from(results[1] as List),
+    );
   }
 
   Future<void> _loadSetCollectionState() async {
@@ -193,14 +212,17 @@ class MasterSetsPageState extends State<MasterSetsPage> {
     );
   }
 
-  Future<void> _removeSetFromMasterSets(TcgSet set) async {
+  Future<void> _removeSetFromMasterSets({
+    required String setId,
+    required String setName,
+  }) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Remove set from Master Sets?'),
           content: Text(
-            'This will clear saved Pokédex data for ${set.name} on this device. '
+            'This will clear saved Pokédex data for $setName on this device. '
             'Use this if the set is showing even though you have no cards saved in it.',
           ),
           actions: [
@@ -219,14 +241,36 @@ class MasterSetsPageState extends State<MasterSetsPage> {
 
     if (confirmed != true) return;
 
-    await LocalPokedexStore.clearSet(set.id);
-    await PokedexSyncService.syncCurrentSetForCurrentUser(set.id);
+    await LocalPokedexStore.clearSet(setId);
+    await PokedexSyncService.syncCurrentSetForCurrentUser(setId);
     await _loadSetCollectionState();
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${set.name} removed from Master Sets')),
+      SnackBar(content: Text('$setName removed from Master Sets')),
     );
+  }
+
+  Future<void> _openCollectedSet(_CollectedSetEntry entry) async {
+    if (entry.isJapanese) {
+      final japaneseSet = entry.japaneseSet;
+      if (japaneseSet == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => JapaneseSetPokedexPage(set: japaneseSet),
+        ),
+      );
+    } else {
+      final englishSet = entry.englishSet;
+      if (englishSet == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => SetPokedexPage(set: englishSet),
+        ),
+      );
+    }
+
+    await _loadSetCollectionState();
   }
 
   Widget _buildViewToggle() {
@@ -299,9 +343,166 @@ class MasterSetsPageState extends State<MasterSetsPage> {
     );
   }
 
+  List<_CollectedSetEntry> _buildCollectedSetEntries(_SetCatalogue catalogue) {
+    final entries = <_CollectedSetEntry>[];
+
+    for (final set in catalogue.englishSets) {
+      final count = _savedCopyCountsBySetId[set.id] ?? 0;
+      if (count <= 0) continue;
+      entries.add(
+        _CollectedSetEntry.english(
+          set: set,
+          savedCopies: count,
+        ),
+      );
+    }
+
+    final japaneseSetsByCollectionId = <String, JapaneseTcgSet>{
+      for (final set in catalogue.japaneseSets) 'jp_${set.id.trim()}': set,
+    };
+
+    for (final entry in _savedCopyCountsBySetId.entries) {
+      final setId = entry.key.trim();
+      final count = entry.value;
+      if (count <= 0 || !setId.startsWith('jp_')) continue;
+
+      entries.add(
+        _CollectedSetEntry.japanese(
+          setId: setId,
+          set: japaneseSetsByCollectionId[setId],
+          savedCopies: count,
+        ),
+      );
+    }
+
+    entries.sort((a, b) {
+      final dateCompare = b.sortableReleaseDate.compareTo(a.sortableReleaseDate);
+      if (dateCompare != 0) return dateCompare;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    return entries;
+  }
+
+  Widget _buildCollectedSetCard(_CollectedSetEntry entry) {
+    return Card(
+      color: const Color(0xFF102754),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onLongPress: () => _removeSetFromMasterSets(
+          setId: entry.setId,
+          setName: entry.name,
+        ),
+        onTap: () => _openCollectedSet(entry),
+        child: Stack(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              alignment: Alignment.center,
+              constraints: const BoxConstraints(minHeight: 128),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: 64,
+                    width: double.infinity,
+                    child: entry.isJapanese
+                        ? _JapaneseSetLogoPreview(set: entry.japaneseSet, setId: entry.rawJapaneseSetId)
+                        : ResolvedSetLogo(
+                            setId: entry.setId,
+                            setName: entry.name,
+                            fallbackLogoUrl: entry.logoUrl,
+                            height: 64,
+                            fit: BoxFit.contain,
+                            textStyle: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (entry.isJapanese) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: const Color(0xFFF7DE77).withValues(alpha: 0.36),
+                            ),
+                          ),
+                          child: const Text(
+                            'JP',
+                            style: TextStyle(
+                              color: Color(0xFFF7DE77),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Text(
+                          entry.name,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    entry.savedCopies == 1
+                        ? '1 saved card'
+                        : '${entry.savedCopies} saved cards',
+                    style: const TextStyle(
+                      color: Color(0xFFC8D4F0),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Tooltip(
+                message: 'Remove from Master Sets',
+                child: IconButton(
+                  onPressed: () => _removeSetFromMasterSets(
+                    setId: entry.setId,
+                    setName: entry.name,
+                  ),
+                  icon: const Icon(Icons.close_rounded),
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSetPokedexView() {
-    return FutureBuilder<List<TcgSet>>(
-      future: _futureSets,
+    return FutureBuilder<_SetCatalogue>(
+      future: _futureSetCatalogue,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting || !_loadedCollectionState) {
           return const Center(child: CircularProgressIndicator());
@@ -315,20 +516,16 @@ class MasterSetsPageState extends State<MasterSetsPage> {
           );
         }
 
-        final allSets = snapshot.data ?? const <TcgSet>[];
-        if (allSets.isEmpty) {
-          return const Center(
-            child: Text('No sets found.', style: TextStyle(color: Colors.white)),
-          );
-        }
-
-        final visibleSets = allSets
-            .where((set) => (_savedCopyCountsBySetId[set.id] ?? 0) > 0)
-            .toList();
+        final catalogue = snapshot.data ?? const _SetCatalogue(
+          englishSets: <TcgSet>[],
+          japaneseSets: <JapaneseTcgSet>[],
+        );
+        final entries = _buildCollectedSetEntries(catalogue);
+        final totalSets = catalogue.englishSets.length + catalogue.japaneseSets.length;
 
         return RefreshIndicator(
           onRefresh: refreshSets,
-          child: visibleSets.isEmpty
+          child: entries.isEmpty
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: const [
@@ -339,7 +536,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                         child: Padding(
                           padding: EdgeInsets.all(16),
                           child: Text(
-                            'Only sets with saved cards show here. Add a card to a set and it will appear here.',
+                            'Only English or Japanese sets with saved cards show here. Add a card to a set and it will appear here.',
                             style: TextStyle(color: Colors.white),
                           ),
                         ),
@@ -348,7 +545,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                     Padding(
                       padding: EdgeInsets.all(24),
                       child: Text(
-                        'No set Pokédex entries yet. Add a card to a set first and it will appear here.',
+                        'No set Pokédex entries yet. Add an English or Japanese card first and it will appear here.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white70, fontSize: 16),
                       ),
@@ -358,7 +555,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
               : ListView.separated(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  itemCount: visibleSets.length + 1,
+                  itemCount: entries.length + 1,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     if (index == 0) {
@@ -371,12 +568,12 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                             children: [
                               const Expanded(
                                 child: Text(
-                                  'Only sets with saved cards show here. Add a card to a set and it will appear here.',
+                                  'English and Japanese sets with saved cards show here together.',
                                   style: TextStyle(color: Colors.white),
                                 ),
                               ),
                               Text(
-                                '${visibleSets.length}/${allSets.length}',
+                                '${entries.length}/$totalSets',
                                 style: const TextStyle(color: Colors.white),
                               ),
                             ],
@@ -385,59 +582,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                       );
                     }
 
-                    final set = visibleSets[index - 1];
-                    return Card(
-                      color: const Color(0xFF102754),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onLongPress: () => _removeSetFromMasterSets(set),
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => SetPokedexPage(set: set),
-                            ),
-                          );
-                          await _loadSetCollectionState();
-                        },
-                        child: Stack(
-                          children: [
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(20),
-                              alignment: Alignment.center,
-                              constraints: const BoxConstraints(minHeight: 110),
-                              child: ResolvedSetLogo(
-                                setId: set.id,
-                                setName: set.name,
-                                fallbackLogoUrl: set.logoUrl,
-                                height: 64,
-                                fit: BoxFit.contain,
-                                textStyle: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 18,
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 8,
-                              right: 8,
-                              child: Tooltip(
-                                message: 'Remove from Master Sets',
-                                child: IconButton(
-                                  onPressed: () => _removeSetFromMasterSets(set),
-                                  icon: const Icon(Icons.close_rounded),
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
+                    return _buildCollectedSetCard(entries[index - 1]);
                   },
                 ),
         );
@@ -632,3 +777,328 @@ class MasterSetsPageState extends State<MasterSetsPage> {
     );
   }
 }
+
+class _SetCatalogue {
+  const _SetCatalogue({
+    required this.englishSets,
+    required this.japaneseSets,
+  });
+
+  final List<TcgSet> englishSets;
+  final List<JapaneseTcgSet> japaneseSets;
+}
+
+class _CollectedSetEntry {
+  const _CollectedSetEntry._({
+    required this.setId,
+    required this.name,
+    required this.savedCopies,
+    required this.releaseDate,
+    this.logoUrl,
+    this.englishSet,
+    this.japaneseSet,
+  });
+
+  factory _CollectedSetEntry.english({
+    required TcgSet set,
+    required int savedCopies,
+  }) {
+    return _CollectedSetEntry._(
+      setId: set.id,
+      name: set.name,
+      logoUrl: set.logoUrl,
+      savedCopies: savedCopies,
+      releaseDate: set.releaseDate,
+      englishSet: set,
+    );
+  }
+
+  factory _CollectedSetEntry.japanese({
+    required String setId,
+    required JapaneseTcgSet? set,
+    required int savedCopies,
+  }) {
+    final rawSetId = setId.startsWith('jp_') ? setId.substring(3) : setId;
+    return _CollectedSetEntry._(
+      setId: setId,
+      name: set?.displayName ?? rawSetId,
+      logoUrl: set?.logoUrl,
+      savedCopies: savedCopies,
+      releaseDate: set?.releaseDate ?? '',
+      japaneseSet: set,
+    );
+  }
+
+  final String setId;
+  final String name;
+  final String? logoUrl;
+  final int savedCopies;
+  final String releaseDate;
+  final TcgSet? englishSet;
+  final JapaneseTcgSet? japaneseSet;
+
+  bool get isJapanese => setId.startsWith('jp_');
+
+  String get rawJapaneseSetId => isJapanese ? setId.substring(3) : setId;
+
+  String get sortableReleaseDate => releaseDate.replaceAll('/', '-');
+}
+
+class _JapaneseSetLogoPreview extends StatelessWidget {
+  const _JapaneseSetLogoPreview({
+    required this.set,
+    required this.setId,
+  });
+
+  final JapaneseTcgSet? set;
+  final String setId;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentSet = set;
+    final candidates = <String>[
+      ..._englishEquivalentLogoCandidatesForMasterSets(setId),
+      if (currentSet != null) ..._masterSetAssetCandidates(currentSet.logoUrl),
+      if (currentSet != null) ..._masterSetAssetCandidates(currentSet.symbolUrl),
+      ..._masterSetFallbackSetAssetCandidates(setId),
+    ];
+
+    return _MasterSetCandidateImage(
+      candidates: candidates,
+      fallbackText: currentSet?.displayName ?? setId,
+    );
+  }
+}
+
+class _MasterSetCandidateImage extends StatefulWidget {
+  const _MasterSetCandidateImage({
+    required this.candidates,
+    required this.fallbackText,
+  });
+
+  final List<String> candidates;
+  final String fallbackText;
+
+  @override
+  State<_MasterSetCandidateImage> createState() => _MasterSetCandidateImageState();
+}
+
+class _MasterSetCandidateImageState extends State<_MasterSetCandidateImage> {
+  int _index = 0;
+
+  List<String> get _cleanCandidates {
+    final seen = <String>{};
+    final results = <String>[];
+
+    for (final candidate in widget.candidates) {
+      final clean = candidate.trim();
+      if (clean.isEmpty) continue;
+      if (seen.add(clean)) results.add(clean);
+    }
+
+    return results;
+  }
+
+  @override
+  void didUpdateWidget(covariant _MasterSetCandidateImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.candidates.join('|') != widget.candidates.join('|')) {
+      _index = 0;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final candidates = _cleanCandidates;
+    if (candidates.isEmpty || _index >= candidates.length) {
+      return Center(
+        child: Text(
+          widget.fallbackText,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 16,
+          ),
+        ),
+      );
+    }
+
+    return Image.network(
+      candidates[_index],
+      fit: BoxFit.contain,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (_index < candidates.length) {
+            setState(() => _index += 1);
+          }
+        });
+
+        return const Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFFF7DE77),
+            ),
+          ),
+        );
+      },
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return const Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFFF7DE77),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+List<String> _englishEquivalentLogoCandidatesForMasterSets(String japaneseSetId) {
+  final cleanId = japaneseSetId.trim().toLowerCase();
+  final englishSetId = _englishLogoSetIdByJapaneseIdForMasterSets[cleanId];
+  if (englishSetId == null || englishSetId.isEmpty) return const <String>[];
+
+  final encodedId = Uri.encodeComponent(englishSetId);
+  return <String>[
+    'https://images.pokemontcg.io/$encodedId/logo.png',
+    'https://images.pokemontcg.io/$encodedId/symbol.png',
+  ];
+}
+
+const Map<String, String> _englishLogoSetIdByJapaneseIdForMasterSets = <String, String>{
+  'sv8a': 'sv8pt5',
+  'sv8': 'sv8',
+  'sv7a': 'sv8',
+  'sv7': 'sv7',
+  'sv6a': 'sv6pt5',
+  'sv6': 'sv6',
+  'sv5a': 'sv6',
+  'sv5k': 'sv5',
+  'sv5m': 'sv5',
+  'sv4a': 'sv4pt5',
+  'sv4k': 'sv4',
+  'sv4m': 'sv4',
+  'sv3a': 'sv4',
+  'sv3': 'sv3',
+  'sv2a': 'sv3pt5',
+  'sv2p': 'sv2',
+  'sv2d': 'sv2',
+  'sv1a': 'sv2',
+  'sv1s': 'sv1',
+  'sv1v': 'sv1',
+  's12a': 'swsh12pt5',
+  's12': 'swsh12',
+  's11a': 'swsh12',
+  's11': 'swsh11',
+  's10a': 'swsh11',
+  's10d': 'swsh10',
+  's10p': 'swsh10',
+  's9a': 'swsh10',
+  's9': 'swsh9',
+  's8b': 'swsh9',
+  's8': 'swsh8',
+  's7r': 'swsh7',
+  's7d': 'swsh7',
+  's6a': 'swsh7',
+  's6h': 'swsh6',
+  's6k': 'swsh6',
+  's5a': 'swsh6',
+  's5i': 'swsh5',
+  's5r': 'swsh5',
+  's4a': 'swsh45',
+  's4': 'swsh4',
+  's3': 'swsh3',
+  's2': 'swsh2',
+};
+
+List<String> _masterSetAssetCandidates(String url) {
+  final clean = _normaliseMasterSetAssetUrl(url);
+  if (clean.isEmpty) return const <String>[];
+
+  if (_hasMasterSetImageExtension(clean)) {
+    return <String>[clean];
+  }
+
+  return <String>[
+    '$clean.webp',
+    '$clean.png',
+    '$clean.jpg',
+    '$clean.jpeg',
+    clean,
+  ];
+}
+
+List<String> _masterSetFallbackSetAssetCandidates(String setId) {
+  final cleanId = setId.trim();
+  if (cleanId.isEmpty) return const <String>[];
+
+  final group = _masterSetAssetGroup(cleanId);
+  if (group.isEmpty) return const <String>[];
+
+  final encodedId = Uri.encodeComponent(cleanId);
+  final encodedGroup = Uri.encodeComponent(group);
+
+  return <String>[
+    'https://assets.tcgdex.net/ja/$encodedGroup/$encodedId/logo.webp',
+    'https://assets.tcgdex.net/ja/$encodedGroup/$encodedId/logo.png',
+    'https://assets.tcgdex.net/ja/$encodedGroup/$encodedId/logo.jpg',
+    'https://assets.tcgdex.net/univ/$encodedGroup/$encodedId/symbol.webp',
+    'https://assets.tcgdex.net/univ/$encodedGroup/$encodedId/symbol.png',
+    'https://assets.tcgdex.net/univ/$encodedGroup/$encodedId/symbol.jpg',
+  ];
+}
+
+String _normaliseMasterSetAssetUrl(String url) {
+  final clean = url.trim();
+  if (clean.isEmpty) return '';
+  if (clean.startsWith('https://') || clean.startsWith('http://')) return clean;
+  if (clean.startsWith('//')) return 'https:$clean';
+  if (clean.startsWith('/')) return 'https://assets.tcgdex.net$clean';
+  return 'https://assets.tcgdex.net/$clean';
+}
+
+bool _hasMasterSetImageExtension(String url) {
+  final lower = url.toLowerCase().split('?').first;
+  return lower.endsWith('.png') ||
+      lower.endsWith('.jpg') ||
+      lower.endsWith('.jpeg') ||
+      lower.endsWith('.webp');
+}
+
+String _masterSetAssetGroup(String setId) {
+  final clean = setId.trim().toLowerCase();
+  if (clean.isEmpty) return '';
+
+  if (clean.startsWith('swsh')) return 'swsh';
+  if (clean.startsWith('sv')) return 'sv';
+  if (clean.startsWith('sm')) return 'sm';
+  if (clean.startsWith('xy')) return 'xy';
+  if (clean.startsWith('bw')) return 'bw';
+  if (clean.startsWith('dp')) return 'dp';
+  if (clean.startsWith('pl')) return 'pl';
+  if (clean.startsWith('hgss')) return 'hgss';
+  if (clean.startsWith('neo')) return 'neo';
+  if (clean.startsWith('ex')) return 'ex';
+  if (clean.startsWith('base')) return 'base';
+  if (clean.startsWith('web')) return 'web';
+  if (clean.startsWith('pcg')) return 'pcg';
+  if (clean.startsWith('adv')) return 'adv';
+  if (clean.startsWith('e')) return 'e';
+
+  final match = RegExp(r'^[a-z]+').firstMatch(clean);
+  return match?.group(0) ?? '';
+}
+

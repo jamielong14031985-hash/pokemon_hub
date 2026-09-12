@@ -2,7 +2,7 @@ name: pokemon_hub_flutter
 description: PocketChase app
 publish_to: 'none'
 
-version: 1.0.0+14
+version: 1.0.0+15
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -40,9 +40,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
   assets:
     - assets/images/
+    - assets/card_backgrounds/
 
 flutter_launcher_icons:
   android: true

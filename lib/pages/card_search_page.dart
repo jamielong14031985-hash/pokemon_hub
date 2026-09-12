@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../models/card_search_mode.dart';
 import '../models/card_search_result.dart';
+import '../models/tcg_set.dart';
 import '../pages/card_details_page.dart';
+import '../pages/japanese_sets_page.dart';
+import '../pages/sealed_product_price_page.dart';
 import '../services/pokemon_tcg_service.dart';
 import '../widgets/card_search_result_card.dart';
 import '../widgets/cards_search_placeholder.dart';
@@ -12,6 +14,30 @@ import '../widgets/set_search_result_card.dart';
 
 const Duration _kCardSearchDebounce = Duration(milliseconds: 450);
 const int _kMinimumSearchCharacters = 2;
+
+enum _CardSearchSection {
+  cards,
+  sets,
+  sealed,
+}
+
+class _CombinedSetSearchResult {
+  const _CombinedSetSearchResult({
+    this.englishSets = const <TcgSet>[],
+    this.japaneseSets = const <JapaneseTcgSet>[],
+    this.englishError,
+    this.japaneseError,
+  });
+
+  final List<TcgSet> englishSets;
+  final List<JapaneseTcgSet> japaneseSets;
+  final Object? englishError;
+  final Object? japaneseError;
+
+  int get totalCount => englishSets.length + japaneseSets.length;
+  bool get hasResults => totalCount > 0;
+  bool get hasAnyError => englishError != null || japaneseError != null;
+}
 
 class CardSearchPage extends StatefulWidget {
   const CardSearchPage({super.key});
@@ -25,16 +51,19 @@ class CardSearchPageState extends State<CardSearchPage> {
   final ScrollController _scrollController = ScrollController();
 
   Timer? _searchDebounce;
-  late Future<CardSearchResult> _futureResults;
+  late Future<CardSearchResult> _futureCardResults;
+  late Future<_CombinedSetSearchResult> _futureSetResults;
 
-  CardSearchMode _searchMode = CardSearchMode.cards;
+  _CardSearchSection _selectedSection = _CardSearchSection.cards;
   String _lastSearchKey = '';
 
   @override
   void initState() {
     super.initState();
-    _futureResults = Future.value(const CardSearchResult());
+    _futureCardResults = Future.value(const CardSearchResult());
+    _futureSetResults = Future.value(const _CombinedSetSearchResult());
     unawaited(PokemonTcgService.warmSetSearchCache());
+    unawaited(JapaneseTcgDexService.fetchSets());
   }
 
   bool _canSearch(String query) {
@@ -47,40 +76,87 @@ class CardSearchPageState extends State<CardSearchPage> {
     return collectorNumberSearch || trimmed.length >= _kMinimumSearchCharacters;
   }
 
-  Future<CardSearchResult> _buildSearchFuture(String query) {
+  Future<CardSearchResult> _buildCardSearchFuture(String query) {
     final cleanQuery = query.trim();
 
     if (cleanQuery.isEmpty || !_canSearch(cleanQuery)) {
       return Future.value(const CardSearchResult());
     }
 
-    if (_searchMode == CardSearchMode.cards) {
-      return PokemonTcgService.searchCardsOnlyResult(cleanQuery);
+    return PokemonTcgService.searchCardsOnlyResult(cleanQuery);
+  }
+
+  Future<_CombinedSetSearchResult> _buildCombinedSetSearchFuture(
+    String query,
+  ) async {
+    final cleanQuery = query.trim();
+
+    if (cleanQuery.isEmpty || !_canSearch(cleanQuery)) {
+      return const _CombinedSetSearchResult();
     }
 
-    return PokemonTcgService.searchSetsOnlyResult(cleanQuery);
+    var englishSets = <TcgSet>[];
+    var japaneseSets = <JapaneseTcgSet>[];
+    Object? englishError;
+    Object? japaneseError;
+
+    await Future.wait<void>([
+      (() async {
+        try {
+          englishSets = await PokemonTcgService.searchSetsOnly(cleanQuery);
+        } catch (error) {
+          englishError = error;
+        }
+      })(),
+      (() async {
+        try {
+          japaneseSets = await JapaneseTcgDexService.searchSetsForQuery(cleanQuery);
+        } catch (error) {
+          japaneseError = error;
+        }
+      })(),
+    ]);
+
+    if (englishSets.isEmpty && japaneseSets.isEmpty &&
+        englishError != null && japaneseError != null) {
+      throw Exception('Could not load English or Japanese set results.');
+    }
+
+    return _CombinedSetSearchResult(
+      englishSets: englishSets,
+      japaneseSets: japaneseSets,
+      englishError: englishError,
+      japaneseError: japaneseError,
+    );
   }
 
   void _search({bool force = false}) {
+    if (_selectedSection == _CardSearchSection.sealed) return;
+
     final query = _controller.text.trim();
 
     if (!force && !_canSearch(query)) {
-      final searchKey = '${_searchMode.name}::$query::too_short';
+      final searchKey = '${_selectedSection.name}::$query::too_short';
       if (searchKey == _lastSearchKey) return;
       _lastSearchKey = searchKey;
 
       setState(() {
-        _futureResults = Future.value(const CardSearchResult());
+        _futureCardResults = Future.value(const CardSearchResult());
+        _futureSetResults = Future.value(const _CombinedSetSearchResult());
       });
       return;
     }
 
-    final searchKey = '${_searchMode.name}::$query';
+    final searchKey = '${_selectedSection.name}::$query';
     if (searchKey == _lastSearchKey) return;
     _lastSearchKey = searchKey;
 
     setState(() {
-      _futureResults = _buildSearchFuture(query);
+      if (_selectedSection == _CardSearchSection.cards) {
+        _futureCardResults = _buildCardSearchFuture(query);
+      } else {
+        _futureSetResults = _buildCombinedSetSearchFuture(query);
+      }
     });
 
     if (query.isNotEmpty) {
@@ -89,6 +165,8 @@ class CardSearchPageState extends State<CardSearchPage> {
   }
 
   void _onSearchChanged(String value) {
+    if (_selectedSection == _CardSearchSection.sealed) return;
+
     _searchDebounce?.cancel();
 
     final query = value.trim();
@@ -117,27 +195,31 @@ class CardSearchPageState extends State<CardSearchPage> {
     setState(() {
       _controller.clear();
       _lastSearchKey = '';
-      _futureResults = Future.value(const CardSearchResult());
+      _futureCardResults = Future.value(const CardSearchResult());
+      _futureSetResults = Future.value(const _CombinedSetSearchResult());
     });
 
     scrollToTop(animated: false);
     FocusScope.of(context).unfocus();
   }
 
-  void _setSearchMode(CardSearchMode mode) {
-    if (_searchMode == mode) return;
+  void _setSearchSection(_CardSearchSection section) {
+    if (_selectedSection == section) return;
 
     _searchDebounce?.cancel();
 
     setState(() {
-      _searchMode = mode;
+      _selectedSection = section;
       _controller.clear();
       _lastSearchKey = '';
-      _futureResults = Future.value(const CardSearchResult());
+      _futureCardResults = Future.value(const CardSearchResult());
+      _futureSetResults = Future.value(const _CombinedSetSearchResult());
     });
 
     FocusScope.of(context).unfocus();
-    scrollToTop(animated: false);
+    if (section != _CardSearchSection.sealed) {
+      scrollToTop(animated: false);
+    }
   }
 
   void scrollToTop({bool animated = true}) {
@@ -160,6 +242,26 @@ class CardSearchPageState extends State<CardSearchPage> {
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  String get _searchHintText {
+    return switch (_selectedSection) {
+      _CardSearchSection.cards => 'Search cards, e.g. Maractus JTG',
+      _CardSearchSection.sets =>
+        'Search English or Japanese sets, e.g. Prismatic Evolutions',
+      _CardSearchSection.sealed => 'Search sealed products inside Sealed',
+    };
+  }
+
+  String get _helperText {
+    return switch (_selectedSection) {
+      _CardSearchSection.cards =>
+        'Search by name, collector number, or set code, like Maractus JTG or 4/102.',
+      _CardSearchSection.sets =>
+        'Set search now shows English sets and matching Japanese sets in the same place.',
+      _CardSearchSection.sealed =>
+        'Search booster boxes, booster bundles, ETBs and UPCs.',
+    };
   }
 
   Widget _buildModeChip({
@@ -203,6 +305,54 @@ class CardSearchPageState extends State<CardSearchPage> {
     );
   }
 
+  Widget _buildSectionSelector() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildModeChip(
+            label: 'Cards',
+            selected: _selectedSection == _CardSearchSection.cards,
+            onTap: () => _setSearchSection(_CardSearchSection.cards),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildModeChip(
+            label: 'Sets',
+            selected: _selectedSection == _CardSearchSection.sets,
+            onTap: () => _setSearchSection(_CardSearchSection.sets),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildModeChip(
+            label: 'Sealed',
+            selected: _selectedSection == _CardSearchSection.sealed,
+            onTap: () => _setSearchSection(_CardSearchSection.sealed),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmbeddedSectionPicker() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Card(
+        color: const Color(0xFF102754),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: _buildSectionSelector(),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSearchTopCard() {
     return Card(
       color: const Color(0xFF102754),
@@ -222,9 +372,7 @@ class CardSearchPageState extends State<CardSearchPage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _runSearchImmediately(),
               decoration: InputDecoration(
-                hintText: _searchMode == CardSearchMode.cards
-                    ? 'Search cards, e.g. Maractus JTG'
-                    : 'Search sets, e.g. Base Set',
+                hintText: _searchHintText,
                 hintStyle: const TextStyle(color: Color(0xFFB7C4E0)),
                 filled: true,
                 fillColor: const Color(0xFF0E2A5E),
@@ -259,30 +407,10 @@ class CardSearchPageState extends State<CardSearchPage> {
               onChanged: _onSearchChanged,
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildModeChip(
-                    label: 'Cards',
-                    selected: _searchMode == CardSearchMode.cards,
-                    onTap: () => _setSearchMode(CardSearchMode.cards),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildModeChip(
-                    label: 'Sets',
-                    selected: _searchMode == CardSearchMode.sets,
-                    onTap: () => _setSearchMode(CardSearchMode.sets),
-                  ),
-                ),
-              ],
-            ),
+            _buildSectionSelector(),
             const SizedBox(height: 10),
             Text(
-              _searchMode == CardSearchMode.cards
-                  ? 'Search by name, collector number, or set code, like Maractus JTG or 4/102.'
-                  : 'Set search is cached after first load, so repeat searches should feel quicker.',
+              _helperText,
               style: const TextStyle(
                 color: Color(0xFFAFC0E6),
                 fontSize: 12,
@@ -305,7 +433,9 @@ class CardSearchPageState extends State<CardSearchPage> {
   }
 
   Widget _buildLoadingMessage(String query) {
-    final label = _searchMode == CardSearchMode.cards ? 'cards' : 'sets';
+    final label = _selectedSection == _CardSearchSection.cards
+        ? 'cards'
+        : 'English and Japanese sets';
 
     return _SearchLoadingCard(
       title: 'Searching $label...',
@@ -338,6 +468,7 @@ class CardSearchPageState extends State<CardSearchPage> {
     required int count,
     required bool cards,
     required String query,
+    String? detail,
   }) {
     final label = cards ? 'card' : 'set';
     final plural = count == 1 ? label : '${label}s';
@@ -348,7 +479,7 @@ class CardSearchPageState extends State<CardSearchPage> {
         children: [
           Expanded(
             child: Text(
-              '$count $plural found',
+              detail ?? '$count $plural found',
               style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 14,
@@ -374,31 +505,164 @@ class CardSearchPageState extends State<CardSearchPage> {
     );
   }
 
+  Widget _buildSetSourceHeader({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7DE77).withValues(alpha: 0.13),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
+              ),
+            ),
+            child: Icon(icon, color: const Color(0xFFF7DE77), size: 19),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Color(0xFFC8D4F0),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildSetResults({
+    required _CombinedSetSearchResult result,
+    required String query,
+  }) {
+    final children = <Widget>[];
+
+    if (!result.hasResults) {
+      children.add(_buildNoResultsMessage(query: query, searchingCards: false));
+      return children;
+    }
+
+    children.add(
+      _buildResultsHeader(
+        count: result.totalCount,
+        cards: false,
+        query: query,
+        detail:
+            '${result.totalCount} sets found • ${result.englishSets.length} English • ${result.japaneseSets.length} Japanese',
+      ),
+    );
+    children.add(const SizedBox(height: 8));
+
+    if (result.englishSets.isNotEmpty) {
+      children.add(
+        _buildSetSourceHeader(
+          title: 'English sets',
+          subtitle: 'International Pokémon TCG set results',
+          icon: Icons.collections_bookmark_outlined,
+        ),
+      );
+      children.addAll(
+        result.englishSets.map(
+          (set) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: SetSearchResultCard(set: set),
+          ),
+        ),
+      );
+    }
+
+    if (result.japaneseSets.isNotEmpty) {
+      children.add(
+        _buildSetSourceHeader(
+          title: 'Japanese sets',
+          subtitle: 'Matching Japanese releases and related set equivalents',
+          icon: Icons.language_rounded,
+        ),
+      );
+      children.addAll(
+        result.japaneseSets.map(
+          (set) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: JapaneseSetSearchResultCard(set: set),
+          ),
+        ),
+      );
+    }
+
+    if (result.hasAnyError) {
+      children.add(
+        const Padding(
+          padding: EdgeInsets.only(top: 2),
+          child: _SearchInfoCard(
+            icon: Icons.info_outline_rounded,
+            title: 'Some set results may be missing',
+            message: 'One set source did not respond, so only the results that loaded are shown.',
+            accent: Color(0xFFF7DE77),
+          ),
+        ),
+      );
+    }
+
+    return children;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<CardSearchResult>(
-      future: _futureResults,
-      builder: (context, snapshot) {
-        final query = _controller.text.trim();
-        final result = snapshot.data ?? const CardSearchResult();
-        final cards = result.cards;
-        final sets = result.sets;
+    if (_selectedSection == _CardSearchSection.sealed) {
+      return Column(
+        children: [
+          _buildEmbeddedSectionPicker(),
+          const Expanded(child: SealedProductPricePage(embedded: true)),
+        ],
+      );
+    }
 
-        final children = <Widget>[
-          _buildSearchTopCard(),
-          const SizedBox(height: 14),
-        ];
+    if (_selectedSection == _CardSearchSection.cards) {
+      return FutureBuilder<CardSearchResult>(
+        future: _futureCardResults,
+        builder: (context, snapshot) {
+          final query = _controller.text.trim();
+          final result = snapshot.data ?? const CardSearchResult();
+          final cards = result.cards;
 
-        if (query.isEmpty) {
-          children.add(const CardsSearchPlaceholder());
-        } else if (!_canSearch(query)) {
-          children.add(_buildShortSearchMessage());
-        } else if (snapshot.connectionState == ConnectionState.waiting) {
-          children.add(_buildLoadingMessage(query));
-        } else if (snapshot.hasError) {
-          children.add(_buildErrorMessage(snapshot.error));
-        } else if (_searchMode == CardSearchMode.cards) {
-          if (cards.isEmpty) {
+          final children = <Widget>[
+            _buildSearchTopCard(),
+            const SizedBox(height: 14),
+          ];
+
+          if (query.isEmpty) {
+            children.add(const CardsSearchPlaceholder());
+          } else if (!_canSearch(query)) {
+            children.add(_buildShortSearchMessage());
+          } else if (snapshot.connectionState == ConnectionState.waiting) {
+            children.add(_buildLoadingMessage(query));
+          } else if (snapshot.hasError) {
+            children.add(_buildErrorMessage(snapshot.error));
+          } else if (cards.isEmpty) {
             children.add(
               _buildNoResultsMessage(
                 query: query,
@@ -414,7 +678,6 @@ class CardSearchPageState extends State<CardSearchPage> {
               ),
             );
             children.add(const SizedBox(height: 8));
-
             children.addAll(
               cards.map(
                 (card) => Padding(
@@ -423,7 +686,7 @@ class CardSearchPageState extends State<CardSearchPage> {
                     card: card,
                     onOpenDetails: () {
                       Navigator.of(context).push(
-                        MaterialPageRoute(
+                        MaterialPageRoute<void>(
                           builder: (_) => CardDetailsPage(card: card),
                         ),
                       );
@@ -433,33 +696,44 @@ class CardSearchPageState extends State<CardSearchPage> {
               ),
             );
           }
-        } else {
-          if (sets.isEmpty) {
-            children.add(
-              _buildNoResultsMessage(
-                query: query,
-                searchingCards: false,
-              ),
-            );
-          } else {
-            children.add(
-              _buildResultsHeader(
-                count: sets.length,
-                cards: false,
-                query: query,
-              ),
-            );
-            children.add(const SizedBox(height: 8));
 
-            children.addAll(
-              sets.map(
-                (set) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: SetSearchResultCard(set: set),
-                ),
-              ),
-            );
-          }
+          return ListView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(16),
+            children: children,
+          );
+        },
+      );
+    }
+
+    return FutureBuilder<_CombinedSetSearchResult>(
+      future: _futureSetResults,
+      builder: (context, snapshot) {
+        final query = _controller.text.trim();
+        final result = snapshot.data ?? const _CombinedSetSearchResult();
+
+        final children = <Widget>[
+          _buildSearchTopCard(),
+          const SizedBox(height: 14),
+        ];
+
+        if (query.isEmpty) {
+          children.add(
+            const _SearchInfoCard(
+              icon: Icons.collections_bookmark_outlined,
+              title: 'Search all sets',
+              message: 'Search once to see English sets plus matching Japanese sets together.',
+              accent: Color(0xFFF7DE77),
+            ),
+          );
+        } else if (!_canSearch(query)) {
+          children.add(_buildShortSearchMessage());
+        } else if (snapshot.connectionState == ConnectionState.waiting) {
+          children.add(_buildLoadingMessage(query));
+        } else if (snapshot.hasError) {
+          children.add(_buildErrorMessage(snapshot.error));
+        } else {
+          children.addAll(_buildSetResults(result: result, query: query));
         }
 
         return ListView(
@@ -630,7 +904,7 @@ class _NoResultsCard extends StatelessWidget {
     final title = searchingCards ? 'No cards found' : 'No sets found';
     final message = searchingCards
         ? 'Try a shorter card name, remove extra words, or search by collector number like 4/102.'
-        : 'Try a shorter set name, for example “Base”, “151”, “Obsidian”, or “Evolving”.';
+        : 'Try a shorter set name, for example “Base”, “151”, “Obsidian”, “Evolving”, or “Prismatic”.';
 
     return Card(
       color: const Color(0xFF102754),
