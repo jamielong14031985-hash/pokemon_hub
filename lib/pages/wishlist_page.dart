@@ -22,19 +22,27 @@ class WishlistPage extends StatelessWidget {
   final bool showAddHint;
 
   Future<void> _openCard(BuildContext context, WishlistEntry entry) async {
+    final returnToWishlistAfterAdd =
+        FirebaseAuth.instance.currentUser?.uid == ownerUid;
     try {
       final fullCard = await PokemonTcgService.fetchCardById(entry.cardId);
       if (!context.mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => CardDetailsPage(card: fullCard),
+          builder: (_) => CardDetailsPage(
+            card: fullCard,
+            returnToWishlistAfterAdd: returnToWishlistAfterAdd,
+          ),
         ),
       );
     } catch (_) {
       if (!context.mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => CardDetailsPage(card: entry.toSummaryCard()),
+          builder: (_) => CardDetailsPage(
+            card: entry.toSummaryCard(),
+            returnToWishlistAfterAdd: returnToWishlistAfterAdd,
+          ),
         ),
       );
     }

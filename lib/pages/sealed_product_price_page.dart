@@ -23,13 +23,20 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
   final FocusNode _searchFocusNode = FocusNode();
 
   SealedProductType? _selectedType;
-  SealedProductListing? _listing;
+  List<SealedProductListing> _listings = const <SealedProductListing>[];
   bool _loading = false;
-  bool _hasSearched = false;
   String? _errorMessage;
   int? _lastUpdatedMs;
   bool _resultsFromCache = false;
   int _requestVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadListings();
+    });
+  }
 
   @override
   void dispose() {
@@ -53,27 +60,13 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
     }
   }
 
-  Future<void> _loadListing() async {
-    final query = _searchController.text.trim();
-    if (query.isEmpty) {
-      setState(() {
-        _hasSearched = false;
-        _listing = null;
-        _errorMessage = null;
-        _lastUpdatedMs = null;
-        _resultsFromCache = false;
-      });
-      _searchFocusNode.requestFocus();
-      return;
-    }
-
+  Future<void> _loadListings() async {
     final requestVersion = ++_requestVersion;
     final marketplaceCode = CurrencySettings.selectedMarketplaceCode;
+    final query = _searchController.text.trim();
 
     setState(() {
-      _hasSearched = true;
       _loading = true;
-      _listing = null;
       _errorMessage = null;
     });
 
@@ -86,9 +79,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
 
       if (!mounted || requestVersion != _requestVersion) return;
       setState(() {
-        // The Cloud Function already removes non-sealed components and sorts
-        // matching listings. PocketChase presents just the first best match.
-        _listing = result.items.isEmpty ? null : result.items.first;
+        _listings = result.items;
         _lastUpdatedMs = result.lastUpdatedMs;
         _resultsFromCache = result.cached;
       });
@@ -108,21 +99,22 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
 
   Future<void> _openListing(SealedProductListing listing) async {
     final rawUrl = listing.listingUrl.trim();
+    if (rawUrl.isEmpty) {
+      _showMessage('This eBay listing link is unavailable.');
+      return;
+    }
+
     final uri = Uri.tryParse(rawUrl);
-    if (rawUrl.isEmpty || uri == null) {
-      _showMessage('This eBay search link is unavailable.');
+    if (uri == null) {
+      _showMessage('This eBay listing link is unavailable.');
       return;
     }
 
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted) {
-      _showMessage('Could not open eBay search.');
+      _showMessage('Could not open this eBay listing.');
     }
   }
-
-
-
-
 
   void _showMessage(String message) {
     if (!mounted) return;
@@ -134,9 +126,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
     if (milliseconds == null || milliseconds <= 0) return '';
 
     final date = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
-
     String twoDigits(int value) => value.toString().padLeft(2, '0');
-
     return '${twoDigits(date.day)}/${twoDigits(date.month)}/${date.year} '
         '${twoDigits(date.hour)}:${twoDigits(date.minute)}';
   }
@@ -146,7 +136,6 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
     required SealedProductType? type,
   }) {
     final selected = _selectedType == type;
-
     return ChoiceChip(
       label: Text(label),
       selected: selected,
@@ -156,9 +145,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
               setState(() {
                 _selectedType = type;
               });
-              if (_hasSearched) {
-                _loadListing();
-              }
+              _loadListings();
             },
       selectedColor: const Color(0xFFF7DE77),
       backgroundColor: const Color(0xFF16366E),
@@ -208,7 +195,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Find a sealed product',
+                      '10 sealed products for sale',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -217,7 +204,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'A clean product card with a live eBay price.',
+                      'Current Booster Boxes, Bundles, ETBs and UPCs on eBay.',
                       style: TextStyle(
                         color: Color(0xFFD8E3FB),
                         fontSize: 12.5,
@@ -235,10 +222,10 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
             focusNode: _searchFocusNode,
             textCapitalization: TextCapitalization.words,
             textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _loadListing(),
+            onSubmitted: (_) => _loadListings(),
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-              hintText: 'Example: Charizard UPC',
+              hintText: 'Search a set, for example Surging Sparks',
               hintStyle: const TextStyle(color: Colors.white38),
               prefixIcon: const Icon(
                 Icons.search_rounded,
@@ -246,7 +233,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
               ),
               suffixIcon: IconButton(
                 tooltip: 'Search sealed products',
-                onPressed: _loading ? null : _loadListing,
+                onPressed: _loading ? null : _loadListings,
                 icon: _loading
                     ? const SizedBox(
                         width: 18,
@@ -298,7 +285,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
                 _buildTypeChip(label: 'All', type: null),
                 const SizedBox(width: 8),
                 _buildTypeChip(
-                  label: SealedProductType.boosterBox.shortLabel,
+                  label: SealedProductType.boosterBox.label,
                   type: SealedProductType.boosterBox,
                 ),
                 const SizedBox(width: 8),
@@ -330,7 +317,7 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Catalogue image with a live price from ${marketplace.label}.',
+                  'Showing current listings from ${marketplace.label}.',
                   style: const TextStyle(
                     color: Color(0xFFD8E3FB),
                     fontSize: 12,
@@ -340,8 +327,8 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
                 ),
               ),
               IconButton(
-                tooltip: 'Refresh result',
-                onPressed: _loading || !_hasSearched ? null : _loadListing,
+                tooltip: 'Refresh listings',
+                onPressed: _loading ? null : _loadListings,
                 icon: const Icon(
                   Icons.refresh_rounded,
                   color: Color(0xFFF7DE77),
@@ -354,318 +341,303 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
     );
   }
 
-  Widget _buildIntroCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: const Color(0xFF102754),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.search_rounded,
-            color: Color(0xFFF7DE77),
-            size: 42,
-          ),
-          SizedBox(height: 12),
-          Text(
-            'Search the sealed product catalogue',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 17,
-            ),
-          ),
-          SizedBox(height: 6),
-          Text(
-            'Try “Charizard UPC”, “Prismatic Evolutions ETB” or “Surging Sparks Booster Box”. You will see one clean product card, not a seller listing.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFFC8D4F0),
-              height: 1.35,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLoadingCard() {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(16, 22, 16, 0),
-      child: Center(
-        child: Column(
-          children: [
-            SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.2),
-            ),
-            SizedBox(height: 12),
-            Text(
-              'Finding the product and checking its live price...',
-              style: TextStyle(
-                color: Color(0xFFD8E3FB),
-                fontWeight: FontWeight.w700,
+  Widget _buildStatusRow() {
+    if (_loading && _listings.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 18, 16, 4),
+        child: Center(
+          child: Column(
+            children: [
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildErrorCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF5B1D28),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _errorMessage ?? 'Could not load this product.',
-            style: const TextStyle(color: Colors.white, height: 1.35),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _loading ? null : _loadListing,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Try again'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNoResultCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: const Color(0xFF102754),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.search_off_rounded,
-            color: Color(0xFFF7DE77),
-            size: 40,
-          ),
-          SizedBox(height: 10),
-          Text(
-            'No matching sealed product found',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-            ),
-          ),
-          SizedBox(height: 6),
-          Text(
-            'Use the full product name and choose a product type to narrow it down.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFFC8D4F0),
-              height: 1.3,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSelectedListingCard(SealedProductListing listing) {
-    final currency = listing.currencyCode.isEmpty
-        ? CurrencySettings.selectedCode
-        : listing.currencyCode;
-    final currentPrice = CurrencySettings.formatAmount(
-      listing.priceAmount,
-      fromCurrency: currency,
-    );
-    final updatedAt = _formatUpdatedAt();
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 22),
-      decoration: BoxDecoration(
-        color: const Color(0xFF102754),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: const Color(0xFFF7DE77).withValues(alpha: 0.3),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF7DE77).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: const Color(0xFFF7DE77).withValues(alpha: 0.32),
-                    ),
-                  ),
-                  child: Text(
-                    listing.productTypeLabel,
-                    style: const TextStyle(
-                      color: Color(0xFFF7DE77),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                const Icon(
-                  Icons.inventory_2_outlined,
-                  color: Color(0xFFF7DE77),
-                  size: 21,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              height: 218,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFF),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(17),
-                child: listing.imageUrl.isEmpty
-                    ? const _CatalogueImageUnavailable()
-                    : Image.network(
-                        listing.imageUrl,
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) =>
-                            const _CatalogueImageUnavailable(),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              listing.title,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 19,
-                height: 1.18,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Current lowest eBay price',
-              style: TextStyle(
-                color: Color(0xFFC8D4F0),
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              currentPrice,
-              style: const TextStyle(
-                color: Color(0xFFF7DE77),
-                fontSize: 31,
-                height: 1,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Calculated from current matching sealed listings on eBay.',
-              style: TextStyle(
-                color: Color(0xFFC8D4F0),
-                fontSize: 12,
-                height: 1.35,
-              ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () => _openListing(listing),
-                icon: const Icon(Icons.open_in_new_rounded),
-                label: const Text('View on eBay'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFF7DE77),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  textStyle: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-            if (updatedAt.isNotEmpty) ...[
-              const SizedBox(height: 14),
+              SizedBox(height: 10),
               Text(
-                '${_resultsFromCache ? 'Last checked' : 'Price checked'} $updatedAt',
-                style: const TextStyle(
-                  color: Color(0xFFAFC0E6),
-                  fontSize: 11.5,
+                'Loading products for sale...',
+                style: TextStyle(
+                  color: Color(0xFFD8E3FB),
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF5B1D28),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _errorMessage!,
+              style: const TextStyle(color: Colors.white, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _loading ? null : _loadListings,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try again'),
+            ),
           ],
+        ),
+      );
+    }
+
+    if (_listings.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF102754),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: const Column(
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              color: Color(0xFFF7DE77),
+              size: 38,
+            ),
+            SizedBox(height: 10),
+            Text(
+              'No matching products found',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(height: 5),
+            Text(
+              'Try another set name or product-type filter.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFFC8D4F0), height: 1.3),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final updatedAt = _formatUpdatedAt();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      child: Row(
+        children: [
+          if (_loading)
+            const SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            const Icon(
+              Icons.local_offer_outlined,
+              color: Color(0xFFF7DE77),
+              size: 17,
+            ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${_listings.length} ${_listings.length == 1 ? 'listing' : 'listings'}'
+              '${updatedAt.isEmpty ? '' : ' • updated $updatedAt'}'
+              '${_resultsFromCache ? ' • cached' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFFD8E3FB),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListingTile(SealedProductListing listing) {
+    final currency = listing.currencyCode.isEmpty
+        ? CurrencySettings.selectedCode
+        : listing.currencyCode;
+    final priceText = CurrencySettings.formatAmount(
+      listing.priceAmount,
+      fromCurrency: currency,
+    );
+    final listingDateText = listing.listingDateText.isEmpty
+        ? 'Available now'
+        : 'Listed ${listing.listingDateText}';
+    final shippingText = listing.hasShippingCost
+        ? ' + ${CurrencySettings.formatAmount(listing.shippingAmount, fromCurrency: currency)} shipping'
+        : ' + shipping not shown';
+
+    return Material(
+      color: const Color(0xFF102754),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => _openListing(listing),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 118,
+                height: 142,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    width: double.infinity,
+                    color: const Color(0xFF071B3F),
+                    child: listing.imageUrl.isEmpty
+                        ? const Center(
+                            child: Icon(
+                              Icons.inventory_2_outlined,
+                              color: Color(0xFFF7DE77),
+                              size: 38,
+                            ),
+                          )
+                        : Image.network(
+                            listing.imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Icon(
+                                Icons.broken_image_outlined,
+                                color: Color(0xFFF7DE77),
+                                size: 36,
+                              ),
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      listing.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        height: 1.16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      listing.productTypeLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFF7DE77),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      priceText,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        height: 1,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      listingDateText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFF7DE77),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      shippingText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFC8D4F0),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 34,
+                      child: OutlinedButton(
+                        onPressed: () => _openListing(listing),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.18),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          textStyle: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        child: const Text('Open eBay'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-
-
-  Widget _buildResultArea() {
-    if (!_hasSearched) return _buildIntroCard();
-    if (_loading) return _buildLoadingCard();
-    if (_errorMessage != null) return _buildErrorCard();
-    if (_listing == null) return _buildNoResultCard();
-    return _buildSelectedListingCard(_listing!);
-  }
-
   Widget _buildListingsBody() {
     return RefreshIndicator(
-      onRefresh: _hasSearched ? _loadListing : () async {},
+      onRefresh: _loadListings,
       child: CustomScrollView(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(child: _buildSearchAndFilters()),
-          SliverToBoxAdapter(child: _buildResultArea()),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          SliverToBoxAdapter(child: _buildStatusRow()),
+          if (_listings.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == _listings.length - 1 ? 0 : 12,
+                    ),
+                    child: _buildListingTile(_listings[index]),
+                  ),
+                  childCount: _listings.length,
+                ),
+              ),
+            )
+          else
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       ),
     );
@@ -687,38 +659,6 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
         foregroundColor: Colors.white,
       ),
       body: SafeArea(child: body),
-    );
-  }
-}
-
-
-class _CatalogueImageUnavailable extends StatelessWidget {
-  const _CatalogueImageUnavailable();
-
-  @override
-  Widget build(BuildContext context) {
-    return const ColoredBox(
-      color: Color(0xFFF8FAFF),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.inventory_2_outlined,
-              color: Color(0xFF16366E),
-              size: 52,
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Catalogue image coming soon',
-              style: TextStyle(
-                color: Color(0xFF16366E),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

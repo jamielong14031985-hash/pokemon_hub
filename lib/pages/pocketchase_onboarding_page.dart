@@ -82,7 +82,7 @@ class _PocketChaseOnboardingPageState extends State<PocketChaseOnboardingPage> {
       ],
     ),
     _GuideSlide(
-      title: 'Build your Master Sets',
+      title: 'Build your Sets',
       subtitle:
           'Track what you own, add duplicate copies, and keep normal, reverse holo and holo cards separate.',
       eyebrow: 'Collection tracking',
@@ -949,7 +949,7 @@ class _MasterSetsPreview extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         _AppLikeHeader(
-          title: 'Master Sets',
+          title: 'Sets',
           subtitle: 'Track and manage your sets',
           icon: Icons.collections_bookmark_outlined,
           goldColor: goldColor,
@@ -2875,3 +2875,4 @@ enum _PreviewKind {
   map,
   community,
 }
+

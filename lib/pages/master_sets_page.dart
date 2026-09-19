@@ -75,7 +75,9 @@ class MasterSetsPageState extends State<MasterSetsPage> {
 
 
   Future<_SetCatalogue> _loadSetCatalogue({bool forceRefresh = false}) async {
-    final englishSetsFuture = PokemonTcgService.fetchSets();
+    final englishSetsFuture = PokemonTcgService.fetchSets(
+      forceRefresh: forceRefresh,
+    );
     final japaneseSetsFuture = JapaneseTcgDexService.fetchSets(
       forceRefresh: forceRefresh,
     );
@@ -220,7 +222,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Remove set from Master Sets?'),
+          title: const Text('Remove set from Sets?'),
           content: Text(
             'This will clear saved Pokédex data for $setName on this device. '
             'Use this if the set is showing even though you have no cards saved in it.',
@@ -247,7 +249,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$setName removed from Master Sets')),
+      SnackBar(content: Text('$setName removed from Sets')),
     );
   }
 
@@ -483,7 +485,7 @@ class MasterSetsPageState extends State<MasterSetsPage> {
               top: 8,
               right: 8,
               child: Tooltip(
-                message: 'Remove from Master Sets',
+                message: 'Remove from Sets',
                 child: IconButton(
                   onPressed: () => _removeSetFromMasterSets(
                     setId: entry.setId,
@@ -1101,4 +1103,5 @@ String _masterSetAssetGroup(String setId) {
   final match = RegExp(r'^[a-z]+').firstMatch(clean);
   return match?.group(0) ?? '';
 }
+
 

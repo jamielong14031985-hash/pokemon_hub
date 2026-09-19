@@ -289,6 +289,9 @@ class TcgCard {
     this.externalRawPriceUpdatedAtMs,
     this.rawPriceBreakdown = const {},
     this.gradedPrices = const {},
+    this.hasNormalVariant,
+    this.hasReverseHoloVariant,
+    this.hasHoloVariant,
   });
 
   final String id;
@@ -313,6 +316,9 @@ class TcgCard {
   final int? externalRawPriceUpdatedAtMs;
   final Map<String, double> rawPriceBreakdown;
   final Map<String, double> gradedPrices;
+  final bool? hasNormalVariant;
+  final bool? hasReverseHoloVariant;
+  final bool? hasHoloVariant;
 
   double? get marketPrice => (rawPrice ?? 0) > 0 ? rawPrice : externalRawPrice;
 
@@ -351,6 +357,9 @@ class TcgCard {
     int? externalRawPriceUpdatedAtMs,
     Map<String, double>? rawPriceBreakdown,
     Map<String, double>? gradedPrices,
+    bool? hasNormalVariant,
+    bool? hasReverseHoloVariant,
+    bool? hasHoloVariant,
   }) {
     return TcgCard(
       id: id ?? this.id,
@@ -375,6 +384,10 @@ class TcgCard {
       externalRawPriceUpdatedAtMs: externalRawPriceUpdatedAtMs ?? this.externalRawPriceUpdatedAtMs,
       rawPriceBreakdown: rawPriceBreakdown ?? this.rawPriceBreakdown,
       gradedPrices: gradedPrices ?? this.gradedPrices,
+      hasNormalVariant: hasNormalVariant ?? this.hasNormalVariant,
+      hasReverseHoloVariant:
+          hasReverseHoloVariant ?? this.hasReverseHoloVariant,
+      hasHoloVariant: hasHoloVariant ?? this.hasHoloVariant,
     );
   }
 
@@ -792,6 +805,13 @@ class TcgCard {
     final images = (json['images'] as Map<String, dynamic>? ?? {});
     final set = (json['set'] as Map<String, dynamic>? ?? {});
     final rawPriceMoney = _extractRawCardMoney(json);
+    final tcgplayer = _asStringDynamicMap(json['tcgplayer']);
+    final tcgPrices = _asStringDynamicMap(tcgplayer['prices']);
+    final hasExactVariantData = tcgPrices.isNotEmpty;
+
+    bool hasAnyPriceGroup(Iterable<String> names) {
+      return names.any((name) => tcgPrices.containsKey(name));
+    }
 
     final baseCard = TcgCard(
       id: (json['id'] ?? '').toString(),
@@ -811,6 +831,27 @@ class TcgCard {
       rawPriceSource: rawPriceMoney == null ? '' : 'Pokémon TCG API',
       rawPriceBreakdown: _extractRawPriceBreakdown(json),
       gradedPrices: _extractGradedPrices(json),
+      hasNormalVariant: hasExactVariantData
+          ? hasAnyPriceGroup(<String>[
+              'normal',
+              '1stEditionNormal',
+              'unlimitedNormal',
+              'unlimited',
+            ])
+          : null,
+      hasReverseHoloVariant: hasExactVariantData
+          ? hasAnyPriceGroup(<String>[
+              'reverseHolofoil',
+              'unlimitedReverseHolofoil',
+            ])
+          : null,
+      hasHoloVariant: hasExactVariantData
+          ? hasAnyPriceGroup(<String>[
+              'holofoil',
+              '1stEditionHolofoil',
+              'unlimitedHolofoil',
+            ])
+          : null,
       types: (json['types'] as List<dynamic>? ?? const [])
           .map((e) => e.toString())
           .toList(),
@@ -845,6 +886,9 @@ class TcgCard {
       externalRawPriceUpdatedAtMs: baseCard.externalRawPriceUpdatedAtMs,
       rawPriceBreakdown: baseCard.rawPriceBreakdown,
       gradedPrices: baseCard.gradedPrices,
+      hasNormalVariant: baseCard.hasNormalVariant,
+      hasReverseHoloVariant: baseCard.hasReverseHoloVariant,
+      hasHoloVariant: baseCard.hasHoloVariant,
       types: baseCard.types,
     );
   }

@@ -19,6 +19,7 @@ class MasterSetSlotTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final slotOwned = slot.isOwned(ownership);
+    final badgeLabel = slot.shortLabel.trim();
 
     return Stack(
       fit: StackFit.expand,
@@ -27,33 +28,38 @@ class MasterSetSlotTile extends StatelessWidget {
           card: slot.card,
           ownership: slot.tileOwnership(ownership),
           greyOutUnowned: greyOutWhenMissing,
+          showVariantPills: false,
         ),
-        Positioned(
-          left: 6,
-          bottom: 6,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-            decoration: BoxDecoration(
-              color: slotOwned
-                  ? const Color(0xFFF7DE77)
-                  : Colors.black.withValues(alpha: 0.74),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
+        if (badgeLabel.isNotEmpty)
+          Positioned(
+            left: 6,
+            bottom: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 7,
+                vertical: 4,
+              ),
+              decoration: BoxDecoration(
                 color: slotOwned
                     ? const Color(0xFFF7DE77)
-                    : Colors.white.withValues(alpha: 0.22),
+                    : Colors.black.withValues(alpha: 0.74),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: slotOwned
+                      ? const Color(0xFFF7DE77)
+                      : Colors.white.withValues(alpha: 0.22),
+                ),
               ),
-            ),
-            child: Text(
-              slot.shortLabel,
-              style: TextStyle(
-                color: slotOwned ? Colors.black : Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
+              child: Text(
+                badgeLabel,
+                style: TextStyle(
+                  color: slotOwned ? Colors.black : Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
           ),
-        ),
       ],
     );
   }

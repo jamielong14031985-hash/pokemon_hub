@@ -297,7 +297,7 @@ class _AppShellState extends State<AppShell> {
       case _kScanIndex:
         return 'Scan Card';
       case _kMasterSetsIndex:
-        return 'Master Sets';
+        return 'Sets';
       case _kMapIndex:
         return 'TCG Shop Map';
       case _kCommunityIndex:
@@ -613,7 +613,7 @@ class _AppShellState extends State<AppShell> {
         const NavigationDestination(
           icon: Icon(Icons.collections_bookmark_outlined),
           selectedIcon: Icon(Icons.collections_bookmark),
-          label: 'Master Sets',
+          label: 'Sets',
         ),
         const NavigationDestination(
           icon: Icon(Icons.map_outlined),
@@ -892,3 +892,4 @@ class _AppShellState extends State<AppShell> {
     return _buildBusinessSetupAwareShell();
   }
 }
+

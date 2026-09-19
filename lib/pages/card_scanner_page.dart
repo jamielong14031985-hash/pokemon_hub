@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/card_ownership.dart';
 import '../models/card_scan_analysis.dart';
 import '../models/quick_scan_variant.dart';
+import 'card_search_page.dart';
 import '../models/tcg_card.dart';
 import '../pokemon_hub_vision_client.dart';
 import '../services/local_pokedex_store.dart';
@@ -59,10 +60,6 @@ class _CardScannerPageState extends State<CardScannerPage>
 
   static const Duration _autoScanInterval = Duration(milliseconds: 4200);
 
-  static const _visionClient = PokemonHubVisionClient(
-    endpoint:
-        'https://us-central1-cardmon-7dc24.cloudfunctions.net/identifyPokemonCardExact',
-  );
 
   bool get _cameraReady =>
       _cameraController != null && _cameraController!.value.isInitialized;
@@ -124,7 +121,7 @@ class _CardScannerPageState extends State<CardScannerPage>
 
       final controller = camera.CameraController(
         selectedCamera,
-        camera.ResolutionPreset.medium,
+        camera.ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: camera.ImageFormatGroup.jpeg,
       );
@@ -565,23 +562,51 @@ class _CardScannerPageState extends State<CardScannerPage>
 
   CardOwnership get _selectedScanOwnership {
     switch (_quickScanVariant) {
-      case QuickScanVariant.reverseHolo:
-        return const CardOwnership(reverseHolo: true, copies: 1);
-      case QuickScanVariant.holo:
-        return const CardOwnership(holo: true, copies: 1);
       case QuickScanVariant.normal:
-        return const CardOwnership(normal: true, copies: 1);
+        return const CardOwnership(
+          normal: true,
+          copies: 1,
+          normalCopies: 1,
+        );
+      case QuickScanVariant.reverseHolo:
+        return const CardOwnership(
+          reverseHolo: true,
+          copies: 1,
+          reverseHoloCopies: 1,
+        );
+      case QuickScanVariant.holo:
+        return const CardOwnership(
+          holo: true,
+          copies: 1,
+          holoCopies: 1,
+        );
+      case QuickScanVariant.pokeBallReverse:
+        return const CardOwnership(
+          pokeBallReverse: true,
+          copies: 1,
+          pokeBallReverseCopies: 1,
+        );
+      case QuickScanVariant.masterBallReverse:
+        return const CardOwnership(
+          masterBallReverse: true,
+          copies: 1,
+          masterBallReverseCopies: 1,
+        );
     }
   }
 
   String get _selectedScanVariantLabel {
     switch (_quickScanVariant) {
+      case QuickScanVariant.normal:
+        return 'Normal';
       case QuickScanVariant.reverseHolo:
         return 'Reverse Holo';
       case QuickScanVariant.holo:
         return 'Holo';
-      case QuickScanVariant.normal:
-        return 'Normal';
+      case QuickScanVariant.pokeBallReverse:
+        return 'Poké Ball Reverse';
+      case QuickScanVariant.masterBallReverse:
+        return 'Master Ball Reverse';
     }
   }
 
@@ -708,6 +733,59 @@ class _CardScannerPageState extends State<CardScannerPage>
     return keys;
   }
 
+  Future<List<TcgCard>> _findDatabaseFallbackMatches({
+    required String? scannedCardName,
+    required String? scannedPokemonName,
+    required String? scannedCollectorNumber,
+    required String? scannedPrintedTotal,
+    required String? scannedSetName,
+    required String? scannedSetCode,
+  }) async {
+    final cardName = (scannedCardName ?? scannedPokemonName ?? '').trim();
+    final collectorNumber = (scannedCollectorNumber ?? '').trim();
+    final printedTotal = (scannedPrintedTotal ?? '').trim();
+    final setName = (scannedSetName ?? '').trim();
+    final setCode = (scannedSetCode ?? '').trim();
+
+    final searches = <Future<List<TcgCard>>>[];
+
+    // A collector number plus the printed set total is the most reliable
+    // fallback when image matching returns the right card too low, or misses
+    // it completely. For example: 238/191.
+    if (collectorNumber.isNotEmpty && printedTotal.isNotEmpty) {
+      searches.add(
+        PokemonTcgService.searchCardsOnly('$collectorNumber/$printedTotal'),
+      );
+    }
+
+    // Use the name with whichever set clue the scanner managed to read. The
+    // card service understands common set codes such as SSP for Surging Sparks.
+    if (cardName.isNotEmpty) {
+      final setHint = setCode.isNotEmpty ? setCode : setName;
+      final query = <String>[cardName, if (setHint.isNotEmpty) setHint].join(' ');
+      searches.add(PokemonTcgService.searchCardsOnly(query));
+    }
+
+    if (searches.isEmpty) return const <TcgCard>[];
+
+    final cardsById = <String, TcgCard>{};
+    for (final search in searches) {
+      try {
+        final cards = await search;
+        for (final card in cards) {
+          final id = card.id.trim();
+          if (id.isNotEmpty) {
+            cardsById.putIfAbsent(id, () => card);
+          }
+        }
+      } catch (_) {
+        // Continue with any other available clue rather than failing the scan.
+      }
+    }
+
+    return cardsById.values.take(24).toList();
+  }
+
   List<TcgCard> _rankMatchesFromScannerClues({
     required List<TcgCard> matches,
     required String? scannedCardName,
@@ -797,168 +875,132 @@ class _CardScannerPageState extends State<CardScannerPage>
   }
 
   Future<CardScanAnalysis> _buildVisionAnalysis(String imagePath) async {
-    final vision = await _visionClient.scanImage(imagePath);
+    // FREE scanner path:
+    // PokemonTcgService.scanCardFromImage uses Google ML Kit OCR on-device,
+    // then PocketChase searches/ranks the card database using the OCR clues.
+    //
+    // No Ximilar request and no PocketChase cloud-vision request is made here.
+    final localAnalysis = await PokemonTcgService.scanCardFromImage(imagePath);
 
-    final orderedResolved = <VisionResolvedCard>[];
-    final seenIds = <String>{};
+    var matches = List<TcgCard>.from(localAnalysis.matches);
 
-    void addResolved(VisionResolvedCard? card) {
-      if (card == null) return;
-      final id = card.id.trim();
-      if (id.isEmpty) return;
-      if (seenIds.add(id)) orderedResolved.add(card);
-    }
-
-    addResolved(vision.bestMatch);
-    for (final card in vision.possibleMatches.take(7)) {
-      addResolved(card);
-    }
-
-    Future<TcgCard> resolveCard(VisionResolvedCard card) async {
-      try {
-        return await PokemonTcgService.fetchCardById(card.id);
-      } catch (_) {
-        return _fallbackVisionCard(card);
-      }
-    }
-
-    List<TcgCard> matches = <TcgCard>[];
-    if (vision.exactConfirmed && vision.bestMatch != null) {
-      matches = <TcgCard>[await resolveCard(vision.bestMatch!)];
-    } else if (orderedResolved.isNotEmpty) {
-      // Resolve a larger shortlist so a correct lower-ranked backend candidate
-      // is still available for the app to rerank locally.
-      matches =
-          await Future.wait<TcgCard>(orderedResolved.take(8).map(resolveCard));
-    }
-
-    final candidateNames = <String>{
-      if ((vision.extraction.cardName ?? '').trim().isNotEmpty)
-        vision.extraction.cardName!.trim(),
-      if ((vision.extraction.pokemonName ?? '').trim().isNotEmpty)
-        vision.extraction.pokemonName!.trim(),
-    }.toList();
-
-    final candidateNumbers = <String>{
-      if ((vision.extraction.collectorNumber ?? '').trim().isNotEmpty)
-        vision.extraction.collectorNumber!.trim(),
-      if ((vision.extraction.collectorNumber ?? '').trim().isNotEmpty &&
-          (vision.extraction.printedTotal ?? '').trim().isNotEmpty)
-        '${vision.extraction.collectorNumber!.trim()}/${vision.extraction.printedTotal!.trim()}',
-    }.toList();
-
-    matches = _rankMatchesFromScannerClues(
-      matches: matches,
-      scannedCardName: vision.extraction.cardName,
-      scannedPokemonName: vision.extraction.pokemonName,
-      scannedCollectorNumber: vision.extraction.collectorNumber,
-      scannedPrintedTotal: vision.extraction.printedTotal,
-      scannedSetName: vision.extraction.setName,
-      scannedSetCode: vision.extraction.setCode,
-    );
-
-    final promoScanText = <String>[
-      vision.extraction.cardName ?? '',
-      vision.extraction.pokemonName ?? '',
-      vision.extraction.collectorNumber ?? '',
-      vision.extraction.printedTotal ?? '',
-      vision.extraction.setCode ?? '',
-      vision.extraction.setName ?? '',
-      ...vision.extraction.attacks,
-      ...vision.extraction.abilities,
-      ...vision.extraction.rulesText,
-      ...vision.extraction.notes,
-      'exact confirmed ${vision.exactConfirmed ? 'yes' : 'no'}',
-      'vision exact confidence ${vision.extraction.exactCardConfidence.toStringAsFixed(2)}',
-      if (vision.bestMatch != null) _formatVisionResolvedCard(vision.bestMatch!),
-      ...vision.possibleMatches.take(4).map(_formatVisionResolvedCard),
-      ...vision.debug.initialPossibleMatches.take(4).map(_formatVisionResolvedCard),
-    ].join(' ');
-
+    // Preserve PocketChase's local promo rescue logic without calling any
+    // recognition API. It only uses the OCR text/candidates we already have.
     final promoFallbackMatches = _findMepPromoFallbackMatches(
-      scanText: promoScanText,
-      candidateNames: candidateNames,
-      candidateNumbers: candidateNumbers,
+      scanText: localAnalysis.extractedText,
+      candidateNames: localAnalysis.candidateNames,
+      candidateNumbers: localAnalysis.candidateNumbers,
     );
 
     final promoRescueMatches = _findMepPromoRescueMatches(
-      scanText: promoScanText,
-      candidateNames: candidateNames,
-      candidateNumbers: candidateNumbers,
+      scanText: localAnalysis.extractedText,
+      candidateNames: localAnalysis.candidateNames,
+      candidateNumbers: localAnalysis.candidateNumbers,
     );
 
     matches = _mergePriorityMatches(
-      <TcgCard>[...promoFallbackMatches, ...promoRescueMatches],
+      <TcgCard>[
+        ...promoFallbackMatches,
+        ...promoRescueMatches,
+      ],
       matches,
     );
 
-    final extractedLines = <String>[
+    final confidence = _freeLocalScanConfidence(
+      analysis: localAnalysis,
+      matches: matches,
+    );
+
+    // Be deliberately conservative. Only auto-confirm very strong scans.
+    // Everything else stays in the existing "Choose your card" flow.
+    final autoConfirm =
+        localAnalysis.exactConfirmed || (matches.isNotEmpty && confidence >= 92);
+
+    final extraDebug = <String>[
+      '',
+      'Free local scanner: yes',
+      'Local confidence: $confidence%',
       if (promoFallbackMatches.isNotEmpty) 'MEP promo fallback: yes',
-      if (promoFallbackMatches.isNotEmpty)
-        'MEP promo match: ${_formatTcgCard(promoFallbackMatches.first)}',
       if (promoRescueMatches.isNotEmpty) 'MEP promo rescue: yes',
-      if (promoRescueMatches.isNotEmpty)
-        'MEP promo rescue match: ${_formatTcgCard(promoRescueMatches.first)}',
-      if ((vision.extraction.cardName ?? '').trim().isNotEmpty)
-        'Card: ${vision.extraction.cardName}',
-      if ((vision.extraction.pokemonName ?? '').trim().isNotEmpty)
-        'Pokémon: ${vision.extraction.pokemonName}',
-      if ((vision.extraction.collectorNumber ?? '').trim().isNotEmpty)
-        'Number: ${vision.extraction.collectorNumber}'
-            '${(vision.extraction.printedTotal ?? '').trim().isNotEmpty ? '/${vision.extraction.printedTotal}' : ''}',
-      if ((vision.extraction.setCode ?? '').trim().isNotEmpty)
-        'Set code: ${vision.extraction.setCode}',
-      if ((vision.extraction.setName ?? '').trim().isNotEmpty)
-        'Set: ${vision.extraction.setName}',
-      if (vision.extraction.hp != null) 'HP: ${vision.extraction.hp}',
-      if ((vision.extraction.supertype ?? '').trim().isNotEmpty)
-        'Supertype: ${vision.extraction.supertype}',
-      if (vision.extraction.subtypes.isNotEmpty)
-        'Subtypes: ${vision.extraction.subtypes.join(', ')}',
-      if (vision.extraction.attacks.isNotEmpty)
-        'Attacks: ${vision.extraction.attacks.join(', ')}',
-      if (vision.extraction.abilities.isNotEmpty)
-        'Abilities: ${vision.extraction.abilities.join(', ')}',
-      if (vision.extraction.rulesText.isNotEmpty)
-        'Rules: ${vision.extraction.rulesText.join(' • ')}',
-      if ((vision.extraction.rarityHint ?? '').trim().isNotEmpty)
-        'Rarity hint: ${vision.extraction.rarityHint}',
-      'Exact confirmed: ${vision.exactConfirmed ? 'yes' : 'no'}',
-      'Vision exact confidence: ${vision.extraction.exactCardConfidence.toStringAsFixed(2)}',
-      if (vision.candidateSetIds.isNotEmpty)
-        'Candidate set ids: ${vision.candidateSetIds.join(', ')}',
-      if (vision.extraction.notes.isNotEmpty)
-        'Notes: ${vision.extraction.notes.join(' • ')}',
-      if (vision.bestMatch != null) '',
-      if (vision.bestMatch != null) 'Backend best match:',
-      if (vision.bestMatch != null)
-        '- ${_formatVisionResolvedCard(vision.bestMatch!)}',
-      if (vision.debug.initialBestMatch != null) '',
-      if (vision.debug.initialBestMatch != null) 'Initial backend best match:',
-      if (vision.debug.initialBestMatch != null)
-        '- ${_formatVisionResolvedCard(vision.debug.initialBestMatch!)}',
-      if (vision.debug.initialPossibleMatches.isNotEmpty) '',
-      if (vision.debug.initialPossibleMatches.isNotEmpty)
-        'Initial backend shortlist:',
-      ...vision.debug.initialPossibleMatches
-          .take(8)
-          .map((card) => '- ${_formatVisionResolvedCard(card)}'),
-      if (vision.possibleMatches.isNotEmpty) '',
-      if (vision.possibleMatches.isNotEmpty) 'Reranked backend matches:',
-      ...vision.possibleMatches
-          .take(8)
-          .map((card) => '- ${_formatVisionResolvedCard(card)}'),
-      if (matches.isNotEmpty) '',
-      if (matches.isNotEmpty) 'Rendered app matches:',
-      ...matches.take(8).map((card) => '- ${_formatTcgCard(card)}'),
     ];
 
     return CardScanAnalysis(
-      extractedText: extractedLines.join('\n'),
-      candidateNames: candidateNames,
-      candidateNumbers: candidateNumbers,
-      matches: matches,
-      exactConfirmed: vision.exactConfirmed,
+      extractedText:
+          '${localAnalysis.extractedText}${extraDebug.join('\n')}',
+      candidateNames: localAnalysis.candidateNames,
+      candidateNumbers: localAnalysis.candidateNumbers,
+      matches: matches.take(8).toList(),
+      exactConfirmed: autoConfirm,
+    );
+  }
+
+  int _freeLocalScanConfidence({
+    required CardScanAnalysis analysis,
+    required List<TcgCard> matches,
+  }) {
+    if (matches.isEmpty) return 0;
+
+    final best = matches.first;
+    var score = 20;
+
+    if (analysis.exactConfirmed) {
+      score += 45;
+    }
+
+    final bestNumberKeys = _scannerNumberKeys(best.number);
+    var exactNumberMatch = false;
+    var collectorPairMatch = false;
+
+    for (final candidate in analysis.candidateNumbers) {
+      final candidateKeys = _scannerNumberKeys(candidate);
+      if (bestNumberKeys.intersection(candidateKeys).isNotEmpty) {
+        exactNumberMatch = true;
+      }
+
+      // A printed pair such as 238/191 is particularly strong evidence.
+      if (candidate.contains('/') &&
+          bestNumberKeys.intersection(candidateKeys).isNotEmpty) {
+        collectorPairMatch = true;
+      }
+    }
+
+    if (collectorPairMatch) {
+      score += 38;
+    } else if (exactNumberMatch) {
+      score += 28;
+    }
+
+    final bestName = _normaliseScannerMatchText(best.name);
+    var bestNameScore = 0;
+
+    for (final candidate in analysis.candidateNames) {
+      final scanned = _normaliseScannerMatchText(candidate);
+      if (scanned.isEmpty || bestName.isEmpty) continue;
+
+      if (scanned == bestName) {
+        bestNameScore = math.max(bestNameScore, 28);
+      } else if (scanned.contains(bestName) || bestName.contains(scanned)) {
+        bestNameScore = math.max(bestNameScore, 18);
+      }
+    }
+
+    score += bestNameScore;
+
+    if (matches.length == 1) {
+      score += 8;
+    } else if (matches.length >= 6) {
+      // A large shortlist means the OCR clues were less specific.
+      score -= 5;
+    }
+
+    return score.clamp(0, 100).toInt();
+  }
+
+  void _openManualCardSearch() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const CardSearchPage(),
+      ),
     );
   }
 
@@ -998,12 +1040,73 @@ class _CardScannerPageState extends State<CardScannerPage>
     }
   }
 
+  Future<String?> _prepareCenteredCardCrop(String imagePath) async {
+    try {
+      final sourceBytes = await File(imagePath).readAsBytes();
+      final decoded = img.decodeImage(sourceBytes);
+      if (decoded == null) return null;
+
+      final oriented = img.bakeOrientation(decoded);
+      if (oriented.width < 540 || oriented.height < 540) return null;
+
+      // The live scanner guide is centred. When the first pass finds nothing,
+      // sending a tighter version of this central area gives the OCR much more
+      // detail for the card name and collector number.
+      final cropWidth = math.max(1, (oriented.width * 0.72).round()).toInt();
+      final cropHeight = math.max(1, (oriented.height * 0.84).round()).toInt();
+      final cropX = math.max(0, ((oriented.width - cropWidth) / 2).round()).toInt();
+      final cropY = math.max(0, ((oriented.height - cropHeight) / 2).round()).toInt();
+
+      var cropped = img.copyCrop(
+        oriented,
+        x: cropX,
+        y: cropY,
+        width: cropWidth,
+        height: cropHeight,
+      );
+
+      final longestSide = math.max(cropped.width, cropped.height);
+      if (longestSide > 1600) {
+        cropped = cropped.width >= cropped.height
+            ? img.copyResize(cropped, width: 1600)
+            : img.copyResize(cropped, height: 1600);
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      final outputPath =
+          '${tempDir.path}/scan_card_crop_${DateTime.now().microsecondsSinceEpoch}.jpg';
+      await File(outputPath).writeAsBytes(
+        img.encodeJpg(cropped, quality: 88),
+        flush: true,
+      );
+      return outputPath;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<CardScanAnalysis> _buildPreparedVisionAnalysis(String imagePath) async {
     final preparedPath = await _prepareScannerAnalysisImage(imagePath);
     final analysisPath = preparedPath ?? imagePath;
 
     try {
-      return await _buildVisionAnalysis(analysisPath);
+      final firstPass = await _buildVisionAnalysis(analysisPath);
+      if (firstPass.matches.isNotEmpty) return firstPass;
+
+      // Only spend time on the tighter crop when the normal image produced no
+      // usable cards. This keeps successful scans just as quick as before.
+      final croppedPath = await _prepareCenteredCardCrop(imagePath);
+      if (croppedPath == null) return firstPass;
+
+      try {
+        final cropPass = await _buildVisionAnalysis(croppedPath);
+        return cropPass.matches.isNotEmpty ? cropPass : firstPass;
+      } finally {
+        try {
+          final file = File(croppedPath);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
     } finally {
       if (preparedPath != null) {
         try {
@@ -1541,7 +1644,7 @@ class _CardScannerPageState extends State<CardScannerPage>
               child: Text(
                 _autoScanBusy
                     ? 'Auto scan is checking this card...'
-                    : 'Reading the card and getting the price...',
+                    : 'Reading the card on your device and finding the match...',
                 style: const TextStyle(color: Colors.white),
               ),
             ),
@@ -1559,9 +1662,29 @@ class _CardScannerPageState extends State<CardScannerPage>
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(
-          _errorMessage!,
-          style: const TextStyle(color: Colors.white),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _errorMessage!,
+              style: const TextStyle(
+                color: Colors.white,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _openManualCardSearch,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.28),
+                ),
+              ),
+              icon: const Icon(Icons.search_rounded),
+              label: const Text('Search for the card manually'),
+            ),
+          ],
         ),
       ),
     );
@@ -1918,6 +2041,14 @@ class _CardScannerPageState extends State<CardScannerPage>
                     buildVariantChip(
                       value: QuickScanVariant.holo,
                       label: 'Holo',
+                    ),
+                    buildVariantChip(
+                      value: QuickScanVariant.pokeBallReverse,
+                      label: 'Poké Ball Reverse',
+                    ),
+                    buildVariantChip(
+                      value: QuickScanVariant.masterBallReverse,
+                      label: 'Master Ball Reverse',
                     ),
                   ],
                 ),
@@ -2314,6 +2445,21 @@ class _CardScannerPageState extends State<CardScannerPage>
           ),
         );
       }
+
+      children.add(
+        OutlinedButton.icon(
+          onPressed: _openManualCardSearch,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          icon: const Icon(Icons.search_rounded),
+          label: const Text('None of these — search manually'),
+        ),
+      );
     }
 
     if (!requiresConfirmation && primaryMatch != null) {

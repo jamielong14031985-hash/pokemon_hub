@@ -24,6 +24,7 @@ class CardDetailsPage extends StatefulWidget {
     this.addAsNormal = true,
     this.addAsReverseHolo = false,
     this.addAsHolo = false,
+    this.returnToWishlistAfterAdd = false,
   });
 
   final TcgCard card;
@@ -34,6 +35,10 @@ class CardDetailsPage extends StatefulWidget {
   final bool addAsNormal;
   final bool addAsReverseHolo;
   final bool addAsHolo;
+
+  /// When this card was opened from the current user's wishlist, return to the
+  /// wishlist after an owned copy is saved and the wishlist entry is removed.
+  final bool returnToWishlistAfterAdd;
 
   @override
   State<CardDetailsPage> createState() => _CardDetailsPageState();
@@ -190,6 +195,9 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
             ? '$selectedVersionLabel card added to Set Pokédex'
             : '$selectedVersionLabel now x$selectedVersionCount',
       );
+      if (mounted && widget.returnToWishlistAfterAdd) {
+        Navigator.of(context).pop();
+      }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -488,6 +496,10 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                     );
                                     if (updatedOwnership != null) {
                                       await _saveOwnership(updatedOwnership);
+                                      if (context.mounted &&
+                                          widget.returnToWishlistAfterAdd) {
+                                        Navigator.of(context).pop();
+                                      }
                                     }
                                   },
                                   child: Text(

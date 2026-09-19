@@ -16,6 +16,8 @@ class SealedProductListing {
     required this.condition,
     required this.sellerName,
     required this.location,
+    required this.listingDate,
+    required this.listingDateMs,
   });
 
   final String listingId;
@@ -30,19 +32,36 @@ class SealedProductListing {
   final String condition;
   final String sellerName;
   final String location;
+  final String listingDate;
+  final int listingDateMs;
 
   double get totalAmount => priceAmount + shippingAmount;
-
   bool get hasShippingCost => shippingAmount > 0;
+
+  String get listingDateText {
+    final trimmed = listingDate.trim();
+    if (trimmed.isEmpty && listingDateMs <= 0) return '';
+    DateTime? parsed;
+    if (listingDateMs > 0) {
+      parsed = DateTime.fromMillisecondsSinceEpoch(listingDateMs).toLocal();
+    } else {
+      parsed = DateTime.tryParse(trimmed)?.toLocal();
+    }
+    if (parsed == null) return trimmed;
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '${twoDigits(parsed.day)}/${twoDigits(parsed.month)}/${parsed.year}';
+  }
 
   factory SealedProductListing.fromMap(Map<String, dynamic> data) {
     double asDouble(Object? value) {
       if (value is num) return value.toDouble();
       return double.tryParse((value ?? '').toString()) ?? 0;
     }
-
+    int asInt(Object? value) {
+      if (value is num) return value.toInt();
+      return int.tryParse((value ?? '').toString()) ?? 0;
+    }
     String asString(Object? value) => (value ?? '').toString().trim();
-
     return SealedProductListing(
       listingId: asString(data['listingId']),
       title: asString(data['title']),
@@ -56,6 +75,8 @@ class SealedProductListing {
       condition: asString(data['condition']),
       sellerName: asString(data['sellerName']),
       location: asString(data['location']),
+      listingDate: asString(data['listingDate'] ?? data['soldDate']),
+      listingDateMs: asInt(data['listingDateMs'] ?? data['soldDateMs']),
     );
   }
 }
@@ -78,9 +99,7 @@ class SealedProductSearchResult {
 
 class SealedProductPriceException implements Exception {
   const SealedProductPriceException(this.message);
-
   final String message;
-
   @override
   String toString() => message;
 }
@@ -93,24 +112,21 @@ class SealedProductPriceService {
 
   static String friendlyErrorMessage(Object error) {
     if (error is SealedProductPriceException) return error.message;
-
     if (error is FirebaseFunctionsException) {
       final message = (error.message ?? '').trim();
       final lower = message.toLowerCase();
-
-      if (error.code == 'failed-precondition' &&
-          lower.contains('ebay credentials')) {
-        return 'Sealed prices are not connected yet. Add the eBay app credentials in Firebase Functions first.';
+      if (error.code == 'failed-precondition' && lower.contains('ebay credentials')) {
+        return 'Sealed product listings are not connected yet. Add the eBay app credentials in Firebase Functions first.';
       }
-
+      if (error.code == 'failed-precondition' || error.code == 'permission-denied') {
+        return 'eBay rejected the listing search credentials. Check the production eBay client ID and secret.';
+      }
       if (error.code == 'resource-exhausted' || lower.contains('rate limit')) {
         return 'eBay is busy right now. Please wait a moment and try again.';
       }
-
       if (message.isNotEmpty) return message;
     }
-
-    return 'Could not load current sealed listings right now. Please try again shortly.';
+    return 'Could not load sealed products for sale right now. Please try again shortly.';
   }
 
   static Future<SealedProductSearchResult> lookupCurrentListings({
@@ -120,48 +136,35 @@ class SealedProductPriceService {
   }) async {
     try {
       final callable = _functions.httpsCallable('lookupEbaySealedProducts');
-      final response = await callable.call<Map<String, dynamic>>(
-        <String, dynamic>{
-          'marketplaceCode': marketplaceCode,
-          'query': query.trim(),
-          'productType': productType,
-        },
-      ).timeout(const Duration(seconds: 35));
-
+      final response = await callable.call<Map<String, dynamic>>(<String, dynamic>{
+        'marketplaceCode': marketplaceCode,
+        'query': query.trim(),
+        'productType': productType,
+        'limit': 10,
+      }).timeout(const Duration(seconds: 35));
       final data = response.data;
       final rawItems = data['items'];
       final items = rawItems is List
           ? rawItems
               .whereType<Map>()
-              .map(
-                (item) => SealedProductListing.fromMap(
-                  Map<String, dynamic>.from(item),
-                ),
-              )
+              .map((item) => SealedProductListing.fromMap(Map<String, dynamic>.from(item)))
               .where((item) => item.title.isNotEmpty && item.priceAmount > 0)
+              .take(10)
               .toList(growable: false)
           : const <SealedProductListing>[];
-
       final rawLastUpdated = data['lastUpdatedMs'];
       final lastUpdatedMs = rawLastUpdated is num
           ? rawLastUpdated.toInt()
           : int.tryParse((rawLastUpdated ?? '').toString());
-
       return SealedProductSearchResult(
         items: items,
-        marketplaceCode: (data['marketplaceCode'] ?? marketplaceCode)
-            .toString()
-            .trim(),
-        marketplaceLabel: (data['marketplaceLabel'] ?? 'eBay')
-            .toString()
-            .trim(),
+        marketplaceCode: (data['marketplaceCode'] ?? marketplaceCode).toString().trim(),
+        marketplaceLabel: (data['marketplaceLabel'] ?? 'eBay').toString().trim(),
         lastUpdatedMs: lastUpdatedMs,
         cached: data['cached'] == true,
       );
     } on TimeoutException {
-      throw const SealedProductPriceException(
-        'eBay took too long to return sealed listings. Please try again shortly.',
-      );
+      throw const SealedProductPriceException('eBay took too long to return sealed products for sale. Please try again shortly.');
     } on FirebaseFunctionsException catch (error) {
       throw SealedProductPriceException(friendlyErrorMessage(error));
     }

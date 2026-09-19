@@ -94,7 +94,7 @@ class LocalPokedexStore {
       if (hasAnySavedCopies) {
         nonEmpty.add(setId);
       } else {
-        // Remove old empty/zero-copy local records so the Master Sets page
+        // Remove old empty/zero-copy local records so the Sets page
         // immediately stops showing this set.
         await prefs.remove(storageKeyForSet(setId));
       }
@@ -148,3 +148,4 @@ class LocalPokedexStore {
     return cardCopies;
   }
 }
+

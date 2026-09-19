@@ -143,4 +143,34 @@ class WishlistService {
       );
     }
   }
+
+  /// Removes exact card IDs after they have been saved to the user's Pokédex.
+  /// Firestore deletes are safe when a card is not currently in the wishlist.
+  static Future<void> removeOwnedCards({
+    required String ownerUid,
+    required Iterable<String> cardIds,
+  }) async {
+    final safeOwnerUid = ownerUid.trim();
+    if (safeOwnerUid.isEmpty) return;
+
+    final ids = cardIds
+        .map((cardId) => cardId.trim())
+        .where((cardId) => cardId.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return;
+
+    // Stay below Firestore's per-batch operation limit for very large sets.
+    const batchSize = 400;
+    for (var start = 0; start < ids.length; start += batchSize) {
+      final end = (start + batchSize).clamp(0, ids.length).toInt();
+      final batch = FirebaseFirestore.instance.batch();
+
+      for (final cardId in ids.sublist(start, end)) {
+        batch.delete(_collection(safeOwnerUid).doc(cardId));
+      }
+
+      await batch.commit().timeout(_kFirebaseWriteTimeout);
+    }
+  }
 }

@@ -9,6 +9,7 @@ import '../models/tcg_card.dart';
 import 'collection_refresh_notifier.dart';
 import 'community_image_services.dart';
 import 'local_custom_binder_store.dart';
+import 'wishlist_service.dart';
 
 class CustomBinderSyncService {
   static CollectionReference<Map<String, dynamic>> _binderCollection(String ownerUid) =>
@@ -250,6 +251,14 @@ class CustomBinderSyncService {
     );
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    try {
+      await WishlistService.removeOwnedCards(
+        ownerUid: user.uid,
+        cardIds: <String>[card.id],
+      );
+    } catch (_) {
+      // The binder save must still succeed if wishlist cleanup is offline.
+    }
     try {
       await syncBinderFromLocal(ownerUid: user.uid, binderId: binderId);
     } catch (_) {}

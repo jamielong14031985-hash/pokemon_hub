@@ -45,6 +45,9 @@ class _ParsedCardSearchQuery {
 
 class PokemonTcgService {
   static const String _baseUrl = 'https://api.pokemontcg.io/v2';
+  static const String _tcgDexHost = 'api.tcgdex.net';
+  static const Set<String> _tcgDexEnglishFallbackSetIds = <String>{'30th'};
+  static final Set<String> _thirtiethCelebrationSetIds = <String>{'30th'};
   static final Map<String, List<TcgCard>> _cardSearchCache = <String, List<TcgCard>>{};
   static final Map<String, Future<List<TcgCard>>> _cardSearchInFlight =
       <String, Future<List<TcgCard>>>{};
@@ -351,7 +354,7 @@ class PokemonTcgService {
       return List<TcgCard>.from(cards);
     }
 
-    final request = _searchCardsOnlyFromApi(cleanQuery);
+    final request = _searchCardsOnlyWithNewSetFallback(cleanQuery);
     _cardSearchInFlight[cacheKey] = request;
 
     try {
@@ -361,6 +364,77 @@ class PokemonTcgService {
     } finally {
       _cardSearchInFlight.remove(cacheKey);
     }
+  }
+
+  static Future<List<TcgCard>> _searchCardsOnlyWithNewSetFallback(
+    String cleanQuery,
+  ) async {
+    List<TcgCard> apiCards;
+    try {
+      apiCards = await _searchCardsOnlyFromApi(cleanQuery);
+    } catch (_) {
+      apiCards = const <TcgCard>[];
+    }
+
+    final cardsById = <String, TcgCard>{
+      for (final card in apiCards) card.id: card,
+    };
+
+    try {
+      final fallbackCards = await _searchTcgDexFallbackCards(cleanQuery);
+      for (final card in fallbackCards) {
+        cardsById.putIfAbsent(card.id, () => card);
+      }
+    } catch (_) {
+      // The primary Pokémon TCG API results are still useful if TCGdex is down.
+    }
+
+    final cards = cardsById.values.toList()
+      ..sort((a, b) => _compareCardSearchResults(a, b, cleanQuery));
+    return cards;
+  }
+
+  static Future<List<TcgCard>> _searchTcgDexFallbackCards(String query) async {
+    final cleanQuery = _normalizeSearchMatchText(query);
+    if (cleanQuery.isEmpty) return const <TcgCard>[];
+
+    final collectorNumber = _tryParseCollectorNumberQuery(query);
+    final queryTerms = cleanQuery
+        .split(' ')
+        .where((term) => term.isNotEmpty)
+        .toList();
+    final mentionsCelebration = queryTerms.any(
+      (term) => term == '30th' || term.startsWith('celebrat') || term == 'classic',
+    );
+    final nameTerms = queryTerms
+        .where(
+          (term) => term != '30th' && !term.startsWith('celebrat') && term != 'classic',
+        )
+        .toList();
+
+    final batches = await Future.wait(
+      _thirtiethCelebrationSetIds.map(fetchCardsBySet),
+    );
+    final allCards = batches.expand((cards) => cards).toList();
+
+    return allCards.where((card) {
+      if (collectorNumber != null) {
+        return _normalizeCollectorCardNumber(card.number) ==
+            _normalizeCollectorCardNumber(collectorNumber.cardNumber);
+      }
+
+      final normalizedName = _normalizeSearchMatchText(card.name);
+      final normalizedSet = _normalizeSearchMatchText(card.setName);
+      final termsToMatch = mentionsCelebration ? nameTerms : queryTerms;
+
+      if (termsToMatch.isEmpty) {
+        return mentionsCelebration;
+      }
+
+      return termsToMatch.every(
+        (term) => normalizedName.contains(term) || normalizedSet.contains(term),
+      );
+    }).take(200).toList();
   }
 
   static Future<List<TcgCard>> _searchCardsOnlyFromApi(String cleanQuery) async {
@@ -2452,7 +2526,7 @@ class PokemonTcgService {
       }
     }
 
-    final request = _fetchAllSetsFromApi();
+    final request = _fetchAllSetsFromApi(forceRefresh: forceRefresh);
 
     if (!forceRefresh) {
       _allSetsInFlight = request;
@@ -2498,39 +2572,180 @@ class PokemonTcgService {
     }
   }
 
-  static Future<List<TcgSet>> _fetchAllSetsFromApi() async {
+  static Future<List<TcgSet>> _fetchAllSetsFromApi({
+    bool forceRefresh = false,
+  }) async {
     final allSets = <TcgSet>[];
     int page = 1;
 
-    while (true) {
-      final uri = Uri.https('api.pokemontcg.io', '/v2/sets', {
-        'pageSize': '250',
-        'page': '$page',
-        'orderBy': '-releaseDate',
-        'select': 'id,name,series,printedTotal,total,releaseDate,images',
-      });
-      final data = await _getJsonMapWithDiskCache(
-        uri,
-        freshFor: _apiSetListDiskCacheFreshFor,
-      );
-      final items = (data['data'] as List<dynamic>? ?? []);
+    try {
+      while (true) {
+        final uri = Uri.https('api.pokemontcg.io', '/v2/sets', {
+          'pageSize': '250',
+          'page': '$page',
+          'orderBy': '-releaseDate',
+          'select': 'id,name,series,printedTotal,total,releaseDate,images',
+        });
+        final data = await _getJsonMapWithDiskCache(
+          uri,
+          freshFor: _apiSetListDiskCacheFreshFor,
+          forceRefresh: forceRefresh,
+        );
+        final items = (data['data'] as List<dynamic>? ?? []);
 
-      if (items.isEmpty) {
-        break;
+        if (items.isEmpty) {
+          break;
+        }
+
+        allSets.addAll(
+          items.map((item) => TcgSet.fromJson(item as Map<String, dynamic>)),
+        );
+
+        if (items.length < 250) {
+          break;
+        }
+
+        page++;
       }
-
-      allSets.addAll(
-        items.map((item) => TcgSet.fromJson(item as Map<String, dynamic>)),
-      );
-
-      if (items.length < 250) {
-        break;
+    } catch (_) {
+      // The API sometimes rejects its large sorted request when a new set is
+      // being published. Retry with small unsorted pages and sort locally.
+      try {
+        allSets
+          ..clear()
+          ..addAll(
+            await _fetchAllSetsWithSmallPages(
+              forceRefresh: forceRefresh,
+            ),
+          );
+      } catch (_) {
+        // Still load brand-new fallback sets below if the catalogue is down.
       }
+    }
 
-      page++;
+    try {
+      final fallbackSets = await _fetchTcgDexEnglishFallbackSets();
+      final existingNames = allSets
+          .map((set) => _normalizeSearchMatchText(set.name))
+          .toSet();
+      final existingIds = allSets.map((set) => set.id.toLowerCase()).toSet();
+
+      for (final set in fallbackSets) {
+        if (existingIds.contains(set.id.toLowerCase())) continue;
+        if (existingNames.contains(_normalizeSearchMatchText(set.name))) continue;
+        allSets.add(set);
+      }
+    } catch (_) {
+      // Keep the normal set list if the temporary new-set source is unavailable.
+    }
+
+    for (var index = 0; index < allSets.length; index++) {
+      final set = allSets[index];
+      if (!_isThirtiethCelebrationSetName(set.name)) continue;
+      allSets[index] = TcgSet(
+        id: set.id,
+        name: set.name,
+        series: set.series,
+        total: 199,
+        releaseDate: set.releaseDate,
+        logoUrl: set.logoUrl,
+        symbolUrl: set.symbolUrl,
+      );
+    }
+
+    allSets.sort((a, b) {
+      final dateCompare = b.releaseDate.compareTo(a.releaseDate);
+      if (dateCompare != 0) return dateCompare;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    for (final set in allSets) {
+      if (_isThirtiethCelebrationSetName(set.name)) {
+        _thirtiethCelebrationSetIds.add(set.id.toLowerCase());
+      }
     }
 
     return allSets;
+  }
+
+  static Future<List<TcgSet>> _fetchAllSetsWithSmallPages({
+    required bool forceRefresh,
+  }) async {
+    const pageSize = 10;
+
+    Future<Map<String, dynamic>> fetchPage(int page) {
+      final uri = Uri.https('api.pokemontcg.io', '/v2/sets', {
+        'pageSize': '$pageSize',
+        'page': '$page',
+      });
+      return _getJsonMapWithDiskCache(
+        uri,
+        freshFor: _apiSetListDiskCacheFreshFor,
+        forceRefresh: forceRefresh,
+      );
+    }
+
+    final firstPage = await fetchPage(1);
+    final totalCount = _readIntValue(firstPage['totalCount']) ?? 0;
+    final totalPages = math.max(1, (totalCount / pageSize).ceil());
+    final pageData = <Map<String, dynamic>>[firstPage];
+
+    if (totalPages > 1) {
+      const batchSize = 6;
+      for (var start = 2; start <= totalPages; start += batchSize) {
+        final end = math.min(start + batchSize, totalPages + 1);
+        final batch = await Future.wait(
+          [for (var page = start; page < end; page++) fetchPage(page)],
+        );
+        pageData.addAll(batch);
+      }
+    }
+
+    final setsById = <String, TcgSet>{};
+    for (final data in pageData) {
+      final items = data['data'] as List<dynamic>? ?? const <dynamic>[];
+      for (final item in items.whereType<Map>()) {
+        final set = TcgSet.fromJson(Map<String, dynamic>.from(item));
+        if (set.id.trim().isNotEmpty) {
+          setsById[set.id] = set;
+        }
+      }
+    }
+
+    return setsById.values.toList();
+  }
+
+  static Future<List<TcgSet>> _fetchTcgDexEnglishFallbackSets() async {
+    return Future.wait(
+      _tcgDexEnglishFallbackSetIds.map((setId) async {
+        final json = await _getTcgDexJsonMap('/v2/en/sets/$setId');
+        return _tcgDexSetFromJson(json);
+      }),
+    );
+  }
+
+  static TcgSet _tcgDexSetFromJson(Map<String, dynamic> json) {
+    final serie = json['serie'] is Map
+        ? Map<String, dynamic>.from(json['serie'] as Map)
+        : const <String, dynamic>{};
+    final cardCount = json['cardCount'] is Map
+        ? Map<String, dynamic>.from(json['cardCount'] as Map)
+        : const <String, dynamic>{};
+
+    final setName = (json['name'] ?? 'Unknown').toString();
+    return TcgSet(
+      id: (json['id'] ?? '').toString(),
+      name: setName,
+      series: (serie['name'] ?? 'Mega Evolution').toString(),
+      total: _isThirtiethCelebrationSetName(setName)
+          ? 199
+          : (_readIntValue(cardCount['total']) ??
+              _readIntValue(cardCount['official']) ??
+              0),
+      releaseDate: (json['releaseDate'] ?? '').toString().replaceAll('-', '/'),
+      logoUrl: _tcgDexSizedImageUrl(json['logo'], highResolution: true),
+      symbolUrl: _tcgDexSizedImageUrl(json['symbol'], highResolution: false),
+    );
   }
 
   static Future<List<TcgCard>> fetchCardsBySet(String setId) async {
@@ -2560,6 +2775,12 @@ class PokemonTcgService {
   }
 
   static Future<List<TcgCard>> _fetchAndCacheCardsBySet(String setId) async {
+    if (_thirtiethCelebrationSetIds.contains(setId.toLowerCase())) {
+      final cards = await _fetchTcgDexCardsBySet(setId);
+      _setCardsCache[setId] = List<TcgCard>.from(cards);
+      return cards;
+    }
+
     final cardsByKey = <String, TcgCard>{};
 
     final setRequest = _fetchSetById(setId);
@@ -2583,8 +2804,53 @@ class PokemonTcgService {
     // Fast first pass: official set id. This is normally enough for the full set,
     // including illustration rares, ultra rares, and secret rares. Run it in
     // parallel with the set metadata request so the page opens sooner.
-    final set = await setRequest;
-    addCards(await primaryCardsRequest);
+    TcgSet? set;
+    try {
+      final primaryResults = await Future.wait<Object?>(<Future<Object?>>[
+        setRequest,
+        primaryCardsRequest,
+      ]);
+      set = primaryResults[0] as TcgSet?;
+      addCards(primaryResults[1] as List<TcgCard>);
+    } catch (primaryError) {
+      // The main API occasionally returns a temporary 5xx response. TCGdex
+      // uses the same IDs for standard international sets, so keep the binder
+      // usable instead of leaving the user on an error screen.
+      try {
+        final fallbackJson = await _getTcgDexJsonMap('/v2/en/sets/$setId');
+        final fallbackSet = _tcgDexSetFromJson(fallbackJson);
+        final rawCards = fallbackJson['cards'];
+        if (rawCards is List) {
+          for (final item in rawCards.whereType<Map>()) {
+            addCards(
+              <TcgCard>[
+                _tcgDexCardBriefToTcgCard(
+                  Map<String, dynamic>.from(item),
+                  TcgSet(
+                    id: setId,
+                    name: fallbackSet.name,
+                    series: fallbackSet.series,
+                    total: fallbackSet.total,
+                    releaseDate: fallbackSet.releaseDate,
+                    logoUrl: fallbackSet.logoUrl,
+                    symbolUrl: fallbackSet.symbolUrl,
+                  ),
+                ),
+              ],
+            );
+          }
+        }
+        if (cardsByKey.isNotEmpty) {
+          final fallbackCards = cardsByKey.values.toList()
+            ..sort((a, b) => compareCardNumbers(a.number, b.number));
+          _setCardsCache[setId] = List<TcgCard>.from(fallbackCards);
+          return fallbackCards;
+        }
+      } catch (_) {
+        // Report the original API error if both card sources are unavailable.
+      }
+      throw Exception('Could not load cards: $primaryError');
+    }
 
     final expectedTotal = set?.total ?? 0;
     final setNameFromApi = set?.name.trim() ?? '';
@@ -2594,52 +2860,60 @@ class PokemonTcgService {
     final setName = setNameFromApi.isNotEmpty ? setNameFromApi : setNameFromCards;
 
     // Only do the slower exact-name fallback if the set id result looks incomplete.
-    // This keeps Master Sets fast while still rescuing special cards when needed.
+    // This keeps Sets fast while still rescuing special cards when needed.
     final needsFallbackByName =
         setName.isNotEmpty && (expectedTotal <= 0 || cardsByKey.length < expectedTotal);
 
     if (needsFallbackByName) {
-      addCards(
-        (await _fetchCardsForSetQuery(
-          'set.name:"${_escapeTcgQueryValue(setName)}"',
-          orderBy: 'number',
-          maxPages: 4,
-        )).where(
-          (card) => _cardBelongsToRequestedSet(
-            card: card,
-            setId: setId,
-            setName: setName,
+      try {
+        addCards(
+          (await _fetchCardsForSetQuery(
+            'set.name:"${_escapeTcgQueryValue(setName)}"',
+            orderBy: 'number',
+            maxPages: 4,
+          )).where(
+            (card) => _cardBelongsToRequestedSet(
+              card: card,
+              setId: setId,
+              setName: setName,
+            ),
           ),
-        ),
-      );
+        );
+      } catch (_) {
+        // Keep the complete first-pass result if a rescue request fails.
+      }
     }
 
     // Rare fallback is now deliberately small and only runs when the set still
     // looks incomplete. The previous version checked too many rarity searches and
-    // made Master Sets feel slow.
+    // made Sets feel slow.
     if (setName.isNotEmpty && expectedTotal > 0 && cardsByKey.length < expectedTotal) {
       final remainingGap = expectedTotal - cardsByKey.length;
       if (remainingGap <= 120) {
-        final rarityCards = await Future.wait(
-          _fastMasterSetRarityQueries.map(
-            (rarityQuery) => _fetchCardsForSetQuery(
-              'set.name:"${_escapeTcgQueryValue(setName)}" $rarityQuery',
-              orderBy: 'number',
-              maxPages: 2,
-            ),
-          ),
-        );
-
-        for (final batch in rarityCards) {
-          addCards(
-            batch.where(
-              (card) => _cardBelongsToRequestedSet(
-                card: card,
-                setId: setId,
-                setName: setName,
+        try {
+          final rarityCards = await Future.wait(
+            _fastMasterSetRarityQueries.map(
+              (rarityQuery) => _fetchCardsForSetQuery(
+                'set.name:"${_escapeTcgQueryValue(setName)}" $rarityQuery',
+                orderBy: 'number',
+                maxPages: 2,
               ),
             ),
           );
+
+          for (final batch in rarityCards) {
+            addCards(
+              batch.where(
+                (card) => _cardBelongsToRequestedSet(
+                  card: card,
+                  setId: setId,
+                  setName: setName,
+                ),
+              ),
+            );
+          }
+        } catch (_) {
+          // Optional rarity rescue must not stop an otherwise usable binder.
         }
       }
     }
@@ -2647,18 +2921,294 @@ class PokemonTcgService {
     // Final rescue: only fill a small number of missing numbers. If a set is
     // missing dozens of cards, individual lookups are too slow and usually means
     // the online database has not added those cards yet.
-    await _fillMissingSetNumbers(
-      cardsByKey: cardsByKey,
-      setId: setId,
-      setName: setName,
-      expectedTotal: expectedTotal,
-    );
+    try {
+      await _fillMissingSetNumbers(
+        cardsByKey: cardsByKey,
+        setId: setId,
+        setName: setName,
+        expectedTotal: expectedTotal,
+      );
+    } catch (_) {
+      // Individual missing-card lookups are optional rescue requests.
+    }
 
     final allCards = cardsByKey.values.toList()
       ..sort((a, b) => compareCardNumbers(a.number, b.number));
 
     _setCardsCache[setId] = List<TcgCard>.from(allCards);
     return allCards;
+  }
+
+  static Future<List<TcgCard>> _fetchTcgDexCardsBySet(String setId) async {
+    final responses = await Future.wait(<Future<Map<String, dynamic>>>[
+      _getTcgDexJsonMap('/v2/en/sets/30th'),
+      _getTcgDexJsonMap('/v2/en/sets/30th-c'),
+      _getTcgDexJsonMap('/v2/en/sets/mee'),
+    ]);
+    final mainJson = responses[0];
+    final classicJson = responses[1];
+    final energyJson = responses[2];
+    final fallbackSet = _tcgDexSetFromJson(mainJson);
+    final set = TcgSet(
+      id: setId,
+      name: '30th Celebration',
+      series: fallbackSet.series,
+      total: 199,
+      releaseDate: fallbackSet.releaseDate,
+      logoUrl: fallbackSet.logoUrl,
+      symbolUrl: fallbackSet.symbolUrl,
+    );
+
+    final cards = <TcgCard>[];
+
+    // The primary API added the complete English release after launch. Prefer
+    // those records because they include the finished artwork and full card
+    // details for the main set, all three RGB Mew cards, and the 30-card
+    // Classic Collection. TCGdex remains the fallback for release-day outages
+    // and supplies the official Classic Collection checklist order.
+    List<TcgCard> officialMain = const <TcgCard>[];
+    List<TcgCard> officialClassic = const <TcgCard>[];
+    try {
+      final officialBatches = await Future.wait(<Future<List<TcgCard>>>[
+        _fetchCardsForSetQuery(
+          'set.id:me55',
+          orderBy: 'number',
+          maxPages: 4,
+        ),
+        _fetchCardsForSetQuery(
+          'set.id:me55c',
+          orderBy: 'number',
+          maxPages: 2,
+        ),
+      ]);
+      officialMain = officialBatches[0];
+      officialClassic = officialBatches[1];
+    } catch (_) {
+      // Continue with the cached TCGdex records when the primary API is down.
+    }
+
+    void addCardsFrom(
+      Map<String, dynamic> source, {
+      String numberPrefix = '',
+      int numberOffset = 0,
+    }) {
+      final rawCards = source['cards'];
+      if (rawCards is! List) return;
+
+      for (final item in rawCards.whereType<Map>()) {
+        final json = Map<String, dynamic>.from(item);
+        final rawNumber = (json['localId'] ?? json['number'] ?? '').toString();
+        final parsedNumber = int.tryParse(rawNumber);
+        if (parsedNumber != null) {
+          json['localId'] = '$numberPrefix${(parsedNumber + numberOffset).toString().padLeft(3, '0')}';
+        } else if (numberPrefix.isNotEmpty) {
+          json['localId'] = '$numberPrefix$rawNumber';
+        }
+        cards.add(_tcgDexCardBriefToTcgCard(json, set));
+      }
+    }
+
+    if (officialMain.length >= 158) {
+      for (final card in officialMain) {
+        final rgbNumber = switch (card.number.trim().toUpperCase()) {
+          'R' => 'R/RGB',
+          'G' => 'G/RGB',
+          'B' => 'B/RGB',
+          final number => number,
+        };
+        cards.add(
+          card.copyWith(
+            setId: set.id,
+            setName: set.name,
+            number: rgbNumber,
+            setLogoUrl: set.logoUrl,
+          ),
+        );
+      }
+    } else {
+      addCardsFrom(mainJson);
+    }
+
+    // TCGdex is temporarily missing the three mythical RGB Mew cards. They use
+    // R/RGB, G/RGB and B/RGB rather than ordinary 159-161 collector numbers.
+    // Stable placeholders let them be searched, collected and put in binders
+    // while the official artwork feed catches up.
+    const rgbMewCards = <MapEntry<String, String>>[
+      MapEntry<String, String>('red', 'R/RGB'),
+      MapEntry<String, String>('green', 'G/RGB'),
+      MapEntry<String, String>('blue', 'B/RGB'),
+    ];
+    final existingNumbers = cards.map((card) => card.number.toUpperCase()).toSet();
+    for (final rgbCard in rgbMewCards) {
+      if (existingNumbers.contains(rgbCard.value)) continue;
+      cards.add(
+        TcgCard(
+          id: '30th-mew-rgb-${rgbCard.key}',
+          name: 'Mew',
+          setId: set.id,
+          setName: set.name,
+          number: rgbCard.value,
+          types: const <String>['Psychic'],
+          rarity: 'Secret Rare',
+          setLogoUrl: set.logoUrl,
+          rawPrice: null,
+          rawPriceSource: 'TCGdex',
+        ),
+      );
+    }
+
+    // The eight pack-in foil Energies use checklist numbers MEE 009-016.
+    addCardsFrom(energyJson, numberPrefix: 'MEE', numberOffset: 8);
+    const energyImageIds = <int>[
+      713248,
+      713249,
+      713250,
+      713251,
+      713252,
+      713253,
+      713254,
+      713255,
+    ];
+    for (var index = 0; index < energyImageIds.length; index++) {
+      final number = 'MEE${(index + 9).toString().padLeft(3, '0')}';
+      final cardIndex = cards.indexWhere(
+        (card) => card.number.toUpperCase() == number,
+      );
+      if (cardIndex < 0) continue;
+      final imageId = energyImageIds[index];
+      cards[cardIndex] = cards[cardIndex].copyWith(
+        imageUrl:
+            'https://product-images.tcgplayer.com/fit-in/437x437/$imageId.jpg',
+        largeImageUrl: 'https://product-images.tcgplayer.com/$imageId.jpg',
+      );
+    }
+
+    // Classic Collection is part of the same 199-card master checklist. Match
+    // the complete primary-API cards to TCGdex's 001-030 checklist so PocketChase
+    // keeps its CC ordering while displaying the real artwork and card details.
+    String classicMatchKey(String value) {
+      var key = _normalizeSearchMatchText(value);
+      // TCGdex currently labels this reprint as "Palkia", while the completed
+      // primary record correctly includes its printed "LV.X" suffix.
+      if (key.endsWith(' lv x')) key = key.substring(0, key.length - 5).trim();
+      return key;
+    }
+
+    final officialClassicByName = <String, List<TcgCard>>{};
+    for (final card in officialClassic) {
+      officialClassicByName
+          .putIfAbsent(classicMatchKey(card.name), () => <TcgCard>[])
+          .add(card);
+    }
+    for (final matchingCards in officialClassicByName.values) {
+      matchingCards.sort((a, b) => compareCardNumbers(a.number, b.number));
+    }
+    final rawClassicCards = classicJson['cards'];
+    var addedCompleteClassicCollection = false;
+    if (rawClassicCards is List && officialClassicByName.isNotEmpty) {
+      var matchedCount = 0;
+      for (final item in rawClassicCards.whereType<Map>()) {
+        final json = Map<String, dynamic>.from(item);
+        final name = (json['name'] ?? '').toString();
+        final matchingCards = officialClassicByName[classicMatchKey(name)];
+        if (matchingCards == null || matchingCards.isEmpty) continue;
+        final officialCard = matchingCards.removeAt(0);
+        final rawNumber = (json['localId'] ?? json['number'] ?? '').toString();
+        final parsedNumber = int.tryParse(rawNumber);
+        final checklistNumber = parsedNumber == null
+            ? 'CC$rawNumber'
+            : 'CC${parsedNumber.toString().padLeft(3, '0')}';
+        cards.add(
+          officialCard.copyWith(
+            setId: set.id,
+            setName: set.name,
+            number: checklistNumber,
+            setLogoUrl: set.logoUrl,
+          ),
+        );
+        matchedCount++;
+      }
+      addedCompleteClassicCollection = matchedCount == 30;
+      if (!addedCompleteClassicCollection && matchedCount > 0) {
+        cards.removeWhere((card) => card.number.toUpperCase().startsWith('CC'));
+      }
+    }
+    if (!addedCompleteClassicCollection) {
+      addCardsFrom(classicJson, numberPrefix: 'CC');
+    }
+
+    cards.sort((a, b) => compareCardNumbers(a.number, b.number));
+    return cards;
+  }
+
+  static bool _isThirtiethCelebrationSetName(String value) {
+    final normalized = _normalizeSearchMatchText(value);
+    return normalized == '30th celebration' ||
+        normalized.contains('30th anniversary');
+  }
+
+  static TcgCard _tcgDexCardBriefToTcgCard(
+    Map<String, dynamic> json,
+    TcgSet set,
+  ) {
+    final imageBase = (json['image'] ?? '').toString().trim();
+    final variants = json['variants'] is Map
+        ? Map<String, dynamic>.from(json['variants'] as Map)
+        : const <String, dynamic>{};
+    final hasExactVariantData = variants.isNotEmpty;
+    return TcgCard(
+      id: (json['id'] ?? '${set.id}-${json['localId'] ?? ''}').toString(),
+      name: (json['name'] ?? 'Unknown').toString(),
+      setId: set.id,
+      setName: set.name,
+      number: (json['localId'] ?? json['number'] ?? 'Unknown').toString(),
+      types: const <String>[],
+      imageUrl: _tcgDexSizedImageUrl(imageBase, highResolution: false),
+      largeImageUrl: _tcgDexSizedImageUrl(imageBase, highResolution: true),
+      setLogoUrl: set.logoUrl,
+      rawPrice: null,
+      rawPriceSource: 'TCGdex',
+      hasNormalVariant:
+          hasExactVariantData ? variants['normal'] == true : null,
+      hasReverseHoloVariant:
+          hasExactVariantData ? variants['reverse'] == true : null,
+      hasHoloVariant: hasExactVariantData ? variants['holo'] == true : null,
+    );
+  }
+
+  static String? _tcgDexSizedImageUrl(
+    dynamic value, {
+    required bool highResolution,
+  }) {
+    final base = (value ?? '').toString().trim();
+    if (base.isEmpty) return null;
+    if (base.endsWith('.png') || base.endsWith('.jpg') || base.endsWith('.webp')) {
+      return base;
+    }
+    return '$base/${highResolution ? 'high' : 'low'}.png';
+  }
+
+  static Future<Map<String, dynamic>> _getTcgDexJsonMap(String path) async {
+    final uri = Uri.https(_tcgDexHost, path);
+    Object? lastError;
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await _getJsonMapWithDiskCache(
+          uri,
+          freshFor: _apiSetListDiskCacheFreshFor,
+        );
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 450 * (attempt + 1)),
+          );
+        }
+      }
+    }
+
+    throw Exception('TCGdex could not load the new set: $lastError');
   }
 
   static const List<String> _fastMasterSetRarityQueries = <String>[
@@ -2783,7 +3333,7 @@ class PokemonTcgService {
     final name = setName.toLowerCase().trim();
 
     // These promo sets use generic Black Star / Promo artwork in the API.
-    // For the Master Sets page, show the matching original era/base-set logo.
+    // For the Sets page, show the matching original era/base-set logo.
     if (id.startsWith('svp') || name.contains('scarlet') && name.contains('violet')) {
       return 'sv1';
     }
@@ -3159,3 +3709,4 @@ class PokemonTcgService {
     return fetchCardById(cardId, forceRefresh: true);
   }
 }
+

@@ -709,7 +709,7 @@ class _SendFeedbackPageState extends State<SendFeedbackPage> {
               decoration: _inputDecoration(
                 label: 'Steps to repeat the problem',
                 hint:
-                    'Example: 1. Open Master Sets\n2. Tap Base Set\n3. Hold Weedle...',
+                    'Example: 1. Open Sets\n2. Tap Base Set\n3. Hold Weedle...',
                 icon: Icons.format_list_numbered_outlined,
               ),
             ),
@@ -855,3 +855,4 @@ class _UploadedFeedbackImage {
     };
   }
 }
+

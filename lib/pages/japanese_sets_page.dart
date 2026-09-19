@@ -1016,20 +1016,39 @@ class _JapaneseSetPokedexPageState extends State<JapaneseSetPokedexPage> {
   List<MasterSetCardSlot> _buildJapaneseMasterSetSlots(List<TcgCard> cards) {
     final slots = <MasterSetCardSlot>[];
     final seen = <String>{};
+    final setId = widget.set.id.trim().toLowerCase();
+    final isJapanese151 = setId == 'sv2a';
 
-    // Japanese sets already list each printed card separately in TCGdex.
-    // Do not create English-style Normal / Reverse Holo / Holo duplicate slots.
     for (final card in cards) {
-      final key = card.id.trim().isNotEmpty
-          ? card.id.trim().toLowerCase()
-          : '${card.setId.trim().toLowerCase()}_${card.number.trim().toLowerCase()}_${card.name.trim().toLowerCase()}';
-      if (seen.add(key)) {
+      void addSlot(MasterSetSlotKind kind) {
+        final key = card.id.trim().isNotEmpty
+            ? '${card.id.trim().toLowerCase()}_${kind.name}'
+            : '${card.setId.trim().toLowerCase()}_${card.number.trim().toLowerCase()}_${card.name.trim().toLowerCase()}_${kind.name}';
+        if (!seen.add(key)) return;
+
         slots.add(
           MasterSetCardSlot(
             card: card,
-            kind: MasterSetSlotKind.normal,
+            kind: kind,
           ),
         );
+      }
+
+      // Japanese sets list each printed card separately, so every card gets
+      // its printed-card slot first.
+      addSlot(MasterSetSlotKind.normal);
+
+      // PocketChase counts Japanese 151 master set as 360 slots:
+      // 210 printed cards + 150 Poke Ball reverse slots for cards 001-150.
+      if (isJapanese151 && _isJapanese151ReverseEligible(card)) {
+        addSlot(MasterSetSlotKind.pokeBallReverse);
+      }
+
+      // The model/helper files now support Master Ball reverses separately.
+      // Leave this disabled unless you want Japanese 151 grand master to count
+      // Master Ball reverses in addition to the 360-card master set.
+      if (isJapanese151 && _includeJapanese151MasterBallReverseSlots && _isJapanese151MasterBallEligible(card)) {
+        addSlot(MasterSetSlotKind.masterBallReverse);
       }
     }
 
@@ -1037,10 +1056,31 @@ class _JapaneseSetPokedexPageState extends State<JapaneseSetPokedexPage> {
       final numberCompare = compareCardNumbers(a.card.number, b.card.number);
       if (numberCompare != 0) return numberCompare;
 
-      return a.card.name.toLowerCase().compareTo(b.card.name.toLowerCase());
+      final nameCompare = a.card.name.toLowerCase().compareTo(b.card.name.toLowerCase());
+      if (nameCompare != 0) return nameCompare;
+
+      return a.kind.index.compareTo(b.kind.index);
     });
 
     return slots;
+  }
+
+  static const bool _includeJapanese151MasterBallReverseSlots = false;
+
+  int _leadingCardNumber(TcgCard card) {
+    final match = RegExp(r'\d+').firstMatch(card.number.trim());
+    if (match == null) return 0;
+    return int.tryParse(match.group(0) ?? '') ?? 0;
+  }
+
+  bool _isJapanese151ReverseEligible(TcgCard card) {
+    final number = _leadingCardNumber(card);
+    return number >= 1 && number <= 150;
+  }
+
+  bool _isJapanese151MasterBallEligible(TcgCard card) {
+    final number = _leadingCardNumber(card);
+    return number >= 1 && number <= 150;
   }
 
   Widget _buildOwnedColourState({
@@ -1913,6 +1953,13 @@ class JapaneseTcgDexService {
   static final Map<String, Future<JapaneseTcgSetDetails>> _detailsInFlight =
       <String, Future<JapaneseTcgSetDetails>>{};
 
+  // The set endpoint returns CardBrief objects, which do not include rarity.
+  // Cache the rarity from the full-card endpoint so every Japanese card can
+  // display its own C / U / R / RR / AR / SR / SAR / UR etc. badge.
+  static final Map<String, String> _cardRarityCache = <String, String>{};
+  static final Map<String, Future<String>> _cardRarityInFlight =
+      <String, Future<String>>{};
+
   static Future<List<JapaneseTcgSet>> fetchSets({bool forceRefresh = false}) async {
     final cached = _cachedSets;
     if (!forceRefresh && cached != null) {
@@ -2200,9 +2247,15 @@ class JapaneseTcgDexService {
   }
 
   static Future<JapaneseTcgSetDetails> _fetchSetDetailsFromApi(String setId) async {
-    final uri = Uri.https(_host, '/v2/$_language/sets/${Uri.encodeComponent(setId)}');
+    final uri = Uri.https(
+      _host,
+      '/v2/$_language/sets/${Uri.encodeComponent(setId)}',
+    );
     final response = await http
-        .get(uri, headers: const <String, String>{'accept': 'application/json'})
+        .get(
+          uri,
+          headers: const <String, String>{'accept': 'application/json'},
+        )
         .timeout(const Duration(seconds: 18));
 
     if (response.statusCode != 200) {
@@ -2214,7 +2267,113 @@ class JapaneseTcgDexService {
       throw Exception('TCGdex returned unexpected set detail data.');
     }
 
-    return JapaneseTcgSetDetails.fromJson(Map<String, dynamic>.from(decoded));
+    final basicDetails = JapaneseTcgSetDetails.fromJson(
+      Map<String, dynamic>.from(decoded),
+    );
+
+    // TCGdex's set endpoint contains CardBrief entries only. CardBrief does not
+    // include rarity, so load the full card records in controlled batches.
+    //
+    // Results are cached by card id, so once a Japanese card has been loaded
+    // during this app session it will not need another rarity request.
+    return _enrichSetDetailsWithCardRarities(basicDetails);
+  }
+
+  static Future<JapaneseTcgSetDetails> _enrichSetDetailsWithCardRarities(
+    JapaneseTcgSetDetails details,
+  ) async {
+    if (details.cards.isEmpty) return details;
+
+    final enrichedCards = <JapaneseTcgCardBrief>[];
+    const batchSize = 18;
+
+    for (var start = 0; start < details.cards.length; start += batchSize) {
+      final end = (start + batchSize).clamp(0, details.cards.length).toInt();
+      final batch = details.cards.sublist(start, end);
+
+      final enrichedBatch = await Future.wait(
+        batch.map(_enrichCardRarity),
+      );
+
+      enrichedCards.addAll(enrichedBatch);
+    }
+
+    return JapaneseTcgSetDetails(
+      id: details.id,
+      name: details.name,
+      series: details.series,
+      logoUrl: details.logoUrl,
+      symbolUrl: details.symbolUrl,
+      releaseDate: details.releaseDate,
+      cardCount: details.cardCount,
+      cards: enrichedCards,
+    );
+  }
+
+  static Future<JapaneseTcgCardBrief> _enrichCardRarity(
+    JapaneseTcgCardBrief card,
+  ) async {
+    if (card.rarity.trim().isNotEmpty) {
+      return card;
+    }
+
+    final rarity = await _fetchJapaneseCardRarity(card.id);
+
+    if (rarity.trim().isEmpty) {
+      return card;
+    }
+
+    return card.copyWith(rarity: rarity);
+  }
+
+  static Future<String> _fetchJapaneseCardRarity(String cardId) async {
+    final cleanId = cardId.trim();
+    if (cleanId.isEmpty) return '';
+
+    final cached = _cardRarityCache[cleanId];
+    if (cached != null) return cached;
+
+    final inFlight = _cardRarityInFlight[cleanId];
+    if (inFlight != null) return inFlight;
+
+    final request = () async {
+      try {
+        final uri = Uri.https(
+          _host,
+          '/v2/$_language/cards/${Uri.encodeComponent(cleanId)}',
+        );
+
+        final response = await http
+            .get(
+              uri,
+              headers: const <String, String>{'accept': 'application/json'},
+            )
+            .timeout(const Duration(seconds: 8));
+
+        if (response.statusCode != 200) {
+          return '';
+        }
+
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map) {
+          return '';
+        }
+
+        final rarity = _text(decoded['rarity']);
+        _cardRarityCache[cleanId] = rarity;
+        return rarity;
+      } catch (_) {
+        return '';
+      }
+    }();
+
+    _cardRarityInFlight[cleanId] = request;
+
+    try {
+      return await request;
+    } finally {
+      _cardRarityInFlight.remove(cleanId);
+    }
   }
 }
 
@@ -2315,6 +2474,7 @@ class JapaneseTcgCardBrief {
     required this.name,
     required this.image,
     required this.types,
+    this.rarity = '',
   });
 
   final String id;
@@ -2323,6 +2483,12 @@ class JapaneseTcgCardBrief {
   final String image;
   final List<String> types;
 
+  /// TCGdex full-card rarity.
+  ///
+  /// The set endpoint normally returns CardBrief objects without this field,
+  /// so JapaneseTcgDexService enriches the cards from /cards/{id}.
+  final String rarity;
+
   factory JapaneseTcgCardBrief.fromJson(Map<String, dynamic> json) {
     return JapaneseTcgCardBrief(
       id: _text(json['id']),
@@ -2330,6 +2496,25 @@ class JapaneseTcgCardBrief {
       name: _text(json['name']),
       image: _text(json['image']),
       types: _stringList(json['types'] ?? json['type']),
+      rarity: _text(json['rarity']),
+    );
+  }
+
+  JapaneseTcgCardBrief copyWith({
+    String? id,
+    String? localId,
+    String? name,
+    String? image,
+    List<String>? types,
+    String? rarity,
+  }) {
+    return JapaneseTcgCardBrief(
+      id: id ?? this.id,
+      localId: localId ?? this.localId,
+      name: name ?? this.name,
+      image: image ?? this.image,
+      types: types ?? this.types,
+      rarity: rarity ?? this.rarity,
     );
   }
 
@@ -2370,7 +2555,7 @@ class JapaneseTcgCardBrief {
       setId: 'jp_$japaneseSetId',
       setName: set.displayName,
       number: displayNumber.isEmpty ? 'Unknown' : displayNumber,
-      rarity: null,
+      rarity: rarity.trim().isEmpty ? null : rarity.trim(),
       hp: null,
       artist: null,
       flavorText: null,

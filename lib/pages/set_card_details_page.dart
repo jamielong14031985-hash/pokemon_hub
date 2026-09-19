@@ -371,6 +371,9 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
   late int normalCopies;
   late int reverseHoloCopies;
   late int holoCopies;
+  late int pokeBallReverseCopies;
+  late int masterBallReverseCopies;
+  late Map<String, int> extraVariantCopies;
   late MasterSetSlotKind selectedSlotKind;
   late String condition;
   late String gradingCompany;
@@ -387,10 +390,22 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
   @override
   void initState() {
     super.initState();
-    normalCopies = widget.ownership.normalCount;
-    reverseHoloCopies = widget.ownership.reverseHoloCount;
-    holoCopies = widget.ownership.holoCount;
-    selectedSlotKind = _initialSelectedSlotKind();
+    if (isSinglePrintSetCard(widget.card)) {
+      normalCopies = widget.ownership.collectionCount;
+      reverseHoloCopies = 0;
+      holoCopies = 0;
+      pokeBallReverseCopies = 0;
+      masterBallReverseCopies = 0;
+      selectedSlotKind = MasterSetSlotKind.normal;
+    } else {
+      normalCopies = widget.ownership.normalCount;
+      reverseHoloCopies = widget.ownership.reverseHoloCount;
+      holoCopies = widget.ownership.holoCount;
+      pokeBallReverseCopies = widget.ownership.pokeBallReverseCount;
+      masterBallReverseCopies = widget.ownership.masterBallReverseCount;
+      selectedSlotKind = _initialSelectedSlotKind();
+    }
+    extraVariantCopies = Map<String, int>.from(widget.ownership.extraVariantCopies);
     condition = normaliseCardCondition(widget.ownership.condition);
     gradingCompany = widget.ownership.gradingCompany.trim();
     _gradeController = TextEditingController(text: formatCardGrade(widget.ownership.grade));
@@ -424,16 +439,27 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
     return value;
   }
 
-  int get _totalCopies => normalCopies + reverseHoloCopies + holoCopies;
+  int get _totalCopies =>
+      normalCopies +
+      reverseHoloCopies +
+      holoCopies +
+      pokeBallReverseCopies +
+      masterBallReverseCopies +
+      extraVariantCopies.values.fold<int>(0, (total, value) => total + (value > 0 ? value : 0));
 
   CardOwnership get _currentOwnership => CardOwnership(
         normal: normalCopies > 0,
         reverseHolo: reverseHoloCopies > 0,
         holo: holoCopies > 0,
+        pokeBallReverse: pokeBallReverseCopies > 0,
+        masterBallReverse: masterBallReverseCopies > 0,
         copies: _totalCopies,
         normalCopies: normalCopies,
         reverseHoloCopies: reverseHoloCopies,
         holoCopies: holoCopies,
+        pokeBallReverseCopies: pokeBallReverseCopies,
+        masterBallReverseCopies: masterBallReverseCopies,
+        extraVariantCopies: Map<String, int>.unmodifiable(extraVariantCopies),
         condition: condition,
         gradingCompany: gradingCompany,
         grade: _currentGradeValue(),
@@ -458,11 +484,30 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
   String _labelForKind(MasterSetSlotKind kind) {
     switch (kind) {
       case MasterSetSlotKind.normal:
+        if (isSinglePrintSetCard(widget.card)) return 'Holo';
         return 'Normal';
       case MasterSetSlotKind.reverseHolo:
         return 'Reverse Holo';
       case MasterSetSlotKind.holo:
         return 'Holo';
+      case MasterSetSlotKind.pokeBallReverse:
+        return 'Poke Ball Reverse';
+      case MasterSetSlotKind.masterBallReverse:
+        return 'Master Ball Reverse';
+      case MasterSetSlotKind.firstEditionNormal:
+      case MasterSetSlotKind.firstEditionHolo:
+      case MasterSetSlotKind.unlimitedNormal:
+      case MasterSetSlotKind.unlimitedHolo:
+      case MasterSetSlotKind.shadowlessNormal:
+      case MasterSetSlotKind.shadowlessHolo:
+      case MasterSetSlotKind.cosmosHolo:
+      case MasterSetSlotKind.crackedIceHolo:
+      case MasterSetSlotKind.setStamped:
+      case MasterSetSlotKind.prereleaseStamped:
+      case MasterSetSlotKind.staffStamped:
+      case MasterSetSlotKind.leagueStamped:
+      case MasterSetSlotKind.productExclusive:
+        return kind.displayLabel;
     }
   }
 
@@ -474,6 +519,24 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
         return reverseHoloCopies;
       case MasterSetSlotKind.holo:
         return holoCopies;
+      case MasterSetSlotKind.pokeBallReverse:
+        return pokeBallReverseCopies;
+      case MasterSetSlotKind.masterBallReverse:
+        return masterBallReverseCopies;
+      case MasterSetSlotKind.firstEditionNormal:
+      case MasterSetSlotKind.firstEditionHolo:
+      case MasterSetSlotKind.unlimitedNormal:
+      case MasterSetSlotKind.unlimitedHolo:
+      case MasterSetSlotKind.shadowlessNormal:
+      case MasterSetSlotKind.shadowlessHolo:
+      case MasterSetSlotKind.cosmosHolo:
+      case MasterSetSlotKind.crackedIceHolo:
+      case MasterSetSlotKind.setStamped:
+      case MasterSetSlotKind.prereleaseStamped:
+      case MasterSetSlotKind.staffStamped:
+      case MasterSetSlotKind.leagueStamped:
+      case MasterSetSlotKind.productExclusive:
+        return extraVariantCopies[kind.storageId] ?? 0;
     }
   }
 
@@ -489,11 +552,36 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
       case MasterSetSlotKind.holo:
         holoCopies = safeCount;
         break;
+      case MasterSetSlotKind.pokeBallReverse:
+        pokeBallReverseCopies = safeCount;
+        break;
+      case MasterSetSlotKind.masterBallReverse:
+        masterBallReverseCopies = safeCount;
+        break;
+      case MasterSetSlotKind.firstEditionNormal:
+      case MasterSetSlotKind.firstEditionHolo:
+      case MasterSetSlotKind.unlimitedNormal:
+      case MasterSetSlotKind.unlimitedHolo:
+      case MasterSetSlotKind.shadowlessNormal:
+      case MasterSetSlotKind.shadowlessHolo:
+      case MasterSetSlotKind.cosmosHolo:
+      case MasterSetSlotKind.crackedIceHolo:
+      case MasterSetSlotKind.setStamped:
+      case MasterSetSlotKind.prereleaseStamped:
+      case MasterSetSlotKind.staffStamped:
+      case MasterSetSlotKind.leagueStamped:
+      case MasterSetSlotKind.productExclusive:
+        if (safeCount > 0) {
+          extraVariantCopies[kind.storageId] = safeCount;
+        } else {
+          extraVariantCopies.remove(kind.storageId);
+        }
+        break;
     }
   }
 
-  Future<void> _saveCurrentOwnershipNow(String message) async {
-    if (widget.readOnly || _savingOwnership) return;
+  Future<bool> _saveCurrentOwnershipNow(String message) async {
+    if (widget.readOnly || _savingOwnership) return false;
 
     setState(() {
       _savingOwnership = true;
@@ -505,15 +593,17 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
       await LocalPokedexStore.saveSetOwnershipMap(widget.card.setId, ownershipByCardId);
       await PokedexSyncService.syncCurrentSetForCurrentUser(widget.card.setId);
 
-      if (!mounted) return;
+      if (!mounted) return true;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
       );
+      return true;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not save card: $error')),
       );
+      return false;
     } finally {
       if (mounted) {
         setState(() {
@@ -538,10 +628,23 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
     );
   }
 
+  Future<void> _addSelectedCardAndReturn() async {
+    if (widget.readOnly || _savingOwnership) return;
+
+    setState(() {
+      _setCountForKind(selectedSlotKind, _countForKind(selectedSlotKind) + 1);
+    });
+
+    final saved = await _saveCurrentOwnershipNow(
+      '${_labelForKind(selectedSlotKind)} card added to set',
+    );
+    if (saved && mounted) _finishDetails();
+  }
+
   MasterSetSlotKind? _firstOwnedSlotKind() {
-    if (normalCopies > 0) return MasterSetSlotKind.normal;
-    if (reverseHoloCopies > 0) return MasterSetSlotKind.reverseHolo;
-    if (holoCopies > 0) return MasterSetSlotKind.holo;
+    for (final kind in MasterSetSlotKind.values) {
+      if (_countForKind(kind) > 0) return kind;
+    }
     return null;
   }
 
@@ -711,6 +814,24 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
   }
 
   Widget _buildVariantSelector() {
+    final singlePrint = isSinglePrintSetCard(widget.card);
+    final availableKinds = singlePrint
+        ? <MasterSetSlotKind>[MasterSetSlotKind.normal]
+        : buildMasterSetSlots(<TcgCard>[widget.card])
+            .map((slot) => slot.kind)
+            .toSet()
+            .toList(growable: true);
+    if (!availableKinds.contains(selectedSlotKind)) {
+      availableKinds.add(selectedSlotKind);
+    }
+    for (final entry in extraVariantCopies.entries) {
+      if (entry.value <= 0) continue;
+      for (final kind in MasterSetSlotKind.values) {
+        if (kind.storageId == entry.key && !availableKinds.contains(kind)) {
+          availableKinds.add(kind);
+        }
+      }
+    }
     return Card(
       color: const Color(0xFF102754),
       child: Column(
@@ -723,7 +844,7 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Choose card version',
+                    singlePrint ? 'Card copies' : 'Choose card version',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 17,
@@ -734,11 +855,10 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
               ],
             ),
           ),
-          _buildVariantRow(MasterSetSlotKind.normal),
-          const Divider(height: 1, color: Colors.white12),
-          _buildVariantRow(MasterSetSlotKind.reverseHolo),
-          const Divider(height: 1, color: Colors.white12),
-          _buildVariantRow(MasterSetSlotKind.holo),
+          for (var index = 0; index < availableKinds.length; index++) ...[
+            if (index > 0) const Divider(height: 1, color: Colors.white12),
+            _buildVariantRow(availableKinds[index]),
+          ],
         ],
       ),
     );
@@ -1007,7 +1127,7 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
                               Text(
                                 widget.readOnly
                                     ? '${widget.ownerLabel ?? 'Shared Pokédex'} is read-only in this view.'
-                                    : 'Choose Normal, Reverse Holo, or Holo above. Add Card only updates the selected version.',
+                                    : 'Choose the card version above. Add Card only updates the selected version.',
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   color: Colors.white54,
@@ -1124,11 +1244,8 @@ class _SetCardDetailsPageState extends State<SetCardDetailsPage> {
                                     child: FilledButton(
                                       onPressed: _savingOwnership
                                           ? null
-                                          : () async {
-                                              await _saveCurrentOwnershipNow('Card saved to Set Pokédex');
-                                              if (mounted) _finishDetails();
-                                            },
-                                      child: const Text('Save and Return'),
+                                          : _addSelectedCardAndReturn,
+                                      child: const Text('Add to Set'),
                                     ),
                                   ),
                                 ],

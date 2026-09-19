@@ -1,1 +1,7 @@
-enum QuickScanVariant { normal, reverseHolo, holo }
+enum QuickScanVariant {
+  normal,
+  reverseHolo,
+  holo,
+  pokeBallReverse,
+  masterBallReverse,
+}

@@ -67,11 +67,7 @@ class _CommunityPageState extends State<CommunityPage> {
   String _archiveSearchQuery = '';
   DateTime? _archiveDeletedDateFilter;
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> get _postsStream =>
-      FirebaseFirestore.instance
-          .collection('community_posts')
-          .orderBy('createdAtMs', descending: true)
-          .snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _postsStream;
 
   static const List<_CommunityArea> _communityAreaOptions = <_CommunityArea>[
     _CommunityArea(key: 'All', label: 'All counties / areas'),
@@ -226,6 +222,10 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   void initState() {
     super.initState();
+    _postsStream = FirebaseFirestore.instance
+        .collection('community_posts')
+        .orderBy('createdAtMs', descending: true)
+        .snapshots();
     _visitStartedAtMs = DateTime.now().millisecondsSinceEpoch;
     _loadLastSeen();
     _loadAdminStatus();

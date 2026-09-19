@@ -12,11 +12,13 @@ class BinderCardTile extends StatelessWidget {
     required this.card,
     required this.ownership,
     this.greyOutUnowned = false,
+    this.showVariantPills = true,
   });
 
   final TcgCard card;
   final CardOwnership ownership;
   final bool greyOutUnowned;
+  final bool showVariantPills;
 
   bool get isOwned =>
       ownership.effectiveCopies > 0 ||
@@ -27,8 +29,6 @@ class BinderCardTile extends StatelessWidget {
   bool get hasShine => ownership.effectiveCopies > 1;
 
   ColorFilter _greyOutFilter(bool shouldGreyOut) {
-    // Always show the real artwork in full colour. The inactive ownership pills
-    // still make it clear when a card is missing.
     return const ColorFilter.mode(Colors.transparent, BlendMode.dst);
   }
 
@@ -115,7 +115,10 @@ class BinderCardTile extends StatelessWidget {
     );
   }
 
-  Widget _buildTileContent({required bool shouldGreyOut, required bool shiny}) {
+  Widget _buildTileContent({
+    required bool shouldGreyOut,
+    required bool shiny,
+  }) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: Stack(
@@ -124,7 +127,7 @@ class BinderCardTile extends StatelessWidget {
           _buildCardArtwork(shouldGreyOut: shouldGreyOut),
           _buildCardNumberBadge(),
           _buildCopyBadge(shiny: shiny),
-          _buildVariantPills(),
+          if (showVariantPills) _buildVariantPills(),
         ],
       ),
     );

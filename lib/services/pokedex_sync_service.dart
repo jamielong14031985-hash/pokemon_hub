@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/card_ownership.dart';
 import 'collection_refresh_notifier.dart';
 import 'local_pokedex_store.dart';
+import 'wishlist_service.dart';
 
 const Duration _kFirebaseReadTimeout = Duration(seconds: 12);
 const Duration _kFirebaseWriteTimeout = Duration(seconds: 15);
@@ -273,6 +274,17 @@ class PokedexSyncService {
     final ownedEntries = ownershipByCardId.entries
         .where((entry) => LocalPokedexStore.hasSavedCopies(entry.value))
         .toList();
+
+    // Owning a card fulfils that wishlist item. Delete only the exact card IDs,
+    // so cards with the same name or number in other sets remain untouched.
+    try {
+      await WishlistService.removeOwnedCards(
+        ownerUid: safeOwnerUid,
+        cardIds: ownedEntries.map((entry) => entry.key),
+      );
+    } catch (_) {
+      // Collection saving must still succeed if wishlist cleanup is offline.
+    }
 
     final setRef = _setCollection(safeOwnerUid).doc(safeSetId);
 
