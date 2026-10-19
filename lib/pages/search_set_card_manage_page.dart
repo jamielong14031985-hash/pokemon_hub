@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../models/card_ownership.dart';
 import '../models/tcg_card.dart';
+import '../services/external_card_price_service.dart';
+import '../services/local_card_price_store.dart';
 import '../utils/ebay_sold_search.dart';
 import '../widgets/graded_prices_button.dart';
 import '../widgets/price_lookup_card.dart';
@@ -26,24 +28,44 @@ class SearchSetCardManagePage extends StatefulWidget {
 
 class _SearchSetCardManagePageState extends State<SearchSetCardManagePage> {
   late int _copies;
+  late TcgCard _pricedCard;
+  bool _refreshingPrice = false;
 
   @override
   void initState() {
     super.initState();
     _copies = widget.ownership.effectiveCopies;
+    _pricedCard = widget.card;
+    _loadSavedPriceAndRefresh();
+  }
+
+  Future<void> _loadSavedPriceAndRefresh() async {
+    final cachedCard = await LocalCardPriceStore.applySavedPrice(_pricedCard);
+    if (!mounted) return;
+    setState(() => _pricedCard = cachedCard);
+    await _refreshPrice();
+  }
+
+  Future<void> _refreshPrice() async {
+    if (_refreshingPrice) return;
+    setState(() => _refreshingPrice = true);
+    try {
+      final refreshedCard =
+          await ExternalCardPriceService.enrichCardWithExternalPrice(
+        _pricedCard,
+      );
+      if (mounted) setState(() => _pricedCard = refreshedCard);
+    } finally {
+      if (mounted) setState(() => _refreshingPrice = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final card = widget.card;
+    final card = _pricedCard;
 
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text(card.name),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
-      ),
       body: SafeArea(
         bottom: true,
         child: Column(
@@ -52,7 +74,12 @@ class _SearchSetCardManagePageState extends State<SearchSetCardManagePage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  SetLogoTile(setId: card.setId, setName: widget.setName, logoUrl: card.setLogoUrl),
+                  ScrollableSetLogoHeader(
+                    setId: card.setId,
+                    setName: widget.setName,
+                    logoUrl: card.setLogoUrl,
+                  ),
+                  const SizedBox(height: 8),
                   if (card.largeImageUrl != null)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(20),
@@ -62,6 +89,8 @@ class _SearchSetCardManagePageState extends State<SearchSetCardManagePage> {
                   PriceLookupCard(
                     card: card,
                     onOpenRawSold: () => openEbaySoldSearch(context: context, card: card),
+                    onRefreshPrice: _refreshPrice,
+                    refreshingPrice: _refreshingPrice,
                   ),
                   GradedPricesButton(
                     card: card,

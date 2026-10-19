@@ -42,6 +42,8 @@ class BinderCardTile extends StatelessWidget {
             imageUrls: card.imageUrlCandidates,
             fit: BoxFit.cover,
             backgroundColor: const Color(0xFF102754),
+            placeholderTitle: card.name,
+            placeholderSubtitle: card.setName,
           ),
         ],
       ),

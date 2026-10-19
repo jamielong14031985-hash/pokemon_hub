@@ -5,6 +5,7 @@ import '../models/tcg_card.dart';
 import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import 'card_image_with_fallback.dart';
+import 'set_logo_widgets.dart';
 
 class CardSearchResultCard extends StatefulWidget {
   const CardSearchResultCard({
@@ -82,49 +83,43 @@ class _CardSearchResultCardState extends State<CardSearchResultCard> {
             onTap: widget.onOpenDetails,
             child: Row(
               children: [
-                SizedBox(
-                  width: 110,
-                  height: 150,
-                  child: CardImageWithFallback(
-                    imageUrls: card.imageUrlCandidates,
-                    fit: BoxFit.cover,
-                    cacheWidth: 220,
-                    cacheHeight: 300,
-                    backgroundColor: Colors.black12,
+                Container(
+                  width: 118,
+                  constraints: const BoxConstraints(minHeight: 176),
+                  padding: const EdgeInsets.all(10),
+                  color: const Color(0xFF0A1D43),
+                  child: Center(
+                    child: CardImageWithFallback(
+                      imageUrls: card.imageUrlCandidates,
+                      fit: BoxFit.contain,
+                      cacheWidth: 240,
+                      cacheHeight: 340,
+                      backgroundColor: Colors.transparent,
+                    ),
                   ),
                 ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 68, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          card.name,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                color: Colors.white,
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Set: ${card.setName}',
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        Text(
-                          'Number: ${card.number}',
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        if (card.rarity != null)
-                          Text(
-                            'Rarity: ${card.rarity}',
-                            style: const TextStyle(color: Colors.white70),
+                    padding: const EdgeInsets.fromLTRB(18, 44, 18, 20),
+                    child: Center(
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ResolvedSetLogo(
+                          setId: card.setId,
+                          setName: card.setName,
+                          fallbackLogoUrl: card.setLogoUrl,
+                          height: 50,
+                          fit: BoxFit.contain,
+                          cacheWidth: 240,
+                          cacheHeight: 100,
+                          textStyle: const TextStyle(
+                            color: Color(0xFFE3E9F8),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
                           ),
-                        if (card.hp != null)
-                          Text(
-                            'HP: ${card.hp}',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                      ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -132,8 +127,8 @@ class _CardSearchResultCardState extends State<CardSearchResultCard> {
             ),
           ),
           Positioned(
-            top: 12,
-            right: 12,
+            top: 10,
+            right: 10,
             child: Tooltip(
               message: 'Quick add to Set Pokédex',
               child: Material(
@@ -144,8 +139,8 @@ class _CardSearchResultCardState extends State<CardSearchResultCard> {
                   customBorder: const CircleBorder(),
                   onTap: _saving ? null : _quickAddToPokedex,
                   child: SizedBox(
-                    width: 42,
-                    height: 42,
+                    width: 34,
+                    height: 34,
                     child: Center(
                       child: _saving
                           ? const SizedBox(
@@ -159,7 +154,7 @@ class _CardSearchResultCardState extends State<CardSearchResultCard> {
                           : const Icon(
                               Icons.add_rounded,
                               color: Colors.black,
-                              size: 26,
+                              size: 22,
                             ),
                     ),
                   ),

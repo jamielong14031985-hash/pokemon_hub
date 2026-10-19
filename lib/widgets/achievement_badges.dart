@@ -317,7 +317,7 @@ class _AchievementBadgesState extends State<AchievementBadges> {
       _rollingMilestoneBadge(
         title: 'Top Card Chase',
         category: 'Value',
-        baseDescription: 'This badge rolls forward based on your highest-value card.',
+        baseDescription: 'Indicative highest-card value; reference prices may be unverified.',
         icon: Icons.workspace_premium_outlined,
         accent: const Color(0xFF82D8FF),
         progress: topCardValue,
@@ -335,7 +335,7 @@ class _AchievementBadgesState extends State<AchievementBadges> {
       _rollingMilestoneBadge(
         title: 'Collection Vault',
         category: 'Value',
-        baseDescription: 'This badge rolls forward as your estimated collection value grows.',
+        baseDescription: 'Indicative collection value; may include prices without sold-sale evidence.',
         icon: Icons.savings_outlined,
         accent: const Color(0xFF75E6A9),
         progress: totalValue,
@@ -353,7 +353,7 @@ class _AchievementBadgesState extends State<AchievementBadges> {
       _rollingMilestoneBadge(
         title: 'Value Marathon',
         category: 'Value',
-        baseDescription: 'A very long value challenge for serious collection growth.',
+        baseDescription: 'Long-term indicative value milestone; reference prices may be unverified.',
         icon: Icons.diamond_outlined,
         accent: const Color(0xFFE7A6FF),
         progress: totalValue,

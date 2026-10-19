@@ -48,6 +48,10 @@ class PokemonTcgService {
   static const String _tcgDexHost = 'api.tcgdex.net';
   static const Set<String> _tcgDexEnglishFallbackSetIds = <String>{'30th'};
   static final Set<String> _thirtiethCelebrationSetIds = <String>{'30th'};
+
+  // English Black Star Promos are separate API sets. Exact product-linked
+  // promo ranges are resolved per expansion below so a promo appears only in
+  // the Grand Master binder it genuinely belongs to.
   static final Map<String, List<TcgCard>> _cardSearchCache = <String, List<TcgCard>>{};
   static final Map<String, Future<List<TcgCard>>> _cardSearchInFlight =
       <String, Future<List<TcgCard>>>{};
@@ -389,14 +393,126 @@ class PokemonTcgService {
       // The primary Pokémon TCG API results are still useful if TCGdex is down.
     }
 
-    final cards = cardsById.values.toList()
+    final cards = _collapseDuplicateSearchAliases(
+      _fillMissingSearchArtwork(cardsById.values.toList()),
+    )
       ..sort((a, b) => _compareCardSearchResults(a, b, cleanQuery));
     return cards;
+  }
+
+  static List<TcgCard> _collapseDuplicateSearchAliases(List<TcgCard> cards) {
+    String keyFor(TcgCard card) {
+      final artwork = ((card.imageUrl ?? '').trim().isNotEmpty
+              ? card.imageUrl
+              : card.largeImageUrl)!
+          .trim()
+          .toLowerCase();
+      return '${_normalizeSearchMatchText(card.name)}|'
+          '${_normalizeCollectorCardNumber(card.number)}|$artwork';
+    }
+
+    int quality(TcgCard card) {
+      var score = 0;
+      final normalizedSetName = _normalizeSearchMatchText(card.setName);
+      final normalizedSetId = _normalizeSearchMatchText(card.setId);
+      if (normalizedSetName.isNotEmpty && normalizedSetName != normalizedSetId) {
+        score += 8;
+      }
+      if ((card.rarity ?? '').trim().isNotEmpty) score += 3;
+      if ((card.hp ?? '').trim().isNotEmpty) score += 3;
+      if (card.types.isNotEmpty) score += 2;
+      if ((card.largeImageUrl ?? '').trim().isNotEmpty) score += 1;
+      return score;
+    }
+
+    final unique = <String, TcgCard>{};
+    for (final card in cards) {
+      final hasArtwork = (card.imageUrl ?? '').trim().isNotEmpty ||
+          (card.largeImageUrl ?? '').trim().isNotEmpty;
+      if (!hasArtwork) {
+        unique.putIfAbsent('id:${card.id}', () => card);
+        continue;
+      }
+
+      final key = keyFor(card);
+      final existing = unique[key];
+      if (existing == null || quality(card) > quality(existing)) {
+        unique[key] = card;
+      }
+    }
+    final exactArtworkMatchesCollapsed = unique.values.toList();
+    String cardSignature(TcgCard card) =>
+        '${_normalizeSearchMatchText(card.name)}|${_normalizeCollectorCardNumber(card.number)}';
+    bool hasFriendlySetName(TcgCard card) {
+      final setName = _normalizeSearchMatchText(card.setName);
+      final setId = _normalizeSearchMatchText(card.setId);
+      return setName.isNotEmpty && setName != setId;
+    }
+
+    final signaturesWithFriendlyRecords = <String>{
+      for (final card in exactArtworkMatchesCollapsed)
+        if (hasFriendlySetName(card)) cardSignature(card),
+    };
+
+    return exactArtworkMatchesCollapsed.where((card) {
+      // TCGdex can expose one physical card under both its public set and
+      // internal aliases (for example B2A, ME02 and Phantasmal Flames). Once a
+      // complete, properly named record exists, hide only the code-only alias.
+      if (hasFriendlySetName(card)) return true;
+      return !signaturesWithFriendlyRecords.contains(cardSignature(card));
+    }).toList();
+  }
+
+  static List<TcgCard> _fillMissingSearchArtwork(List<TcgCard> cards) {
+    String signature(TcgCard card) =>
+        '${_normalizeSearchMatchText(card.name)}|${_normalizeCollectorCardNumber(card.number)}';
+
+    final artworkBySignature = <String, TcgCard>{};
+    for (final card in cards) {
+      final hasStoredArtwork = (card.imageUrl ?? '').trim().isNotEmpty ||
+          (card.largeImageUrl ?? '').trim().isNotEmpty;
+      if (hasStoredArtwork) {
+        artworkBySignature.putIfAbsent(signature(card), () => card);
+      }
+    }
+
+    return cards.map((card) {
+      final hasStoredArtwork = (card.imageUrl ?? '').trim().isNotEmpty ||
+          (card.largeImageUrl ?? '').trim().isNotEmpty;
+      if (hasStoredArtwork) return card;
+
+      final artworkCard = artworkBySignature[signature(card)];
+      if (artworkCard == null) return card;
+      return card.copyWith(
+        imageUrl: artworkCard.imageUrl,
+        largeImageUrl: artworkCard.largeImageUrl,
+      );
+    }).toList();
   }
 
   static Future<List<TcgCard>> _searchTcgDexFallbackCards(String query) async {
     final cleanQuery = _normalizeSearchMatchText(query);
     if (cleanQuery.isEmpty) return const <TcgCard>[];
+
+    final cardsById = <String, TcgCard>{};
+
+    // This is the general outage fallback for the public Pokémon TCG API.
+    // Previously this method only searched the custom 30th Anniversary set,
+    // which made an ordinary query such as "Pikachu" look as though the app
+    // only contained 30th Anniversary cards whenever the primary API was
+    // unavailable.
+    try {
+      final generalCards = await _searchTcgDexEnglishCards(query);
+      for (final card in generalCards) {
+        cardsById.putIfAbsent(card.id, () => card);
+      }
+    } catch (_) {
+      // The custom catalogue below can still provide release-day cards.
+    }
+
+    for (final card in _searchCuratedJapanesePromoCards(cleanQuery)) {
+      cardsById.putIfAbsent(card.id, () => card);
+    }
 
     final collectorNumber = _tryParseCollectorNumberQuery(query);
     final queryTerms = cleanQuery
@@ -412,12 +528,18 @@ class PokemonTcgService {
         )
         .toList();
 
-    final batches = await Future.wait(
-      _thirtiethCelebrationSetIds.map(fetchCardsBySet),
-    );
-    final allCards = batches.expand((cards) => cards).toList();
+    var allCards = const <TcgCard>[];
+    try {
+      final batches = await Future.wait(
+        _thirtiethCelebrationSetIds.map(fetchCardsBySet),
+      );
+      allCards = batches.expand((cards) => cards).toList();
+    } catch (_) {
+      // Do not discard full-catalogue fallback results merely because the
+      // separate 30th Anniversary catalogue is temporarily unavailable.
+    }
 
-    return allCards.where((card) {
+    for (final card in allCards.where((card) {
       if (collectorNumber != null) {
         return _normalizeCollectorCardNumber(card.number) ==
             _normalizeCollectorCardNumber(collectorNumber.cardNumber);
@@ -434,7 +556,177 @@ class PokemonTcgService {
       return termsToMatch.every(
         (term) => normalizedName.contains(term) || normalizedSet.contains(term),
       );
-    }).take(200).toList();
+    }).take(200)) {
+      cardsById.putIfAbsent(card.id, () => card);
+    }
+
+    final cards = cardsById.values.toList()
+      ..sort((a, b) => _compareCardSearchResults(a, b, query));
+    return cards.take(250).toList();
+  }
+
+  static Future<List<TcgCard>> _searchTcgDexEnglishCards(String query) async {
+    final normalized = _normalizeSearchMatchText(query);
+    if (normalized.isEmpty) return const <TcgCard>[];
+
+    final uri = Uri.https(
+      _tcgDexHost,
+      '/v2/en/cards',
+      <String, String>{'name': normalized},
+    );
+    final response = await http
+        .get(uri, headers: const <String, String>{'accept': 'application/json'})
+        .timeout(const Duration(seconds: 18));
+    if (response.statusCode != 200) {
+      throw Exception('TCGdex returned HTTP ${response.statusCode}.');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) return const <TcgCard>[];
+
+    final cards = <TcgCard>[];
+    for (final item in decoded.whereType<Map>().take(250)) {
+      final json = Map<String, dynamic>.from(item);
+      final id = (json['id'] ?? '').toString().trim();
+      final image = (json['image'] ?? '').toString().trim();
+      final separator = id.indexOf('-');
+      final setId = separator > 0 ? id.substring(0, separator) : 'tcgdex';
+
+      // TCGdex also includes Pokémon TCG Pocket, whose A1/B1A-style sets are
+      // digital-only cards. PocketChase tracks physical cards, so do not mix
+      // those results into the physical card catalogue.
+      if (_isPokemonTcgPocketResult(setId: setId, imageUrl: image)) continue;
+
+      // The dedicated 30th catalogue below has the correct numbering, images
+      // and metadata. Do not let an image-less generic CardBrief duplicate it.
+      if (id.toLowerCase().startsWith('30th-')) continue;
+      final set = TcgSet(
+        id: setId,
+        name: _friendlyTcgDexSetName(setId),
+        series: '',
+        total: 0,
+        releaseDate: '',
+      );
+      cards.add(_tcgDexCardBriefToTcgCard(json, set));
+    }
+    return _hydrateTcgDexSearchArtwork(cards);
+  }
+
+  static bool _isPokemonTcgPocketResult({
+    required String setId,
+    required String imageUrl,
+  }) {
+    if (imageUrl.toLowerCase().contains('/tcgp/')) return true;
+
+    final normalizedSetId = setId.trim().toLowerCase();
+    return normalizedSetId == 'p-a' ||
+        RegExp(r'^[a-z]\d+[a-z]?$').hasMatch(normalizedSetId);
+  }
+
+  static Future<List<TcgCard>> _hydrateTcgDexSearchArtwork(
+    List<TcgCard> cards,
+  ) async {
+    final hydrated = List<TcgCard>.from(cards);
+    final missingIndexes = <int>[
+      for (var index = 0; index < hydrated.length; index++)
+        if ((hydrated[index].imageUrl ?? '').trim().isEmpty &&
+            (hydrated[index].largeImageUrl ?? '').trim().isEmpty)
+          index,
+    ];
+
+    // Card search responses are lightweight CardBrief records. Some newer and
+    // promotional sets omit artwork there even though the full card endpoint
+    // already has it. Resolve only the missing entries, in small batches, so a
+    // search remains quick and one unavailable card cannot fail the whole list.
+    const batchSize = 12;
+    for (var start = 0; start < missingIndexes.length; start += batchSize) {
+      final end = math.min(start + batchSize, missingIndexes.length);
+      final batch = missingIndexes.sublist(start, end);
+      await Future.wait(batch.map((index) async {
+        final card = hydrated[index];
+        final cardId = card.id.trim();
+        if (cardId.isEmpty) return;
+        try {
+          final detail = await _getTcgDexJsonMap(
+            '/v2/en/cards/${Uri.encodeComponent(cardId)}',
+          );
+          final imageBase = (detail['image'] ?? '').toString().trim();
+          if (imageBase.isEmpty) return;
+          hydrated[index] = card.copyWith(
+            imageUrl: _tcgDexSizedImageUrl(
+              imageBase,
+              highResolution: false,
+            ),
+            largeImageUrl: _tcgDexSizedImageUrl(
+              imageBase,
+              highResolution: true,
+            ),
+          );
+        } catch (_) {
+          // Keep the original result; cross-source matching can still supply
+          // artwork for an identical card number below.
+        }
+      }));
+    }
+
+    return hydrated;
+  }
+
+  static String _friendlyTcgDexSetName(String setId) {
+    const names = <String, String>{
+      'basep': 'Wizards Black Star Promos',
+      'xyp': 'XY Black Star Promos',
+      'smp': 'Sun & Moon Black Star Promos',
+      'swshp': 'Sword & Shield Black Star Promos',
+      'svp': 'Scarlet & Violet Black Star Promos',
+      '2024sv': "McDonald's Collection 2024",
+      'sm7.5': 'Dragon Majesty',
+      'swsh4.5sv': 'Shining Fates Shiny Vault',
+    };
+    return names[setId.toLowerCase()] ?? setId.toUpperCase();
+  }
+
+  static List<TcgCard> _searchCuratedJapanesePromoCards(String normalizedQuery) {
+    const promos = <({String number, String name, String setId, String setName, String imageUrl})>[
+      (number: '203/XY-P', name: 'Poncho-wearing Pikachu', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/6/62/PonchoWearingPikachuXYPromo203.jpg'),
+      (number: '207/XY-P', name: 'Poncho-wearing Pikachu – Mega Charizard X', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/5/5a/PonchoWearingPikachuXYPromo207.jpg'),
+      (number: '208/XY-P', name: 'Poncho-wearing Pikachu – Mega Charizard Y', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/a/a6/PonchoWearingPikachuXYPromo208.jpg'),
+      (number: '230/XY-P', name: 'Poncho-wearing Pikachu – Mega Rayquaza', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/7/7d/PonchoWearingPikachuXYPromo230.jpg'),
+      (number: '231/XY-P', name: 'Poncho-wearing Pikachu – Shiny Mega Rayquaza', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/9/94/PonchoWearingPikachuXYPromo231.jpg'),
+      (number: '274/XY-P', name: 'Poncho-wearing Pikachu – Mega Ponchos', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/4/4d/PonchoWearingPikachuXYPromo274.jpg'),
+      (number: '275/XY-P', name: 'Poncho-wearing Pikachu – Mega Ponchos', setId: 'XY-P', setName: 'Japanese XY-P Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/6/60/PonchoWearingPikachuXYPromo275.jpg'),
+      (number: '037/SM-P', name: 'Poncho-wearing Pikachu – Alolan Vulpix', setId: 'SM-P', setName: 'Japanese Sun & Moon Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/a/a7/PonchowearingPikachuSMPromo37.jpg'),
+      (number: '038/SM-P', name: 'Poncho-wearing Pikachu – Vulpix', setId: 'SM-P', setName: 'Japanese Sun & Moon Promos', imageUrl: 'https://archives.bulbagarden.net/media/upload/8/85/PonchowearingPikachuSMPromo38.jpg'),
+    ];
+
+    final terms = normalizedQuery
+        .split(' ')
+        .where((term) => term.isNotEmpty)
+        .toList();
+    if (terms.isEmpty) return const <TcgCard>[];
+
+    return promos.where((promo) {
+      final haystack = _normalizeSearchMatchText(
+        '${promo.name} ${promo.number} ${promo.setId} ${promo.setName}',
+      );
+      return terms.every(haystack.contains);
+    }).map((promo) {
+      final safeNumber = promo.number.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+      return TcgCard(
+        id: 'jp-promo-$safeNumber',
+        name: promo.name,
+        setId: 'jp-${promo.setId.toLowerCase()}',
+        setName: promo.setName,
+        number: promo.number,
+        types: const <String>['Lightning'],
+        rarity: 'Promo',
+        imageUrl: promo.imageUrl,
+        largeImageUrl: promo.imageUrl,
+        rawPrice: null,
+        rawPriceCurrency: 'JPY',
+        rawPriceSource: 'Japanese promo catalogue',
+      );
+    }).toList();
   }
 
   static Future<List<TcgCard>> _searchCardsOnlyFromApi(String cleanQuery) async {
@@ -2932,11 +3224,305 @@ class PokemonTcgService {
       // Individual missing-card lookups are optional rescue requests.
     }
 
+    // Pricing feeds are not a reliable checklist for newly released sets: a
+    // card can have one priced finish while another official finish is still
+    // absent from the market data. Merge TCGdex's per-card `variants` flags so
+    // Grand Master slots are driven by the printings that actually exist.
+    try {
+      await _enrichEnglishSetVariantsFromTcgDex(
+        cardsByKey: cardsByKey,
+        setId: setId,
+        setName: setName,
+      );
+    } catch (_) {
+      // Variant enrichment is optional; never prevent the set from opening.
+    }
+
+    // Promo cards are supplied by the APIs as separate Black Star Promo sets.
+    // Merge the matching promo era into its canonical English Grand Master
+    // binder while retaining each card's real promo id, printed number, image,
+    // rarity and price data.
+    try {
+      addCards(
+        await _fetchEnglishPromosForGrandMasterBinder(
+          targetSetId: setId,
+          targetSetName: setName,
+          targetSetLogoUrl: set?.logoUrl,
+        ),
+      );
+    } catch (_) {
+      // Promo enrichment must not stop the ordinary expansion from opening.
+    }
+
     final allCards = cardsByKey.values.toList()
       ..sort((a, b) => compareCardNumbers(a.number, b.number));
 
     _setCardsCache[setId] = List<TcgCard>.from(allCards);
     return allCards;
+  }
+
+  static Future<void> _enrichEnglishSetVariantsFromTcgDex({
+    required Map<String, TcgCard> cardsByKey,
+    required String setId,
+    required String setName,
+  }) async {
+    final candidateSetIds = <String>{setId.trim()};
+    final normalizedName = _normalizeSearchMatchText(setName);
+    if (normalizedName.contains('ascended heroes')) {
+      candidateSetIds.addAll(
+        <String>{'me2.5', 'me2pt5', 'me02pt5', 'asc', 'b2a'},
+      );
+    }
+    candidateSetIds.removeWhere((value) => value.isEmpty);
+
+    Map<String, dynamic>? setJson;
+    for (final candidateSetId in candidateSetIds) {
+      try {
+        final candidate =
+            await _getTcgDexJsonMap('/v2/en/sets/$candidateSetId');
+        if (candidate['cards'] is List) {
+          setJson = candidate;
+          break;
+        }
+      } catch (_) {
+        // Some providers use a different temporary id for a new expansion.
+      }
+    }
+    if (setJson == null) return;
+
+    String matchKey(String number, String name) {
+      final cleanNumber = number
+          .toUpperCase()
+          .replaceAll(RegExp(r'[^A-Z0-9]+'), '');
+      return '$cleanNumber|${_normalizeSearchMatchText(name)}';
+    }
+
+    final variantsByCard = <String, Map<String, dynamic>>{};
+    for (final raw in (setJson['cards'] as List).whereType<Map>()) {
+      final json = Map<String, dynamic>.from(raw);
+      final variants = json['variants'];
+      if (variants is! Map || variants.isEmpty) continue;
+      final number = (json['localId'] ?? json['number'] ?? '').toString();
+      final name = (json['name'] ?? '').toString();
+      variantsByCard[matchKey(number, name)] =
+          Map<String, dynamic>.from(variants);
+    }
+    if (variantsByCard.isEmpty) return;
+
+    for (final entry in cardsByKey.entries.toList()) {
+      final card = entry.value;
+      final variants = variantsByCard[matchKey(card.number, card.name)];
+      if (variants == null) continue;
+      cardsByKey[entry.key] = card.copyWith(
+        hasNormalVariant: variants['normal'] == true,
+        hasReverseHoloVariant: variants['reverse'] == true,
+        hasHoloVariant: variants['holo'] == true,
+      );
+    }
+  }
+
+  static Future<List<TcgCard>> _fetchEnglishPromosForGrandMasterBinder({
+    required String targetSetId,
+    required String targetSetName,
+    required String? targetSetLogoUrl,
+  }) async {
+    final normalizedTargetId = targetSetId.trim().toLowerCase();
+    final normalizedTargetName =
+        _normalizeSearchMatchText(targetSetName);
+
+    // Source promo set -> exact printed promo numbers associated with this
+    // expansion's products. Name matching also covers temporary/new API ids.
+    final promoNumbersBySetId = <String, Set<int>>{};
+    if (normalizedTargetId == 'sv8' ||
+        normalizedTargetId == 'ssp' ||
+        normalizedTargetName.contains('surging sparks')) {
+      promoNumbersBySetId['svp'] = <int>{
+        151, 152, 153, 154, 155, 156, 157, 158, 159,
+      };
+    } else if (normalizedTargetId == 'me2.5' ||
+        normalizedTargetId == 'me2pt5' ||
+        normalizedTargetId == 'me02pt5' ||
+        normalizedTargetId == 'asc' ||
+        normalizedTargetId == 'b2a' ||
+        normalizedTargetName.contains('ascended heroes')) {
+      promoNumbersBySetId['mep'] = <int>{31, 32, 33, 34, 35, 36};
+    }
+
+    if (promoNumbersBySetId.isEmpty) {
+      return const <TcgCard>[];
+    }
+
+    final batches = await Future.wait(
+      promoNumbersBySetId.keys.map(
+        _fetchEnglishPromoSetCards,
+      ),
+    );
+
+    final promosById = <String, TcgCard>{};
+    for (var batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      final promoSetId = promoNumbersBySetId.keys.elementAt(batchIndex);
+      final allowedNumbers = promoNumbersBySetId[promoSetId]!;
+      final batch = batches[batchIndex];
+      for (final promo in batch) {
+        final promoId = promo.id.trim();
+        if (promoId.isEmpty) continue;
+        final printedNumber = _englishPromoPrintedNumber(promo);
+        if (printedNumber == null || !allowedNumbers.contains(printedNumber)) {
+          continue;
+        }
+
+        // A genuine Black Star Promo is a single printed card. It should not
+        // inherit the normal/reverse/holo slot guesses from its host expansion.
+        promosById[promoId] = promo.copyWith(
+          setId: targetSetId,
+          setName: targetSetName,
+          number:
+              '${promoSetId.toUpperCase()}${printedNumber.toString().padLeft(3, '0')}',
+          rarity: (promo.rarity ?? '').toLowerCase().contains('promo')
+              ? promo.rarity
+              : 'Promo',
+          setLogoUrl: targetSetLogoUrl,
+          hasNormalVariant: true,
+          hasReverseHoloVariant: false,
+          hasHoloVariant: false,
+        );
+      }
+    }
+
+    return promosById.values.toList()
+      ..sort((a, b) => compareCardNumbers(a.number, b.number));
+  }
+
+  static int? _englishPromoPrintedNumber(TcgCard card) {
+    for (final value in <String>[card.number, card.id]) {
+      final matches = RegExp(r'(\d+)').allMatches(value).toList();
+      if (matches.isEmpty) continue;
+      final parsed = int.tryParse(matches.last.group(1) ?? '');
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
+  static Future<List<TcgCard>> _fetchEnglishPromoSetCards(
+    String promoSetId,
+  ) async {
+    final cardsByNumber = <int, TcgCard>{};
+
+    void mergeCards(Iterable<TcgCard> cards) {
+      for (final card in cards) {
+        final number = _englishPromoPrintedNumber(card);
+        if (number == null) continue;
+        final existing = cardsByNumber[number];
+        final cardHasImage = (card.imageUrl ?? '').trim().isNotEmpty ||
+            (card.largeImageUrl ?? '').trim().isNotEmpty;
+        final existingHasImage = existing != null &&
+            ((existing.imageUrl ?? '').trim().isNotEmpty ||
+                (existing.largeImageUrl ?? '').trim().isNotEmpty);
+        if (existing == null || (cardHasImage && !existingHasImage)) {
+          cardsByNumber[number] = card;
+        }
+      }
+    }
+
+    try {
+      final primary = await _fetchCardsForSetQuery(
+        'set.id:$promoSetId',
+        orderBy: 'number',
+        maxPages: 8,
+      );
+      mergeCards(primary);
+    } catch (_) {
+      // Try TCGdex below; new promo cards often arrive there first.
+    }
+
+    try {
+      final json = await _getTcgDexJsonMap('/v2/en/sets/$promoSetId');
+      final promoSet = _tcgDexSetFromJson(json);
+      final rawCards = json['cards'];
+      if (rawCards is List) {
+        final briefs = rawCards
+            .whereType<Map>()
+            .map(
+              (item) => _tcgDexCardBriefToTcgCard(
+                Map<String, dynamic>.from(item),
+                promoSet,
+              ),
+            )
+            .toList();
+        mergeCards(await _hydrateTcgDexSearchArtwork(briefs));
+      }
+    } catch (_) {
+      // Keep any primary-source cards already loaded above.
+    }
+
+    // A newly announced promo can exist in both APIs as a metadata-only card.
+    // Resolve its full TCGdex record using the canonical promo id before the
+    // card is moved into its expansion binder (which changes setId).
+    final hydrated = await Future.wait(cardsByNumber.entries.map((entry) async {
+      final card = entry.value;
+      if ((card.imageUrl ?? '').trim().isNotEmpty ||
+          (card.largeImageUrl ?? '').trim().isNotEmpty) {
+        return card;
+      }
+      final padded = entry.key.toString().padLeft(3, '0');
+      final candidates = <String>{
+        card.id.trim(),
+        '$promoSetId-$padded',
+        '$promoSetId-${entry.key}',
+      }..removeWhere((id) => id.isEmpty);
+      for (final candidate in candidates) {
+        try {
+          final detail = await _getTcgDexJsonMap(
+            '/v2/en/cards/${Uri.encodeComponent(candidate)}',
+          );
+          final imageBase = (detail['image'] ?? '').toString().trim();
+          if (imageBase.isEmpty) continue;
+          return card.copyWith(
+            imageUrl: _tcgDexSizedImageUrl(
+              imageBase,
+              highResolution: false,
+            ),
+            largeImageUrl: _tcgDexSizedImageUrl(
+              imageBase,
+              highResolution: true,
+            ),
+          );
+        } catch (_) {
+          // Try the next id shape; API ids occasionally omit zero padding.
+        }
+      }
+
+      // The Mega Evolution promo catalogue currently publishes MEP031-036 as
+      // metadata-only records. Keep a card-specific artwork fallback so the
+      // Ascended Heroes binder never renders blank promo tiles while the APIs
+      // catch up. These URLs point at the matching English Black Star cards,
+      // not product/listing photographs.
+      if (promoSetId.toLowerCase() == 'mep') {
+        const mepArtwork = <int, String>{
+          31:
+              'https://doujkbm8mih0s.cloudfront.net/static/images/alt/thumb/mep/031-ns-zekrom-holo-black-star.jpg',
+          32:
+              'https://doujkbm8mih0s.cloudfront.net/static/images/alt/thumb/mep/032-mega-gardevoir-ex-holo-black-star.jpg',
+          33:
+              'https://doujkbm8mih0s.cloudfront.net/static/images/alt/thumb/mep/033-mega-lucario-ex-holo-black-star.jpg',
+          34:
+              'https://doujkbm8mih0s.cloudfront.net/static/images/alt/thumb/mep/034-mega-meganium-ex-holo-black-star.jpg',
+          35:
+              'https://doujkbm8mih0s.cloudfront.net/static/images/alt/thumb/mep/035-mega-emboar-ex-holo-black-star.jpg',
+          36:
+              'https://doujkbm8mih0s.cloudfront.net/static/images/alt/thumb/mep/036-mega-feraligatr-ex-holo-black-star.jpg',
+        };
+        final fallbackUrl = mepArtwork[entry.key];
+        if (fallbackUrl != null) {
+          return card.copyWith(
+            imageUrl: fallbackUrl,
+            largeImageUrl: fallbackUrl,
+          );
+        }
+      }
+      return card;
+    }));
+    return hydrated;
   }
 
   static Future<List<TcgCard>> _fetchTcgDexCardsBySet(String setId) async {
@@ -2991,11 +3577,16 @@ class PokemonTcgService {
       Map<String, dynamic> source, {
       String numberPrefix = '',
       int numberOffset = 0,
+      int? limit,
     }) {
       final rawCards = source['cards'];
       if (rawCards is! List) return;
 
-      for (final item in rawCards.whereType<Map>()) {
+      final sourceCards = rawCards.whereType<Map>();
+      final selectedCards = limit == null
+          ? sourceCards
+          : sourceCards.take(limit);
+      for (final item in selectedCards) {
         final json = Map<String, dynamic>.from(item);
         final rawNumber = (json['localId'] ?? json['number'] ?? '').toString();
         final parsedNumber = int.tryParse(rawNumber);
@@ -3008,7 +3599,16 @@ class PokemonTcgService {
       }
     }
 
-    if (officialMain.length >= 158) {
+    // New API checklists can appear before their artwork has been populated.
+    // Keep using TCGdex until nearly all primary records have usable images so
+    // a metadata-only update cannot turn the collection into blank cards.
+    final officialMainWithImages = officialMain
+        .where((card) => card.imageUrlCandidates.isNotEmpty)
+        .length;
+    final hasCompleteOfficialArtwork =
+        officialMain.length >= 158 && officialMainWithImages >= 150;
+
+    if (hasCompleteOfficialArtwork) {
       for (final card in officialMain) {
         final rgbNumber = switch (card.number.trim().toUpperCase()) {
           'R' => 'R/RGB',
@@ -3058,7 +3658,12 @@ class PokemonTcgService {
     }
 
     // The eight pack-in foil Energies use checklist numbers MEE 009-016.
-    addCardsFrom(energyJson, numberPrefix: 'MEE', numberOffset: 8);
+    addCardsFrom(
+      energyJson,
+      numberPrefix: 'MEE',
+      numberOffset: 8,
+      limit: 8,
+    );
     const energyImageIds = <int>[
       713248,
       713249,
@@ -3135,6 +3740,50 @@ class PokemonTcgService {
     }
     if (!addedCompleteClassicCollection) {
       addCardsFrom(classicJson, numberPrefix: 'CC');
+    }
+
+    // Genuine released 30th Celebration MEP Black Star Promos. These are
+    // separate card records because their printed collector numbers are
+    // MEP 094-101; the
+    // ordinary 30th Celebration versions must not be presented as promos.
+    const celebrationPromos = <({
+      String number,
+      String name,
+      String type,
+      int imageId,
+      String suffix,
+    })>[
+      (number: '094', name: 'Alolan Exeggutor', type: 'Grass', imageId: 713262, suffix: ''),
+      (number: '095', name: 'Lucario', type: 'Fighting', imageId: 713263, suffix: ''),
+      (number: '096', name: 'Moltres', type: 'Fire', imageId: 713264, suffix: ''),
+      (number: '097', name: 'Articuno', type: 'Water', imageId: 713265, suffix: ''),
+      (number: '098', name: 'Zapdos', type: 'Lightning', imageId: 713266, suffix: ''),
+      (number: '099', name: 'Greninja ex', type: 'Water', imageId: 713268, suffix: ''),
+      (number: '100', name: 'Sylveon ex', type: 'Psychic', imageId: 713267, suffix: ''),
+      (number: '101', name: 'Nidorina', type: 'Darkness', imageId: 713260, suffix: ''),
+      (number: '101', name: 'Nidorina [Pokémon Center]', type: 'Darkness', imageId: 713261, suffix: '-pc'),
+    ];
+    for (final promo in celebrationPromos) {
+      cards.add(
+        TcgCard(
+          id: '30th-mep-${promo.number}${promo.suffix}',
+          name: promo.name,
+          setId: set.id,
+          setName: set.name,
+          number: 'MEP${promo.number}${promo.suffix.toUpperCase()}',
+          types: <String>[promo.type],
+          rarity: promo.suffix == '-pc'
+              ? 'Black Star Promo • Pokémon Center Stamped'
+              : 'Black Star Promo',
+          imageUrl:
+              'https://product-images.tcgplayer.com/fit-in/437x437/${promo.imageId}.jpg',
+          largeImageUrl:
+              'https://product-images.tcgplayer.com/${promo.imageId}.jpg',
+          setLogoUrl: set.logoUrl,
+          rawPrice: null,
+          rawPriceSource: 'TCGplayer',
+        ),
+      );
     }
 
     cards.sort((a, b) => compareCardNumbers(a.number, b.number));
@@ -3265,6 +3914,48 @@ class PokemonTcgService {
 
     if (normalizedSetId.isEmpty) {
       return (fallback != null && fallback.isNotEmpty) ? fallback : null;
+    }
+
+    if (normalizedSetId.toLowerCase() == '30th') {
+      final cachedThirtySet = _setByIdCache['30th'];
+      final cachedLogo = cachedThirtySet?.logoUrl?.trim();
+      if (cachedLogo != null && cachedLogo.isNotEmpty) return cachedLogo;
+
+      // The main and Classic Collection use the same 30th Celebration logo.
+      // Try both TCGdex records because the main record can temporarily omit
+      // its logo while the Classic Collection record still has the artwork.
+      for (final sourceSetId in const <String>['30th', '30th-c']) {
+        try {
+          final json =
+              await _getTcgDexJsonMap('/v2/en/sets/$sourceSetId');
+          final thirtySet = _tcgDexSetFromJson(json);
+          final thirtyLogo = thirtySet.logoUrl?.trim();
+          if (thirtyLogo != null && thirtyLogo.isNotEmpty) {
+            _setByIdCache['30th'] = TcgSet(
+              id: '30th',
+              name: '30th Celebration',
+              series: thirtySet.series,
+              total: 199,
+              releaseDate: thirtySet.releaseDate,
+              logoUrl: thirtyLogo,
+              symbolUrl: thirtySet.symbolUrl,
+            );
+            return thirtyLogo;
+          }
+        } catch (_) {
+          // Continue to the next known source.
+        }
+      }
+
+      // The primary database IDs are useful as a final fallback and are the
+      // same records that supplied the logo before the binders were merged.
+      for (final sourceSetId in const <String>['me55c', 'me55']) {
+        final sourceSet = await _fetchSetById(sourceSetId);
+        final sourceLogo = sourceSet?.logoUrl?.trim();
+        if (sourceLogo != null && sourceLogo.isNotEmpty) {
+          return sourceLogo;
+        }
+      }
     }
 
     final set = await _fetchSetById(normalizedSetId);

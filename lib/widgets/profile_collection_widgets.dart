@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
+import '../models/wishlist_entry.dart';
 import '../services/currency_settings.dart';
 import '../utils/price_format_helpers.dart';
 import '../utils/profile_stats_helpers.dart';
@@ -9,15 +10,230 @@ import 'profile_showcase_mini_stat.dart';
 import 'rarity_dashboard_mini_stat.dart';
 import 'rarity_value_bar.dart';
 
+class CollectionOverviewDashboard extends StatelessWidget {
+  const CollectionOverviewDashboard({
+    super.key,
+    required this.stats,
+    required this.wishlist,
+    required this.onOpenScanner,
+    required this.onOpenSets,
+    required this.onOpenWishlist,
+  });
+
+  final ProfileStats stats;
+  final List<WishlistEntry> wishlist;
+  final VoidCallback onOpenScanner;
+  final VoidCallback onOpenSets;
+  final VoidCallback onOpenWishlist;
+
+  double get _wishlistValue => wishlist.fold<double>(0, (total, entry) {
+        final converted = CurrencySettings.convertAmountSync(
+          entry.rawPrice,
+          fromCurrency: entry.rawPriceCurrency,
+        );
+        return total + (converted ?? 0);
+      });
+
+  int get _wishlistSetCount => wishlist
+      .map((entry) => entry.setId.trim().isEmpty ? entry.setName.trim() : entry.setId.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet()
+      .length;
+
+  @override
+  Widget build(BuildContext context) {
+    final pricingMessage = stats.highValueUnverifiedCards > 0
+        ? '${stats.highValueUnverifiedCards} high-value guides need review'
+        : stats.unpricedUniqueCards > 0
+        ? '${stats.unpricedUniqueCards} cards still need a price'
+        : stats.lowConfidencePricedCards > 0
+            ? '${stats.lowConfidencePricedCards} prices need stronger sales data'
+            : 'All available prices are up to date';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102754),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.dashboard_rounded, color: Color(0xFFF7DE77)),
+              SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Collection overview',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 9,
+            crossAxisSpacing: 9,
+            childAspectRatio: 2.05,
+            children: [
+              _OverviewStat(label: 'Total cards', value: '${stats.totalCards}', icon: Icons.style_rounded),
+              _OverviewStat(label: 'Unique cards', value: '${stats.uniqueCards}', icon: Icons.filter_none_rounded),
+              _OverviewStat(label: 'Duplicates', value: '${stats.duplicateCards}', icon: Icons.content_copy_rounded),
+              _OverviewStat(label: 'Sets collected', value: '${stats.setsCollected}', icon: Icons.collections_bookmark_rounded),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _OverviewSummary(
+                  icon: Icons.favorite_rounded,
+                  title: '${wishlist.length} wishlist cards',
+                  subtitle: '$_wishlistSetCount sets • ${CurrencySettings.formatSelectedAmount(_wishlistValue)} est.',
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: _OverviewSummary(
+                  icon: Icons.verified_outlined,
+                  title: '${stats.pricedUniqueCards}/${stats.uniqueCards} priced',
+                  subtitle: pricingMessage,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _DashboardAction(icon: Icons.document_scanner_outlined, label: 'Scan', onTap: onOpenScanner)),
+              const SizedBox(width: 8),
+              Expanded(child: _DashboardAction(icon: Icons.collections_bookmark_outlined, label: 'Sets', onTap: onOpenSets)),
+              const SizedBox(width: 8),
+              Expanded(child: _DashboardAction(icon: Icons.favorite_border_rounded, label: 'Wishlist', onTap: onOpenWishlist)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OverviewStat extends StatelessWidget {
+  const _OverviewStat({required this.label, required this.value, required this.icon});
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.055),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFF7DE77), size: 20),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                  Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _OverviewSummary extends StatelessWidget {
+  const _OverviewSummary({required this.icon, required this.title, required this.subtitle});
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 76,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF173872),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFF7DE77), size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 3),
+                  Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white60, fontSize: 9.5, height: 1.2)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _DashboardAction extends StatelessWidget {
+  const _DashboardAction({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: const Color(0xFFF7DE77),
+        borderRadius: BorderRadius.circular(13),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(13),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 17, color: const Color(0xFF071A3E)),
+                const SizedBox(width: 5),
+                Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF071A3E), fontSize: 11, fontWeight: FontWeight.w900))),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
 class RarityValueDashboard extends StatelessWidget {
   const RarityValueDashboard({
     super.key,
     required this.stats,
     this.onOpenCard,
+    this.onRefreshPrices,
+    this.refreshingPrices = false,
   });
 
   final ProfileStats stats;
   final ValueChanged<TcgCard>? onOpenCard;
+  final VoidCallback? onRefreshPrices;
+  final bool refreshingPrices;
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +312,7 @@ class RarityValueDashboard extends StatelessWidget {
                         ),
                         SizedBox(height: 3),
                         Text(
-                          'See where your collection value is coming from.',
+                          'Indicative estimates, sales evidence and price sources.',
                           style: TextStyle(
                             color: Color(0xFFC8D4F0),
                             fontSize: 12,
@@ -109,6 +325,78 @@ class RarityValueDashboard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
+              if (stats.totalCards > 0) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.055),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${stats.pricedUniqueCards} of ${stats.uniqueCards} cards priced',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            stats.pricedUniqueCards >= stats.uniqueCards
+                                ? 'Complete'
+                                : 'Partial estimate',
+                            style: const TextStyle(
+                              color: Color(0xFFF7DE77),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 9),
+                      LinearProgressIndicator(
+                        value: stats.uniqueCards <= 0
+                            ? 0
+                            : stats.pricedUniqueCards / stats.uniqueCards,
+                        minHeight: 7,
+                        borderRadius: BorderRadius.circular(999),
+                        backgroundColor: Colors.white12,
+                        color: const Color(0xFFF7DE77),
+                      ),
+                      if (stats.pricedUniqueCards < stats.uniqueCards &&
+                          onRefreshPrices != null) ...[
+                        const SizedBox(height: 11),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: refreshingPrices ? null : onRefreshPrices,
+                            icon: refreshingPrices
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.sync_rounded),
+                            label: Text(
+                              refreshingPrices
+                                  ? 'Checking up to 20 cards...'
+                                  : 'Refresh 20 missing prices',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
               if (stats.totalCards <= 0)
                 Container(
                   width: double.infinity,
@@ -128,7 +416,7 @@ class RarityValueDashboard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: RarityDashboardMiniStat(
-                        label: 'Collection value',
+                        label: 'Indicative value',
                         value: CurrencySettings.formatSelectedAmount(stats.totalEstimatedPrice),
                         icon: Icons.payment_outlined,
                       ),
@@ -143,6 +431,42 @@ class RarityValueDashboard extends StatelessWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RarityDashboardMiniStat(
+                        label: 'Sales-supported*',
+                        value: stats.salesSupportedValue > 0
+                            ? CurrencySettings.formatSelectedAmount(stats.salesSupportedValue)
+                            : 'None yet',
+                        icon: Icons.verified_outlined,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: RarityDashboardMiniStat(
+                        label: 'Other guides',
+                        value: stats.guideOnlyValue > 0
+                            ? CurrencySettings.formatSelectedAmount(stats.guideOnlyValue)
+                            : 'None',
+                        icon: Icons.info_outline_rounded,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                const Text(
+                  '*Partial subtotal: provider-reported median from 3+ matched sales, with medium/high confidence. Not independently audited. Indicative value also includes unverified price guides.',
+                  style: TextStyle(color: Colors.white70, fontSize: 10.5, height: 1.35),
+                ),
+                if (stats.highValueUnverifiedCards > 0) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    '${stats.highValueUnverifiedCards} high-value card price guides need independent confirmation.',
+                    style: const TextStyle(color: Color(0xFFFFB36B), fontSize: 10.5, height: 1.3),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -165,7 +489,7 @@ class RarityValueDashboard extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 const Text(
-                  'Value by rarity',
+                  'Indicative value by rarity',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 15,
@@ -283,7 +607,7 @@ class TopValueCardTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    formatCardPrice(card.marketPrice, fromCurrency: card.rawPriceCurrency),
+                    formatCardPrice(card.marketPrice, fromCurrency: card.marketPriceCurrency),
                     style: const TextStyle(
                       color: Color(0xFFF7DE77),
                       fontSize: 12,
@@ -456,7 +780,7 @@ class ProfileShowcaseCard extends StatelessWidget {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              formatCardPrice(topCard.marketPrice, fromCurrency: topCard.rawPriceCurrency),
+                              formatCardPrice(topCard.marketPrice, fromCurrency: topCard.marketPriceCurrency),
                               style: const TextStyle(
                                 color: Color(0xFFF7DE77),
                                 fontWeight: FontWeight.w900,

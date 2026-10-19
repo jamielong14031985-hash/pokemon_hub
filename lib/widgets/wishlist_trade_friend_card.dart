@@ -15,6 +15,8 @@ class WishlistTradeFriendCard extends StatelessWidget {
     required this.onTapEntry,
     required this.onOpenDetails,
     required this.onMessage,
+    required this.onDeal,
+    required this.onMakeDeal,
   });
 
   final FriendTradeMatchOverview overview;
@@ -23,6 +25,8 @@ class WishlistTradeFriendCard extends StatelessWidget {
   final Future<void> Function(WishlistEntry entry) onTapEntry;
   final VoidCallback onOpenDetails;
   final VoidCallback onMessage;
+  final ValueChanged<FriendTradeMatchEntry> onDeal;
+  final VoidCallback onMakeDeal;
 
   List<FriendTradeMatchEntry> _filter(List<FriendTradeMatchEntry> items) {
     if (!showLikelySpareOnly) return items;
@@ -60,17 +64,17 @@ class WishlistTradeFriendCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        '${overview.totalMatches} total match${overview.totalMatches == 1 ? '' : 'es'}',
+                        '${overview.totalMatches} match${overview.totalMatches == 1 ? '' : 'es'} • ${overview.spareCopies} spare cop${overview.spareCopies == 1 ? 'y' : 'ies'}',
                         style: const TextStyle(color: Color(0xFFC8D4F0)),
                       ),
                     ],
                   ),
                 ),
                 if (overview.likelySpareMatches > 0)
-                  const CommunityMetaChip(
+                  CommunityMetaChip(
                     icon: Icons.auto_awesome_outlined,
-                    label: 'Likely spares',
-                    color: Color(0xFF6B4EFF),
+                    label: '${overview.spareCopies} trade spare${overview.spareCopies == 1 ? '' : 's'}',
+                    color: const Color(0xFF6B4EFF),
                   ),
               ],
             ),
@@ -89,10 +93,17 @@ class WishlistTradeFriendCard extends StatelessWidget {
                   label: 'You have ${overview.snapshot.youHaveForFriend.length}',
                   color: const Color(0xFF2C7A5B),
                 ),
-                if (overview.estimatedSelectedValue > 0)
+                if ((showLikelySpareOnly
+                            ? overview.estimatedSpareValue
+                            : overview.estimatedSelectedValue) >
+                        0)
                   CommunityMetaChip(
                     icon: Icons.payments_outlined,
-                    label: CurrencySettings.formatSelectedAmount(overview.estimatedSelectedValue),
+                    label: CurrencySettings.formatSelectedAmount(
+                      showLikelySpareOnly
+                          ? overview.estimatedSpareValue
+                          : overview.estimatedSelectedValue,
+                    ),
                     color: const Color(0xFF875A16),
                   ),
               ],
@@ -111,6 +122,7 @@ class WishlistTradeFriendCard extends StatelessWidget {
                         item: item,
                         friendName: overview.friend.username,
                         onTap: () => onTapEntry(item.entry),
+                        onMakeDeal: canMessage && item.hasLikelySpare ? () => onDeal(item) : null,
                       ),
                     ),
                   ),
@@ -129,6 +141,7 @@ class WishlistTradeFriendCard extends StatelessWidget {
                         item: item,
                         friendName: overview.friend.username,
                         onTap: () => onTapEntry(item.entry),
+                        onMakeDeal: canMessage && item.hasLikelySpare ? () => onDeal(item) : null,
                       ),
                     ),
                   ),
@@ -139,6 +152,14 @@ class WishlistTradeFriendCard extends StatelessWidget {
                 style: TextStyle(color: Colors.white70),
               ),
             const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: canMessage && (youHave.any((e) => e.hasLikelySpare) || theyHave.any((e) => e.hasLikelySpare))
+                  ? onMakeDeal : null,
+              icon: const Icon(Icons.handshake_outlined),
+              label: const Text('Make a Deal'),
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF7DE77), foregroundColor: Colors.black),
+            )),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(

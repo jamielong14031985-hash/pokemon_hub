@@ -103,6 +103,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     final initialDate = _selectedDateOfBirth ?? DateTime(now.year - 18, now.month, now.day);
     final picked = await showDatePicker(
       context: context,
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
       initialDate: initialDate.isAfter(now) ? now : initialDate,
       firstDate: DateTime(now.year - 120, 1, 1),
       lastDate: now,

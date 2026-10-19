@@ -532,7 +532,7 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Future<void> _openCreatePostSheet({String? initialPostType}) async {
-    await showModalBottomSheet<void>(
+    final awaitingImageReview = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF102754),
@@ -541,10 +541,19 @@ class _CommunityPageState extends State<CommunityPage> {
         initialPostType: initialPostType,
       ),
     );
+    if (awaitingImageReview == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Your post was sent to an admin for picture approval. It will appear publicly once approved.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _openEditPostSheet(CommunityPost post) async {
-    await showModalBottomSheet<void>(
+    final awaitingImageReview = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF102754),
@@ -553,6 +562,15 @@ class _CommunityPageState extends State<CommunityPage> {
         existingPost: post,
       ),
     );
+    if (awaitingImageReview == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The updated pictures were sent to an admin for approval.',
+          ),
+        ),
+      );
+    }
   }
 
   bool get _hasActiveMarketplaceFilters =>
@@ -2084,7 +2102,14 @@ class _CommunityPageState extends State<CommunityPage> {
                 const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
             final feedDocs = docs
-                .where((doc) => !_postIsArchivedForAdmin(doc.data()))
+                .where((doc) {
+                  final data = doc.data();
+                  final moderationStatus =
+                      (data['moderationStatus'] ?? '').toString().trim();
+                  return !_postIsArchivedForAdmin(data) &&
+                      moderationStatus != 'pending' &&
+                      moderationStatus != 'rejected';
+                })
                 .toList();
             final archivedDocs = docs
                 .where((doc) => _postIsArchivedForAdmin(doc.data()))
@@ -2157,7 +2182,7 @@ class _CommunityPageState extends State<CommunityPage> {
                     canMessage: !viewingArchive &&
                         post.authorId.isNotEmpty && post.authorId != currentUid,
                     isNew: isNew,
-                    compact: true,
+                    horizontal: true,
                     canUserFeature:
                         !viewingArchive && isOwnPost && isProActive && !isFeatureBusy,
                     canAdminFeature:
@@ -2234,15 +2259,14 @@ class _CommunityPageState extends State<CommunityPage> {
                 else
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
-                    sliver: SliverGrid(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                        childAspectRatio: 0.58,
-                      ),
+                    sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
-                        (context, index) => buildPostCard(posts[index]),
+                        (context, index) => Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == posts.length - 1 ? 0 : 12,
+                          ),
+                          child: buildPostCard(posts[index]),
+                        ),
                         childCount: posts.length,
                       ),
                     ),

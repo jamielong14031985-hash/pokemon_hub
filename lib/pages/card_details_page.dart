@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/card_ownership.dart';
 import '../models/tcg_card.dart';
 import '../services/local_pokedex_store.dart';
+import '../services/local_card_price_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/wishlist_service.dart';
 import '../services/external_card_price_service.dart';
@@ -12,9 +13,9 @@ import '../services/currency_settings.dart';
 import '../utils/ebay_sold_search.dart';
 import '../widgets/card_image_with_fallback.dart';
 import '../widgets/custom_binder_sheets.dart';
-import '../widgets/graded_prices_button.dart';
 import '../widgets/price_lookup_card.dart';
 import '../widgets/set_logo_widgets.dart';
+import 'deal_builder_page.dart';
 import 'set_card_details_page.dart';
 
 class CardDetailsPage extends StatefulWidget {
@@ -57,6 +58,24 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
     await addCardToCustomBinderFlow(context, widget.card);
   }
 
+  // Open Deal Builder with the precise card/variant already selected.
+  // Adding to a buying or selling deal never changes ownership or the wishlist.
+  Future<void> _addToDealBuilder() async {
+    final variant = widget.addAsReverseHolo
+        ? 'Reverse Holo'
+        : widget.addAsHolo
+            ? 'Holo'
+            : null;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => DealBuilderPage(
+          initialCard: _pricedCard,
+          initialVariant: variant,
+        ),
+      ),
+    );
+  }
+
 
   @override
   void initState() {
@@ -68,10 +87,12 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
 
 
   Future<void> _refreshExternalPriceIfMissing() async {
-    // Do not call JustTCG automatically when a card screen opens.
-    // The JustTCG free tier is rate limited, so external pricing is now
-    // checked only when the user presses Refresh Raw Price.
-    return;
+    final cachedCard = await LocalCardPriceStore.applySavedPrice(_pricedCard);
+    if (!mounted) return;
+    setState(() => _pricedCard = cachedCard);
+
+    // Keep the saved value visible while silently checking for a newer price.
+    await _refreshExternalPrice(showMessageWhenMissing: false);
   }
 
   Future<void> _refreshExternalPrice({bool showMessageWhenMissing = true}) async {
@@ -97,7 +118,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
             content: Text(
               hasPrice
                   ? 'Raw price updated from ${enrichedCard.marketPriceSource}'
-                  : 'No raw price found from JustTCG yet',
+                  : 'No exact sold-price match found yet',
             ),
           ),
         );
@@ -300,11 +321,6 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: Text(card.name),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
-      ),
       body: SafeArea(
         bottom: true,
         child: Column(
@@ -313,7 +329,12 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  SetLogoTile(setId: card.setId, setName: card.setName, logoUrl: card.setLogoUrl),
+                  ScrollableSetLogoHeader(
+                    setId: card.setId,
+                    setName: card.setName,
+                    logoUrl: card.setLogoUrl,
+                  ),
+                  const SizedBox(height: 8),
                   CardImageWithFallback(
                     imageUrls: card.largeImageUrlCandidates,
                     height: 320,
@@ -325,12 +346,9 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                   PriceLookupCard(
                     card: card,
                     onOpenRawSold: () => openEbaySoldSearch(context: context, card: card),
+                    onOpenGradedPrices: _openRegionalGradedSearch,
                     onRefreshPrice: () => _refreshExternalPrice(),
                     refreshingPrice: _refreshingPrice,
-                  ),
-                  GradedPricesButton(
-                    card: card,
-                    onOpenGradedPrices: _openRegionalGradedSearch,
                   ),
                   const SizedBox(height: 12),
                   Card(
@@ -437,6 +455,19 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                   ),
                                 ),
                               ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: _addToDealBuilder,
+                                  icon: const Icon(Icons.handshake_outlined),
+                                  label: const Text('Add to Deal'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFFF7DE77),
+                                    side: const BorderSide(color: Color(0xFFF7DE77)),
+                                  ),
+                                ),
+                              ),
                               if (hasSavedCopies) ...[
                                 const SizedBox(height: 8),
                                 SizedBox(
@@ -458,14 +489,21 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                                   return SizedBox(
                                     width: double.infinity,
                                     child: OutlinedButton.icon(
-                                      onPressed: _wishlistBusy ? null : () => _toggleWishlist(isInWishlist),
+                                      onPressed: _wishlistBusy ||
+                                              (hasSavedCopies && !isInWishlist)
+                                          ? null
+                                          : () => _toggleWishlist(isInWishlist),
                                       icon: Icon(
                                         isInWishlist
                                             ? Icons.favorite_rounded
                                             : Icons.favorite_outline_rounded,
                                       ),
                                       label: Text(
-                                        isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist',
+                                        isInWishlist
+                                            ? 'Remove from Wishlist'
+                                            : hasSavedCopies
+                                                ? 'Already owned'
+                                                : 'Add to Wishlist',
                                       ),
                                     ),
                                   );
@@ -548,7 +586,7 @@ class _CardDetailsPageState extends State<CardDetailsPage> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Tap to show Add Card, wishlist, binder and Pokédex actions',
+                                'Tap to show Add Card, Deal Builder, wishlist and binder actions',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.68),

@@ -902,27 +902,6 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                               label: 'Admin',
                               color: Color(0xFFB13B59),
                             ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.08),
-                              ),
-                            ),
-                            child: Text(
-                              _formatDate(livePost.createdAt),
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -930,54 +909,58 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                         livePost.title,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 18,
+                          height: 1.2,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Text(
                         livePost.description,
                         style: const TextStyle(
                           color: Color(0xFFD8E3FB),
-                          fontSize: 15,
-                          height: 1.45,
+                          fontSize: 14,
+                          height: 1.35,
                         ),
                       ),
                       if (livePost.hasImages) ...[
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         CommunityImageStrip(
                           imageBase64List: livePost.imageBase64List,
-                          height: 180,
+                          height: 150,
                         ),
                       ],
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       Row(
                         children: [
                           CommunityUserAvatar(
                             userId: livePost.authorId,
                             displayName: livePost.authorName,
-                            size: 38,
+                            size: 34,
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 9),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Posted by',
-                                  style: TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
+                                Text(
+                                  livePost.authorName,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  livePost.authorName,
+                                  '${_formatDate(livePost.createdAt)}'
+                                  '${livePost.hasImages ? ' • ${communityImageCountLabel(livePost.imageCount)}' : ''}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    color: Color(0xFFD8E3FB),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ],
@@ -1039,11 +1022,6 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
                         const SizedBox(height: 10),
                         TradeSafetyPanel(post: livePost),
                       ],
-                      if (livePost.hasImages)
-                        CommunityInfoRow(
-                          label: 'Photos',
-                          value: communityImageCountLabel(livePost.imageCount),
-                        ),
                       if (livePost.lastBumpedAt != null)
                         CommunityInfoRow(
                           label: 'Last bumped',
@@ -1576,7 +1554,7 @@ class _CommunityPostThreadPageState extends State<CommunityPostThreadPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: Text(_isAdmin ? 'Post replies • Admin' : 'Post replies'),
+        title: const Text('Post replies'),
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
       ),

@@ -229,9 +229,18 @@ class _CustomBinderCardPageState extends State<CustomBinderCardPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: Text(card.name),
+        toolbarHeight: 92,
+        title: ResolvedSetLogo(
+          setId: card.setId,
+          setName: card.setName,
+          fallbackLogoUrl: card.setLogoUrl,
+          height: 68,
+        ),
+        centerTitle: true,
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
       ),
       body: SafeArea(
         bottom: true,
@@ -276,7 +285,6 @@ class _CustomBinderCardPageState extends State<CustomBinderCardPage> {
                       ),
                     ),
                   ),
-                  SetLogoTile(setId: card.setId, setName: card.setName, logoUrl: card.setLogoUrl),
                   if (card.largeImageUrl != null)
                     Container(
                       decoration: BoxDecoration(

@@ -375,35 +375,40 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
       children: [
         Center(
           child: Container(
-            width: 104,
-            height: 104,
-            decoration: BoxDecoration(
-              color: _fieldColor,
-              shape: BoxShape.circle,
-              border: Border.all(color: _goldColor, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.20),
-                  blurRadius: 14,
-                  offset: const Offset(0, 7),
+            width: double.infinity,
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: AspectRatio(
+              aspectRatio: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _fieldColor,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _goldColor, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.20),
+                      blurRadius: 14,
+                      offset: const Offset(0, 7),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            clipBehavior: Clip.hardEdge,
-            child: hasNewImage
-                ? Image.memory(
-                    _logoImageBytes!,
-                    fit: BoxFit.cover,
-                  )
-                : _hasExistingLogoImage
-                    ? Image.network(
-                        existingLogoUrl,
+                clipBehavior: Clip.antiAlias,
+                child: hasNewImage
+                    ? Image.memory(
+                        _logoImageBytes!,
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return _buildBusinessProfilePicturePlaceholder();
-                        },
                       )
-                    : _buildBusinessProfilePicturePlaceholder(),
+                    : _hasExistingLogoImage
+                        ? Image.network(
+                            existingLogoUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return _buildBusinessProfilePicturePlaceholder();
+                            },
+                          )
+                        : _buildBusinessProfilePicturePlaceholder(),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -453,7 +458,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'This picture is used as the business logo on the Business Profile and public customer view.',
+          'Recommended size: 1200 × 600 pixels (2:1 landscape). This image fills the top of your public Business Profile.',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: _softTextColor,
@@ -481,7 +486,8 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
   Future<void> _pickBusinessProfilePicture() async {
     final pickedImage = await _imagePicker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: 900,
+      maxWidth: 1200,
+      maxHeight: 600,
       imageQuality: 88,
     );
 
@@ -1380,7 +1386,7 @@ class _BusinessProfileEditorPageState extends State<BusinessProfileEditorPage> {
                 title: 'Business profile picture',
                 icon: Icons.account_circle_outlined,
                 subtitle:
-                    'Upload the logo or picture customers will see on the business profile.',
+                    'Upload a 1200 × 600 pixel landscape logo or profile picture customers will see.',
                 children: [
                   _buildBusinessProfilePicturePicker(),
                 ],

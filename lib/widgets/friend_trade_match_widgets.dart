@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/friend_trade_match_models.dart';
 import '../models/wishlist_entry.dart';
+import '../utils/promo_collection_labels.dart';
 import '../services/currency_settings.dart';
 import 'community_meta_chip.dart';
 
@@ -11,16 +12,20 @@ class WishlistTradeMiniTile extends StatelessWidget {
     required this.item,
     required this.friendName,
     required this.onTap,
+    this.onMakeDeal,
   });
 
   final FriendTradeMatchEntry item;
   final String friendName;
   final VoidCallback onTap;
+  final VoidCallback? onMakeDeal;
 
   @override
   Widget build(BuildContext context) {
     final entry = item.entry;
-    final ownerLabel = item.ownerIsFriend ? '$friendName owns x${item.ownerCopies}' : 'You own x${item.ownerCopies}';
+    final ownerLabel = item.ownerIsFriend
+        ? '$friendName owns x${item.ownerCopies}'
+        : 'You own x${item.ownerCopies}';
 
     return Material(
       color: const Color(0xFF16366E),
@@ -61,7 +66,10 @@ class WishlistTradeMiniTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      entry.setName,
+                      PromoCollectionLabels.displaySetName(
+                        cardId: entry.cardId, cardName: entry.name,
+                        setId: entry.setId, number: entry.number,
+                        fallbackSetName: entry.setName),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Colors.white70, fontSize: 12),
@@ -77,17 +85,21 @@ class WishlistTradeMiniTile extends StatelessWidget {
                           color: item.hasLikelySpare ? const Color(0xFF2C7A5B) : const Color(0xFF355189),
                         ),
                         if (item.hasLikelySpare)
-                          const CommunityMetaChip(
+                          CommunityMetaChip(
                             icon: Icons.auto_awesome_outlined,
-                            label: 'Spare',
-                            color: Color(0xFF6B4EFF),
+                            label: '${item.ownerSpareCopies} spare',
+                            color: const Color(0xFF6B4EFF),
                           ),
                       ],
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+              if (onMakeDeal != null)
+                IconButton(tooltip: 'Make a Deal', icon: const Icon(Icons.handshake_outlined,
+                  color: Color(0xFFF7DE77)), onPressed: onMakeDeal)
+              else
+                const Icon(Icons.chevron_right_rounded, color: Colors.white54),
             ],
           ),
         ),
@@ -104,6 +116,7 @@ class FriendTradeMatchSection extends StatelessWidget {
     required this.emptyMessage,
     required this.items,
     required this.onTapEntry,
+    this.onDeal,
   });
 
   final String title;
@@ -111,6 +124,7 @@ class FriendTradeMatchSection extends StatelessWidget {
   final String emptyMessage;
   final List<FriendTradeMatchEntry> items;
   final Future<void> Function(WishlistEntry entry) onTapEntry;
+  final ValueChanged<FriendTradeMatchEntry>? onDeal;
 
   @override
   Widget build(BuildContext context) {
@@ -155,9 +169,8 @@ class FriendTradeMatchSection extends StatelessWidget {
                   final item = items[index];
                   return FriendTradeMatchCard(
                     item: item,
-                    onTap: () {
-                      onTapEntry(item.entry);
-                    },
+                    onTap: () { onTapEntry(item.entry); },
+                    onDeal: onDeal == null || !item.hasLikelySpare ? null : () => onDeal!(item),
                   );
                 },
               ),
@@ -173,10 +186,12 @@ class FriendTradeMatchCard extends StatelessWidget {
     super.key,
     required this.item,
     required this.onTap,
+    this.onDeal,
   });
 
   final FriendTradeMatchEntry item;
   final VoidCallback onTap;
+  final VoidCallback? onDeal;
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +235,10 @@ class FriendTradeMatchCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      entry.setName,
+                      PromoCollectionLabels.displaySetName(
+                        cardId: entry.cardId, cardName: entry.name,
+                        setId: entry.setId, number: entry.number,
+                        fallbackSetName: entry.setName),
                       style: const TextStyle(color: Colors.white70),
                     ),
                     const SizedBox(height: 5),
@@ -235,14 +253,18 @@ class FriendTradeMatchCard extends StatelessWidget {
                       children: [
                         CommunityMetaChip(
                           icon: item.ownerIsFriend ? Icons.person_outline : Icons.inventory_2_outlined,
-                          label: item.copiesLabel,
+                          // This badge only shows ownership; the spare count has its own
+                          // shorter badge so both fit on small screens.
+                          label: item.ownerIsFriend
+                              ? 'They own x${item.ownerCopies}'
+                              : 'You own x${item.ownerCopies}',
                           color: item.hasLikelySpare ? const Color(0xFF2C7A5B) : const Color(0xFF355189),
                         ),
                         if (item.hasLikelySpare)
-                          const CommunityMetaChip(
+                          CommunityMetaChip(
                             icon: Icons.auto_awesome_outlined,
-                            label: 'Likely spare',
-                            color: Color(0xFF6B4EFF),
+                            label: '${item.ownerSpareCopies} spare${item.ownerSpareCopies == 1 ? '' : 's'}',
+                            color: const Color(0xFF6B4EFF),
                           ),
                       ],
                     ),
@@ -260,10 +282,12 @@ class FriendTradeMatchCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              const Padding(
-                padding: EdgeInsets.only(top: 26),
-                child: Icon(Icons.chevron_right_rounded, color: Colors.white54),
-              ),
+              if (onDeal != null)
+                IconButton(tooltip: 'Make a Deal', onPressed: onDeal,
+                  icon: const Icon(Icons.handshake_outlined, color: Color(0xFFF7DE77)))
+              else
+                const Padding(padding: EdgeInsets.only(top: 26),
+                  child: Icon(Icons.chevron_right_rounded, color: Colors.white54)),
             ],
           ),
         ),

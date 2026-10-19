@@ -1,237 +1,278 @@
 import 'package:flutter/material.dart';
 
-import 'custom_app_logo.dart';
+enum _CardsPlaceholderMode {
+  cards,
+  sets,
+}
 
 class CardsSearchPlaceholder extends StatelessWidget {
-  const CardsSearchPlaceholder({super.key});
+  const CardsSearchPlaceholder({super.key})
+      : _mode = _CardsPlaceholderMode.cards;
+
+  const CardsSearchPlaceholder.sets({super.key})
+      : _mode = _CardsPlaceholderMode.sets;
+
+  final _CardsPlaceholderMode _mode;
+
+  bool get _isCards => _mode == _CardsPlaceholderMode.cards;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = _isCards ? 'Find your next card' : 'Search all sets';
+    final message = _isCards
+        ? 'Search by Pokémon name, set code or card number.'
+        : 'Find English and Japanese Pokémon sets by name.';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _GlossySearchPromptCard(
+          title: title,
+          message: message,
+          badge: _GlossyModeBadge(
+            label: _isCards ? 'Cards' : 'Sets',
+            assetPath: _isCards
+                ? 'assets/images/pc_search_cards.png'
+                : 'assets/images/pc_search_sets.png',
+            selected: false,
+            fallbackIcon: _isCards
+                ? Icons.style_rounded
+                : Icons.collections_bookmark_rounded,
+          ),
+        ),
+        const SizedBox(height: 18),
+        _PageBadgeShowcase(
+          assetPath: _isCards
+              ? 'assets/images/pc_hero_cards.png'
+              : 'assets/images/pc_hero_sets.png',
+          fallbackIcon: _isCards
+              ? Icons.style_rounded
+              : Icons.collections_bookmark_rounded,
+        ),
+      ],
+    );
+  }
+}
+
+class _GlossySearchPromptCard extends StatelessWidget {
+  const _GlossySearchPromptCard({
+    required this.title,
+    required this.message,
+    required this.badge,
+  });
+
+  final String title;
+  final String message;
+  final Widget badge;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF173A78),
-            Color(0xFF102754),
-            Color(0xFF071B43),
-          ],
+        color: const Color(0xFF0E2D63),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.11),
+          width: 1.2,
         ),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.16),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
+            color: Colors.black.withValues(alpha: 0.13),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const _SearchHeroLogo(),
-          const SizedBox(height: 22),
-          const Text(
-            'Search cards or sets',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 23,
-              height: 1.1,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Choose Cards or Sets above, then type a Pokémon name, card name, collector number, or set name to start.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFFC8D4F0),
-              fontSize: 14,
-              height: 1.4,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: const [
-              _SearchHintChip(
-                icon: Icons.catching_pokemon,
-                label: 'Pikachu',
-              ),
-              _SearchHintChip(
-                icon: Icons.numbers_rounded,
-                label: '4/102',
-              ),
-              _SearchHintChip(
-                icon: Icons.collections_bookmark_outlined,
-                label: 'Base Set',
-              ),
-              _SearchHintChip(
-                icon: Icons.auto_awesome_outlined,
-                label: 'Charizard ex',
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.055),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
-            ),
-            child: const Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.tips_and_updates_outlined,
-                  color: Color(0xFFF7DE77),
-                  size: 21,
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Tip: shorter searches are usually faster. Try the card name first, then add more words if needed.',
-                    style: TextStyle(
-                      color: Color(0xFFE4ECFF),
-                      fontSize: 12.5,
-                      height: 1.35,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            badge,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: Color(0xFFD4E1FA),
+                      fontSize: 13.2,
+                      height: 1.34,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SearchHeroLogo extends StatelessWidget {
-  const _SearchHeroLogo();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 214,
-      height: 214,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [
-            const Color(0xFFF7DE77).withValues(alpha: 0.20),
-            Colors.white.withValues(alpha: 0.06),
-            Colors.transparent,
           ],
         ),
       ),
-      alignment: Alignment.center,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            width: 178,
-            height: 178,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: const Color(0xFFF7DE77).withValues(alpha: 0.18),
-                width: 10,
-              ),
+    );
+  }
+}
+
+/// Uses the exact illustration from the approved PocketChase mockup.
+/// It already contains its own Poké Ball motif, lighting and artwork.
+/// Do not overlay extra circles or redraw the glow in Flutter.
+class _PageBadgeShowcase extends StatelessWidget {
+  const _PageBadgeShowcase({
+    required this.assetPath,
+    required this.fallbackIcon,
+  });
+
+  final String assetPath;
+  final IconData fallbackIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: SizedBox(
+        height: 280,
+        width: double.infinity,
+        child: Image.asset(
+          assetPath,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, __, ___) => Center(
+            child: Icon(
+              fallbackIcon,
+              size: 106,
+              color: const Color(0xFFF7DE77),
             ),
           ),
-          Container(
-            width: 158,
-            height: 158,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.04),
-              border: Border.all(
-                color: const Color(0xFFF7DE77).withValues(alpha: 0.62),
-                width: 3,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFF7DE77).withValues(alpha: 0.26),
-                  blurRadius: 28,
-                  spreadRadius: 3,
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.20),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: ClipOval(
-              child: Image.asset(
-                kCustomAppLogoAsset,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-                errorBuilder: (_, __, ___) {
-                  return const Center(
-                    child: Icon(
-                      Icons.style,
-                      color: Color(0xFFF7DE77),
-                      size: 82,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _SearchHintChip extends StatelessWidget {
-  const _SearchHintChip({
-    required this.icon,
+class _GlossyModeBadge extends StatelessWidget {
+  const _GlossyModeBadge({
     required this.label,
+    required this.assetPath,
+    required this.selected,
+    required this.fallbackIcon,
   });
 
-  final IconData icon;
   final String label;
+  final String assetPath;
+  final bool selected;
+  final IconData fallbackIcon;
 
   @override
   Widget build(BuildContext context) {
+    const ink = Color(0xFF0B224A);
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      width: 94,
+      height: 94,
       decoration: BoxDecoration(
-        color: const Color(0xFFF7DE77).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: const Color(0xFFF7DE77).withValues(alpha: 0.24),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: selected
+              ? const [
+                  Color(0xFFFFF3A0),
+                  Color(0xFFFFDE57),
+                  Color(0xFFF8C93E),
+                ]
+              : const [
+                  Color(0xFF18518F),
+                  Color(0xFF0D3266),
+                  Color(0xFF061D49),
+                ],
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: const Color(0xFFF7DE77), size: 16),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFFFF2B3),
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: selected
+              ? const Color(0xFFFFF2A9)
+              : const Color(0xFF468AC4),
+          width: selected ? 2.0 : 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: selected
+                ? const Color(0xFFFFDE56).withValues(alpha: 0.30)
+                : const Color(0xFF2D8EDF).withValues(alpha: 0.16),
+            blurRadius: selected ? 16 : 11,
+            spreadRadius: selected ? 0.4 : 0,
+            offset: const Offset(0, 4),
           ),
         ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -16,
+              right: -10,
+              child: Icon(
+                Icons.catching_pokemon,
+                size: 50,
+                color: selected
+                    ? Colors.white.withValues(alpha: 0.14)
+                    : const Color(0xFFB3DAFF).withValues(alpha: 0.10),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: Image.asset(
+                        assetPath,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (_, __, ___) => Icon(
+                          fallbackIcon,
+                          size: 34,
+                          color: selected ? ink : const Color(0xFFFFDE56),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected ? ink : Colors.white,
+                      fontSize: 12.2,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Container(
+                    height: 4,
+                    width: selected ? 24 : 18,
+                    decoration: BoxDecoration(
+                      color: selected ? ink : const Color(0xFFA9D0F5),
+                      borderRadius: BorderRadius.circular(100),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

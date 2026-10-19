@@ -13,9 +13,10 @@ import '../utils/app_helpers.dart';
 import '../widgets/custom_binder_cover.dart';
 import '../widgets/custom_binder_sheets.dart';
 import '../widgets/set_logo_widgets.dart';
-import 'custom_binder_page.dart';
+import 'custom_binder_page.dart' as custom_binder_page;
 import 'japanese_sets_page.dart';
 import 'set_pokedex_page.dart';
+import 'national_pokedex_page.dart';
 
 class MasterSetsPage extends StatefulWidget {
   const MasterSetsPage({super.key});
@@ -26,6 +27,7 @@ class MasterSetsPage extends StatefulWidget {
 
 class MasterSetsPageState extends State<MasterSetsPage> {
   late Future<_SetCatalogue> _futureSetCatalogue;
+  _SetCatalogue? _lastSetCatalogue;
   final Map<String, int> _savedCopyCountsBySetId = <String, int>{};
   bool _loadedCollectionState = false;
   bool _loadingCustomBinders = false;
@@ -75,22 +77,25 @@ class MasterSetsPageState extends State<MasterSetsPage> {
 
 
   Future<_SetCatalogue> _loadSetCatalogue({bool forceRefresh = false}) async {
-    final englishSetsFuture = PokemonTcgService.fetchSets(
-      forceRefresh: forceRefresh,
-    );
-    final japaneseSetsFuture = JapaneseTcgDexService.fetchSets(
-      forceRefresh: forceRefresh,
-    );
+    final previous = _lastSetCatalogue;
 
-    final results = await Future.wait<dynamic>([
-      englishSetsFuture,
-      japaneseSetsFuture,
+    final results = await Future.wait<Object>([
+      PokemonTcgService.fetchSets(forceRefresh: forceRefresh)
+          .then<Object>((sets) => sets)
+          .catchError((_) => previous?.englishSets ?? const <TcgSet>[]),
+      JapaneseTcgDexService.fetchSets(forceRefresh: forceRefresh)
+          .then<Object>((sets) => sets)
+          .catchError(
+            (_) => previous?.japaneseSets ?? const <JapaneseTcgSet>[],
+          ),
     ]);
 
-    return _SetCatalogue(
+    final loaded = _SetCatalogue(
       englishSets: List<TcgSet>.from(results[0] as List),
       japaneseSets: List<JapaneseTcgSet>.from(results[1] as List),
     );
+    _lastSetCatalogue = loaded;
+    return loaded;
   }
 
   Future<void> _loadSetCollectionState() async {
@@ -276,68 +281,133 @@ class MasterSetsPageState extends State<MasterSetsPage> {
   }
 
   Widget _buildViewToggle() {
-    Widget buildChip({
+    const gold = Color(0xFFF7DE77);
+
+    Widget buildTab({
       required String label,
-      required IconData icon,
+      required String imageAsset,
+      required IconData fallbackIcon,
       required MasterSetsViewMode mode,
     }) {
       final selected = _viewMode == mode;
       return Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () {
-            setState(() {
-              _viewMode = mode;
-            });
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(
-              color: selected ? const Color(0xFFF7DE77) : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: selected ? const Color(0xFFF7DE77) : Colors.white.withValues(alpha: 0.08),
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  color: selected ? Colors.black : Colors.white,
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label: '$label tab',
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(19),
+              onTap: () {
+                if (_viewMode != mode) {
+                  setState(() => _viewMode = mode);
+                }
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                height: 80,
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: selected
+                        ? const [
+                            Color(0xFFFFEB9D),
+                            Color(0xFFF7DE77),
+                            Color(0xFFF2C45D),
+                          ]
+                        : const [
+                            Color(0xFF17427D),
+                            Color(0xFF103266),
+                            Color(0xFF081E46),
+                          ],
+                  ),
+                  borderRadius: BorderRadius.circular(19),
+                  border: Border.all(
+                    color: selected
+                        ? const Color(0xFFFFEFBB)
+                        : const Color(0xFF4685C1),
+                    width: selected ? 1.7 : 1.1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: selected
+                          ? gold.withValues(alpha: 0.27)
+                          : Colors.black.withValues(alpha: 0.17),
+                      blurRadius: selected ? 15 : 7,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    label,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: selected ? Colors.black : Colors.white,
-                      fontWeight: FontWeight.w800,
+                child: Center(
+                  // Use the original ornate gold wordmarks with their large
+                  // binder/ball illustrations removed. The selected tab still
+                  // uses the same gold/blue treatment as before.
+                  child: Image.asset(
+                    imageAsset,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                    width: double.infinity,
+                    height: 68,
+                    errorBuilder: (context, error, stackTrace) => Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          fallbackIcon,
+                          color: selected ? const Color(0xFF102448) : gold,
+                          size: 25,
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          label,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: selected
+                                ? const Color(0xFF102448)
+                                : Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
       );
     }
 
+    // Preserve the existing scrolling behaviour on every Sets view.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.fromLTRB(15, 12, 15, 13),
       child: Row(
         children: [
-          buildChip(
+          buildTab(
             label: 'Set Pokédex',
-            icon: Icons.collections_bookmark_outlined,
+            imageAsset: 'assets/images/pocketchase_set_pokedex_wordmark.png',
+            fallbackIcon: Icons.collections_bookmark_rounded,
             mode: MasterSetsViewMode.setPokedex,
           ),
-          const SizedBox(width: 10),
-          buildChip(
+          const SizedBox(width: 9),
+          buildTab(
+            label: 'National Pokédex',
+            imageAsset: 'assets/images/pocketchase_national_pokedex_wordmark.png',
+            fallbackIcon: Icons.catching_pokemon,
+            mode: MasterSetsViewMode.nationalPokedex,
+          ),
+          const SizedBox(width: 9),
+          buildTab(
             label: 'Custom Binders',
-            icon: Icons.photo_album_outlined,
+            imageAsset: 'assets/images/pocketchase_custom_binders_wordmark.png',
+            fallbackIcon: Icons.auto_stories_rounded,
             mode: MasterSetsViewMode.customBinders,
           ),
         ],
@@ -347,10 +417,12 @@ class MasterSetsPageState extends State<MasterSetsPage> {
 
   List<_CollectedSetEntry> _buildCollectedSetEntries(_SetCatalogue catalogue) {
     final entries = <_CollectedSetEntry>[];
+    final matchedSetIds = <String>{};
 
     for (final set in catalogue.englishSets) {
       final count = _savedCopyCountsBySetId[set.id] ?? 0;
       if (count <= 0) continue;
+      matchedSetIds.add(set.id);
       entries.add(
         _CollectedSetEntry.english(
           set: set,
@@ -366,15 +438,24 @@ class MasterSetsPageState extends State<MasterSetsPage> {
     for (final entry in _savedCopyCountsBySetId.entries) {
       final setId = entry.key.trim();
       final count = entry.value;
-      if (count <= 0 || !setId.startsWith('jp_')) continue;
+      if (count <= 0 || matchedSetIds.contains(setId)) continue;
 
-      entries.add(
-        _CollectedSetEntry.japanese(
-          setId: setId,
-          set: japaneseSetsByCollectionId[setId],
-          savedCopies: count,
-        ),
-      );
+      if (setId.startsWith('jp_')) {
+        entries.add(
+          _CollectedSetEntry.japanese(
+            setId: setId,
+            set: japaneseSetsByCollectionId[setId],
+            savedCopies: count,
+          ),
+        );
+      } else {
+        entries.add(
+          _CollectedSetEntry.englishFallback(
+            setId: setId,
+            savedCopies: count,
+          ),
+        );
+      }
     }
 
     entries.sort((a, b) {
@@ -412,20 +493,41 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                   SizedBox(
                     height: 64,
                     width: double.infinity,
-                    child: entry.isJapanese
-                        ? _JapaneseSetLogoPreview(set: entry.japaneseSet, setId: entry.rawJapaneseSetId)
-                        : ResolvedSetLogo(
-                            setId: entry.setId,
-                            setName: entry.name,
-                            fallbackLogoUrl: entry.logoUrl,
-                            height: 64,
-                            fit: BoxFit.contain,
-                            textStyle: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
+                    child: entry.setId.trim().toLowerCase() == 'mep'
+                        ? Center(
+                            child: Image.asset(
+                              'assets/images/first_partner_series_collection_logo.png',
+                              height: 64,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Text(
+                                'First Partner Series Collection 2026',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Color(0xFFF7DE77),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 17,
+                                ),
+                              ),
                             ),
-                          ),
+                          )
+                        : entry.isJapanese
+                            ? _JapaneseSetLogoPreview(
+                                set: entry.japaneseSet,
+                                setId: entry.rawJapaneseSetId,
+                              )
+                            : ResolvedSetLogo(
+                                setId: entry.setId,
+                                setName: entry.name,
+                                fallbackLogoUrl: entry.logoUrl,
+                                height: 64,
+                                fit: BoxFit.contain,
+                                textStyle: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 18,
+                                ),
+                              ),
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -454,7 +556,9 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                       ],
                       Flexible(
                         child: Text(
-                          entry.name,
+                          entry.setId.trim().toLowerCase() == 'mep'
+                              ? 'First Partner Series Collection 2026'
+                              : entry.name,
                           textAlign: TextAlign.center,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -509,21 +613,14 @@ class MasterSetsPageState extends State<MasterSetsPage> {
         if (snapshot.connectionState == ConnectionState.waiting || !_loadedCollectionState) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Could not load sets: ${snapshot.error}',
-              style: const TextStyle(color: Colors.white),
-            ),
-          );
-        }
-
         final catalogue = snapshot.data ?? const _SetCatalogue(
           englishSets: <TcgSet>[],
           japaneseSets: <JapaneseTcgSet>[],
         );
         final entries = _buildCollectedSetEntries(catalogue);
-        final totalSets = catalogue.englishSets.length + catalogue.japaneseSets.length;
+        final loadedSetTotal =
+            catalogue.englishSets.length + catalogue.japaneseSets.length;
+        final totalSets = loadedSetTotal > 0 ? loadedSetTotal : entries.length;
 
         return RefreshIndicator(
           onRefresh: refreshSets,
@@ -688,7 +785,9 @@ class MasterSetsPageState extends State<MasterSetsPage> {
                     onTap: () async {
                       await Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => CustomBinderPage(binder: binder),
+                          builder: (_) => custom_binder_page.CustomBinderPage(
+                            binder: binder,
+                          ),
                         ),
                       );
                       await _loadCustomBinderState();
@@ -767,15 +866,26 @@ class MasterSetsPageState extends State<MasterSetsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildViewToggle(),
-        Expanded(
-          child: _viewMode == MasterSetsViewMode.setPokedex
-              ? _buildSetPokedexView()
-              : _buildCustomBindersView(),
-        ),
+    // The navigation belongs to the scrolling page, not a fixed header.
+    // National Pokédex includes it in its own single ListView. For the Set
+    // Pokédex and Custom Binders we coordinate the existing lists with a
+    // non-pinned sliver, preserving their pull-to-refresh and item layouts.
+    if (_viewMode == MasterSetsViewMode.nationalPokedex) {
+      return NationalPokedexPage(
+        embedded: true,
+        scrollHeader: _buildViewToggle(),
+      );
+    }
+
+    return NestedScrollView(
+      headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+        SliverToBoxAdapter(child: _buildViewToggle()),
       ],
+      body: switch (_viewMode) {
+        MasterSetsViewMode.setPokedex => _buildSetPokedexView(),
+        MasterSetsViewMode.customBinders => _buildCustomBindersView(),
+        MasterSetsViewMode.nationalPokedex => const SizedBox.shrink(),
+      },
     );
   }
 }
@@ -815,19 +925,54 @@ class _CollectedSetEntry {
     );
   }
 
+  factory _CollectedSetEntry.englishFallback({
+    required String setId,
+    required int savedCopies,
+  }) {
+    final normalized = setId.trim().toLowerCase();
+    final displayName = normalized == '30th'
+        ? '30th Celebration'
+        : normalized == 'mep'
+            ? 'First Partner Series Collection 2026'
+            : setId;
+    final fallbackSet = TcgSet(
+      id: setId,
+      name: displayName,
+      series: '',
+      total: 0,
+      releaseDate: '',
+    );
+    return _CollectedSetEntry._(
+      setId: setId,
+      name: displayName,
+      savedCopies: savedCopies,
+      releaseDate: '',
+      englishSet: fallbackSet,
+    );
+  }
+
   factory _CollectedSetEntry.japanese({
     required String setId,
     required JapaneseTcgSet? set,
     required int savedCopies,
   }) {
     final rawSetId = setId.startsWith('jp_') ? setId.substring(3) : setId;
+    final fallbackSet = JapaneseTcgSet(
+      id: rawSetId,
+      name: rawSetId,
+      series: '',
+      logoUrl: '',
+      symbolUrl: '',
+      releaseDate: '',
+      cardCount: 0,
+    );
     return _CollectedSetEntry._(
       setId: setId,
-      name: set?.displayName ?? rawSetId,
+      name: set?.displayName ?? fallbackSet.displayName,
       logoUrl: set?.logoUrl,
       savedCopies: savedCopies,
       releaseDate: set?.releaseDate ?? '',
-      japaneseSet: set,
+      japaneseSet: set ?? fallbackSet,
     );
   }
 

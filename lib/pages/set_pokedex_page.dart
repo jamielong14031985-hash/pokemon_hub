@@ -12,7 +12,9 @@ import '../utils/master_set_slot_helpers.dart';
 import '../widgets/collection_stat_card.dart';
 import '../widgets/master_set_slot_tile.dart';
 import '../widgets/set_logo_widgets.dart';
+import 'first_partner_promo_cards_page.dart';
 import 'set_card_details_page.dart';
+import 'thirty_celebration_price_audit_page.dart';
 
 class SetPokedexPage extends StatefulWidget {
   const SetPokedexPage({super.key, required this.set});
@@ -56,6 +58,18 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
   }
 
   Future<List<TcgCard>> _loadCards() async {
+    if (widget.set.id.trim().toLowerCase() == 'mep') {
+      // This is the First Partner Series Collection 2026 binder, not the
+      // unfiltered MEP promo catalogue. Only the 27 designated promo cards
+      // belong in this specific view. Combining full remote MEP results
+      // and historical saved IDs created duplicates such as 037-bulbasaur.
+      // This does not delete or rewrite anyone's saved collection data.
+      final cards = FirstPartnerPromoCardsPage.knownMepPromoCards().toList()
+        ..sort((a, b) => compareCardNumbers(a.number, b.number));
+      _allCards = cards;
+      return cards;
+    }
+
     final cards = await PokemonTcgService.fetchCardsBySet(widget.set.id);
     cards.sort((a, b) => compareCardNumbers(a.number, b.number));
     _allCards = cards;
@@ -85,7 +99,22 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
   }
 
   CardOwnership _ownershipFor(TcgCard card) {
-    return _ownershipByCardId[card.id] ?? const CardOwnership();
+    final canonical = _ownershipByCardId[card.id] ?? const CardOwnership();
+    if (widget.set.id.trim().toLowerCase() != 'mep') return canonical;
+
+    // An older provider sometimes appended the card name to the ID:
+    //   mep-037-bulbasaur versus mep-037.
+    // Read that *same-name* record as an ownership alias, so two actual
+    // Bulbasaur copies show on one checklist card. Never match merely on
+    // promo number: mep-037-ns-zekrom is not a Bulbasaur card.
+    final slug = card.name.trim().toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    final alias = _ownershipByCardId['${card.id}-$slug'];
+    if (alias != null && alias.collectionCount > canonical.collectionCount) {
+      return alias;
+    }
+    return canonical;
   }
 
   Future<void> _updateOwnership(TcgCard card, CardOwnership ownership) async {
@@ -184,17 +213,8 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     });
   }
 
-  int _pageForSlot(MasterSetCardSlot targetSlot, List<MasterSetCardSlot> visibleSlots) {
-    final slotIndex = visibleSlots.indexWhere(
-      (slot) => slot.card.id == targetSlot.card.id && slot.kind == targetSlot.kind,
-    );
-    if (slotIndex < 0) return _currentPage;
-    return (slotIndex ~/ _cardsPerPage) + 1;
-  }
-
   Route<dynamic> _buildCardDetailsRoute({
     required MasterSetCardSlot slot,
-    required CardOwnership ownership,
     required List<MasterSetCardSlot> visibleSlots,
     required int currentIndex,
     required bool slideFromRight,
@@ -203,13 +223,15 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
       transitionDuration: const Duration(milliseconds: 260),
       reverseTransitionDuration: Duration.zero,
       pageBuilder: (context, animation, secondaryAnimation) {
-        return SetCardDetailsPage(
-          card: slot.card,
-          ownership: ownership,
-          initialSlotKind: slot.kind,
-          navigationCards: visibleSlots.map((slot) => slot.card).toList(),
-          navigationSlotKinds: visibleSlots.map((slot) => slot.kind).toList(),
-          navigationIndex: currentIndex,
+        return _BinderCardSwipeViewer(
+          slots: visibleSlots,
+          initialIndex: currentIndex,
+          ownershipFor: _ownershipFor,
+          onCardLeft: (cardId, updated) {
+            // Keep unsaved edits when changing cards. Persist as one batch
+            // when the viewer finally closes, not on every horizontal swipe.
+            _ownershipByCardId[cardId] = updated;
+          },
         );
       },
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -252,50 +274,28 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
     var currentIndex = visibleSlots.indexWhere(
       (candidate) => candidate.card.id == slot.card.id && candidate.kind == slot.kind,
     );
-    if (currentIndex < 0) {
-      currentIndex = 0;
+    if (currentIndex < 0) currentIndex = 0;
+
+    // One route for the whole browsing session. Swipes inside the viewer do
+    // not return to this binder or trigger a database sync between cards.
+    final result = await Navigator.of(context).push<dynamic>(
+      _buildCardDetailsRoute(
+        slot: visibleSlots[currentIndex],
+        visibleSlots: visibleSlots,
+        currentIndex: currentIndex,
+        slideFromRight: true,
+      ),
+    );
+    if (!mounted) return;
+
+    if (result is SetCardDetailsResult) {
+      _ownershipByCardId[result.cardId] = result.ownership;
+    } else if (result is CardOwnership) {
+      _ownershipByCardId[visibleSlots[currentIndex].card.id] = result;
     }
 
-    var previousIndex = currentIndex;
-
-    while (mounted && currentIndex >= 0 && currentIndex < visibleSlots.length) {
-      final currentSlot = visibleSlots[currentIndex];
-      final slideFromRight = currentIndex >= previousIndex;
-      if (!mounted) return;
-      final result = await Navigator.of(context).push<dynamic>(
-        _buildCardDetailsRoute(
-          slot: currentSlot,
-          ownership: _ownershipFor(currentSlot.card),
-          visibleSlots: visibleSlots,
-          currentIndex: currentIndex,
-          slideFromRight: slideFromRight,
-        ),
-      );
-
-      if (!mounted) return;
-
-      if (result is SetCardDetailsResult) {
-        await _updateOwnershipForCardId(result.cardId, result.ownership);
-
-        final nextIndex = result.nextIndex;
-        if (nextIndex != null && nextIndex >= 0 && nextIndex < visibleSlots.length) {
-          final nextSlot = visibleSlots[nextIndex];
-          final totalPages = visibleSlots.isEmpty
-              ? 1
-              : ((visibleSlots.length - 1) ~/ _cardsPerPage) + 1;
-          _goToPokedexPage(_pageForSlot(nextSlot, visibleSlots), totalPages);
-          previousIndex = currentIndex;
-          currentIndex = nextIndex;
-          continue;
-        }
-        break;
-      }
-
-      if (result is CardOwnership) {
-        await _updateOwnership(currentSlot.card, result);
-      }
-      break;
-    }
+    setState(() {});
+    await _saveOwnership();
   }
 
   List<TcgCard> get _filteredCards {
@@ -401,6 +401,19 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
         title: const Text(''),
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
+        actions: <Widget>[
+          if (widget.set.id.trim().toLowerCase() == '30th')
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (context) => const ThirtyCelebrationPriceAuditPage(),
+                ),
+              ),
+              icon: const Icon(Icons.fact_check_outlined, color: Color(0xFFF7DE77)),
+              label: const Text('Price audit',
+                  style: TextStyle(color: Color(0xFFF7DE77))),
+            ),
+        ],
       ),
       body: FutureBuilder<List<TcgCard>>(
         future: _futureCards,
@@ -458,23 +471,49 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
               child: Column(
                 children: [
                   Transform.translate(
+                    // Use the same header position for First Partner and
+                    // other set pages (including 30th Celebration).
                     offset: const Offset(0, 6),
                     child: Padding(
                       padding: const EdgeInsets.only(left: 2, right: 2),
                       child: Column(
                         children: [
-                          ResolvedSetLogo(
-                            setId: widget.set.id,
-                            setName: widget.set.name,
-                            fallbackLogoUrl: widget.set.logoUrl,
-                            height: 64,
-                            fit: BoxFit.contain,
-                            textStyle: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
-                            ),
-                          ),
+                          widget.set.id.trim().toLowerCase() == 'mep'
+                              ? SizedBox(
+                                  height: 64,
+                                  child: Center(
+                                    // Keep the full logo within the same
+                                    // 64 logical-pixel slot as normal set logos.
+                                    // Do not paint it outside its bounds.
+                                    child: Image.asset(
+                                      'assets/images/first_partner_series_collection_logo.png',
+                                      height: 64,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (context, error, stackTrace) =>
+                                          const Text(
+                                        'First Partner Series Collection 2026',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : ResolvedSetLogo(
+                                  setId: widget.set.id,
+                                  setName: widget.set.name,
+                                  fallbackLogoUrl: widget.set.logoUrl,
+                                  height: 64,
+                                  fit: BoxFit.contain,
+                                  textStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 18,
+                                  ),
+                                ),
                           const SizedBox(height: 4),
                           Row(
                             children: [
@@ -585,7 +624,8 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
                                 curve: Curves.easeOutCubic,
                                 padding: const EdgeInsets.symmetric(horizontal: 2),
                                 child: GridView.builder(
-                                  physics: const NeverScrollableScrollPhysics(),
+                                  physics: const BouncingScrollPhysics(),
+                                  padding: const EdgeInsets.only(bottom: 12),
                                   itemCount: pageSlots.length,
                                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                     crossAxisCount: 3,
@@ -700,6 +740,80 @@ class _SetPokedexPageState extends State<SetPokedexPage> {
           );
         },
       ),
+    );
+  }
+}
+
+// Keep one card-detail route open while moving between binder cards.
+// This avoids flashing the binder and rebuilding its entire navigation stack
+// on every swipe. Only the selected card widget is replaced.
+class _BinderCardSwipeViewer extends StatefulWidget {
+  const _BinderCardSwipeViewer({
+    required this.slots,
+    required this.initialIndex,
+    required this.ownershipFor,
+    required this.onCardLeft,
+  });
+
+  final List<MasterSetCardSlot> slots;
+  final int initialIndex;
+  final CardOwnership Function(TcgCard card) ownershipFor;
+  final void Function(String cardId, CardOwnership ownership) onCardLeft;
+
+  @override
+  State<_BinderCardSwipeViewer> createState() => _BinderCardSwipeViewerState();
+}
+
+class _BinderCardSwipeViewerState extends State<_BinderCardSwipeViewer> {
+  late int _index;
+  late final List<TcgCard> _cards;
+  late final List<MasterSetSlotKind> _kinds;
+  final Set<String> _warming = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _cards = widget.slots.map((slot) => slot.card).toList(growable: false);
+    _kinds = widget.slots.map((slot) => slot.kind).toList(growable: false);
+    _warmNeighbourImages();
+  }
+
+  // Cache only adjacent card images. Network requests are asynchronous, and
+  // the user never needs to wait for an image to start the next swipe.
+  void _warmNeighbourImages() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final nearby in <int>[_index - 1, _index + 1]) {
+        if (nearby < 0 || nearby >= widget.slots.length) continue;
+        final card = widget.slots[nearby].card;
+        final url = (card.largeImageUrl ?? card.imageUrl ?? '').trim();
+        if (url.isEmpty || !_warming.add(url)) continue;
+        precacheImage(NetworkImage(url), context).catchError((_) {});
+      }
+    });
+  }
+
+  void _goTo(int nextIndex, CardOwnership currentOwnership) {
+    if (!mounted || nextIndex < 0 || nextIndex >= widget.slots.length) return;
+    final currentSlot = widget.slots[_index];
+    widget.onCardLeft(currentSlot.card.id, currentOwnership);
+    setState(() => _index = nextIndex);
+    _warmNeighbourImages();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slot = widget.slots[_index];
+    return SetCardDetailsPage(
+      key: ValueKey<String>('binder-slot-$_index-${slot.card.id}'),
+      card: slot.card,
+      ownership: widget.ownershipFor(slot.card),
+      initialSlotKind: slot.kind,
+      navigationCards: _cards,
+      navigationSlotKinds: _kinds,
+      navigationIndex: _index,
+      onSwipeNavigate: _goTo,
     );
   }
 }

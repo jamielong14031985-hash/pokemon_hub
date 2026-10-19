@@ -73,6 +73,41 @@ class LocalPokedexStore {
     collectionRefreshNotifier.value++;
   }
 
+  static Future<bool> mergeSetsInto({
+    required String targetSetId,
+    required Iterable<String> sourceSetIds,
+  }) async {
+    final cleanTargetId = targetSetId.trim();
+    if (cleanTargetId.isEmpty) return false;
+
+    final prefs = await SharedPreferences.getInstance();
+    final merged = await loadSetOwnershipMap(cleanTargetId);
+    var changed = false;
+
+    for (final rawSourceId in sourceSetIds) {
+      final sourceId = rawSourceId.trim();
+      if (sourceId.isEmpty || sourceId == cleanTargetId) continue;
+
+      final source = await loadSetOwnershipMap(sourceId);
+      for (final entry in source.entries) {
+        if (!hasSavedCopies(entry.value)) continue;
+        // The same physical card may already have been migrated by an earlier
+        // build. Keep the existing target record instead of doubling copies.
+        merged.putIfAbsent(entry.key, () => entry.value);
+      }
+
+      if (source.isNotEmpty || prefs.containsKey(storageKeyForSet(sourceId))) {
+        await prefs.remove(storageKeyForSet(sourceId));
+        changed = true;
+      }
+    }
+
+    if (!changed) return false;
+    await saveSetOwnershipMap(cleanTargetId, merged, notify: false);
+    collectionRefreshNotifier.value++;
+    return true;
+  }
+
   static Future<Set<String>> allTrackedSetIds() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs
@@ -80,6 +115,47 @@ class LocalPokedexStore {
         .where((key) => key.startsWith('set_pokedex_'))
         .map((key) => key.replaceFirst('set_pokedex_', ''))
         .toSet();
+  }
+
+  static Future<Map<String, Map<String, CardOwnership>>>
+      loadAllOwnershipBySet() async {
+    final setIds = await allTrackedSetIds();
+    final ownershipBySet = <String, Map<String, CardOwnership>>{};
+
+    for (final setId in setIds) {
+      final ownership = await loadSetOwnershipMap(setId);
+      final saved = <String, CardOwnership>{
+        for (final entry in ownership.entries)
+          if (hasSavedCopies(entry.value)) entry.key: entry.value,
+      };
+      if (saved.isNotEmpty) ownershipBySet[setId] = saved;
+    }
+
+    return ownershipBySet;
+  }
+
+  static Future<void> replaceAllOwnershipBySet(
+    Map<String, Map<String, CardOwnership>> ownershipBySet,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final existingKeys = prefs
+        .getKeys()
+        .where((key) => key.startsWith('set_pokedex_'))
+        .toList(growable: false);
+
+    for (final key in existingKeys) {
+      await prefs.remove(key);
+    }
+
+    for (final setEntry in ownershipBySet.entries) {
+      await saveSetOwnershipMap(
+        setEntry.key,
+        setEntry.value,
+        notify: false,
+      );
+    }
+
+    collectionRefreshNotifier.value++;
   }
 
   static Future<Set<String>> allNonEmptySetIds() async {

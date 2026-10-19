@@ -575,6 +575,12 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
         final updatedPostData = updatedPost.toJson();
         updatedPostData['area'] = safeArea?.label ?? '';
         updatedPostData['areaKey'] = safeArea?.key ?? '';
+        updatedPostData['moderationStatus'] =
+            safeImages.isEmpty ? 'not_required' : 'pending';
+        updatedPostData['moderationSubmittedAtMs'] =
+            safeImages.isEmpty ? null : now;
+        updatedPostData['moderatedAtMs'] = null;
+        updatedPostData['moderatedByUid'] = '';
 
         await FirebaseFirestore.instance
             .collection('community_posts')
@@ -609,12 +615,18 @@ class _CreateCommunityPostSheetState extends State<CreateCommunityPostSheet> {
         final postData = post.toJson();
         postData['area'] = safeArea?.label ?? '';
         postData['areaKey'] = safeArea?.key ?? '';
+        postData['moderationStatus'] =
+            safeImages.isEmpty ? 'not_required' : 'pending';
+        postData['moderationSubmittedAtMs'] =
+            safeImages.isEmpty ? null : now;
+        postData['moderatedAtMs'] = null;
+        postData['moderatedByUid'] = '';
 
         await postDoc.set(postData);
       }
 
       if (!mounted) return;
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(safeImages.isNotEmpty);
     } on FirebaseException catch (error) {
       _showComposerMessage(
         error.message ??

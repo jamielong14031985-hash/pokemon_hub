@@ -287,6 +287,11 @@ class TcgCard {
     this.externalRawPriceCurrency = 'USD',
     this.externalRawPriceSource = '',
     this.externalRawPriceUpdatedAtMs,
+    this.externalRawPriceLow,
+    this.externalRawPriceHigh,
+    this.externalRawPriceSoldCount = 0,
+    this.externalRawPriceConfidence = '',
+    this.externalRawPriceMethod = '',
     this.rawPriceBreakdown = const {},
     this.gradedPrices = const {},
     this.hasNormalVariant,
@@ -314,20 +319,30 @@ class TcgCard {
   final String externalRawPriceCurrency;
   final String externalRawPriceSource;
   final int? externalRawPriceUpdatedAtMs;
+  final double? externalRawPriceLow;
+  final double? externalRawPriceHigh;
+  final int externalRawPriceSoldCount;
+  final String externalRawPriceConfidence;
+  final String externalRawPriceMethod;
   final Map<String, double> rawPriceBreakdown;
   final Map<String, double> gradedPrices;
   final bool? hasNormalVariant;
   final bool? hasReverseHoloVariant;
   final bool? hasHoloVariant;
 
-  double? get marketPrice => (rawPrice ?? 0) > 0 ? rawPrice : externalRawPrice;
+  double? get marketPrice =>
+      (externalRawPrice ?? 0) > 0 ? externalRawPrice : rawPrice;
 
-  String get marketPriceCurrency => (rawPrice ?? 0) > 0 ? rawPriceCurrency : externalRawPriceCurrency;
+  String get marketPriceCurrency => (externalRawPrice ?? 0) > 0
+      ? externalRawPriceCurrency
+      : rawPriceCurrency;
 
   String get marketPriceSource {
-    if ((rawPrice ?? 0) > 0) return rawPriceSource;
-    final source = externalRawPriceSource.trim();
-    return source.isEmpty ? 'External pricing' : source;
+    if ((externalRawPrice ?? 0) > 0) {
+      final source = externalRawPriceSource.trim();
+      return source.isEmpty ? 'External pricing' : source;
+    }
+    return rawPriceSource.trim().isEmpty ? 'Provider market guide' : rawPriceSource;
   }
 
   bool get hasLiveMarketPrice => (marketPrice ?? 0) > 0;
@@ -355,6 +370,12 @@ class TcgCard {
     String? externalRawPriceCurrency,
     String? externalRawPriceSource,
     int? externalRawPriceUpdatedAtMs,
+    double? externalRawPriceLow,
+    double? externalRawPriceHigh,
+    int? externalRawPriceSoldCount,
+    String? externalRawPriceConfidence,
+    String? externalRawPriceMethod,
+    bool clearExternalRawPrice = false,
     Map<String, double>? rawPriceBreakdown,
     Map<String, double>? gradedPrices,
     bool? hasNormalVariant,
@@ -378,10 +399,32 @@ class TcgCard {
       rawPrice: rawPrice ?? this.rawPrice,
       rawPriceCurrency: rawPriceCurrency ?? this.rawPriceCurrency,
       rawPriceSource: rawPriceSource ?? this.rawPriceSource,
-      externalRawPrice: externalRawPrice ?? this.externalRawPrice,
-      externalRawPriceCurrency: externalRawPriceCurrency ?? this.externalRawPriceCurrency,
-      externalRawPriceSource: externalRawPriceSource ?? this.externalRawPriceSource,
-      externalRawPriceUpdatedAtMs: externalRawPriceUpdatedAtMs ?? this.externalRawPriceUpdatedAtMs,
+      externalRawPrice:
+          clearExternalRawPrice ? null : externalRawPrice ?? this.externalRawPrice,
+      externalRawPriceCurrency: clearExternalRawPrice
+          ? 'USD'
+          : externalRawPriceCurrency ?? this.externalRawPriceCurrency,
+      externalRawPriceSource: clearExternalRawPrice
+          ? ''
+          : externalRawPriceSource ?? this.externalRawPriceSource,
+      externalRawPriceUpdatedAtMs: clearExternalRawPrice
+          ? null
+          : externalRawPriceUpdatedAtMs ?? this.externalRawPriceUpdatedAtMs,
+      externalRawPriceLow: clearExternalRawPrice
+          ? null
+          : externalRawPriceLow ?? this.externalRawPriceLow,
+      externalRawPriceHigh: clearExternalRawPrice
+          ? null
+          : externalRawPriceHigh ?? this.externalRawPriceHigh,
+      externalRawPriceSoldCount: clearExternalRawPrice
+          ? 0
+          : externalRawPriceSoldCount ?? this.externalRawPriceSoldCount,
+      externalRawPriceConfidence: clearExternalRawPrice
+          ? ''
+          : externalRawPriceConfidence ?? this.externalRawPriceConfidence,
+      externalRawPriceMethod: clearExternalRawPrice
+          ? ''
+          : externalRawPriceMethod ?? this.externalRawPriceMethod,
       rawPriceBreakdown: rawPriceBreakdown ?? this.rawPriceBreakdown,
       gradedPrices: gradedPrices ?? this.gradedPrices,
       hasNormalVariant: hasNormalVariant ?? this.hasNormalVariant,
@@ -441,6 +484,27 @@ class TcgCard {
     // 2015 Treecko: den-cards.pokellector.com/182/Treecko.MCD5.1.png
     for (final pokellectorUrl in _pokellectorMcdonaldsImageUrls()) {
       candidates.add(pokellectorUrl);
+    }
+
+    // Try the two most reliable exact card paths first. TCGdex CardBrief
+    // records occasionally omit `image`, particularly for older promos,
+    // dotted set IDs and subset IDs. Normalising the set ID here fixes cards
+    // such as sm7.5-3 and swsh4.5sv-SV107 without waiting for dozens of
+    // speculative CDN paths to fail one by one.
+    for (final candidateSetId in _setIdCandidates()) {
+      for (final candidateNumber in numberCandidates) {
+        final encodedSetId = Uri.encodeComponent(candidateSetId);
+        final encodedNumber = Uri.encodeComponent(candidateNumber);
+        final pokemonCardId = Uri.encodeComponent(
+          '$candidateSetId-$candidateNumber',
+        );
+        candidates.add(
+          'https://images.pokemoncard.io/images/$encodedSetId/$pokemonCardId.png',
+        );
+        candidates.add(
+          'https://images.pokemontcg.io/$encodedSetId/$encodedNumber.png',
+        );
+      }
     }
 
     // For McDonald's sets, try PokemonCard.io direct card images first.
@@ -506,6 +570,7 @@ class TcgCard {
     final rawSetId = setId.trim().toLowerCase();
     final candidates = <String>[
       rawSetId,
+      rawSetId.replaceAll('.', ''),
       ..._mcdonaldsSetAliases(),
     ];
 
@@ -649,10 +714,10 @@ class TcgCard {
   }
 
   List<String> _pokemonCardImageSetIdCandidates() {
-    if (!_isMcdonaldsCard) return const <String>[];
-
+    final rawSetId = setId.trim().toLowerCase();
     final candidates = <String>[
-      setId.trim().toLowerCase(),
+      rawSetId,
+      rawSetId.replaceAll('.', ''),
       ..._mcdonaldsSetAliases(),
     ];
 
@@ -660,8 +725,6 @@ class TcgCard {
   }
 
   List<String> _pokemonCardImageCardIdCandidates() {
-    if (!_isMcdonaldsCard) return const <String>[];
-
     final setCandidates = _pokemonCardImageSetIdCandidates();
     final numberCandidates = _imageNumberCandidates();
     final candidates = <String>[
@@ -712,10 +775,12 @@ class TcgCard {
   }
 
   List<String> _tcgDexSetIdCandidates() {
-    if (!_isMcdonaldsCard) return const <String>[];
-
     final text = '$id $setId $setName'.toLowerCase();
-    final candidates = <String>[];
+    final rawSetId = setId.trim();
+    final candidates = <String>[
+      rawSetId,
+      rawSetId.replaceAll('.', ''),
+    ];
 
     final knownMappings = <String, String>{
       '2014': '2014xy',
@@ -884,6 +949,11 @@ class TcgCard {
       externalRawPriceCurrency: baseCard.externalRawPriceCurrency,
       externalRawPriceSource: baseCard.externalRawPriceSource,
       externalRawPriceUpdatedAtMs: baseCard.externalRawPriceUpdatedAtMs,
+      externalRawPriceLow: baseCard.externalRawPriceLow,
+      externalRawPriceHigh: baseCard.externalRawPriceHigh,
+      externalRawPriceSoldCount: baseCard.externalRawPriceSoldCount,
+      externalRawPriceConfidence: baseCard.externalRawPriceConfidence,
+      externalRawPriceMethod: baseCard.externalRawPriceMethod,
       rawPriceBreakdown: baseCard.rawPriceBreakdown,
       gradedPrices: baseCard.gradedPrices,
       hasNormalVariant: baseCard.hasNormalVariant,

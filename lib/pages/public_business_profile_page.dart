@@ -188,7 +188,6 @@ class PublicBusinessProfilePage extends StatelessWidget {
     return Scaffold(
       backgroundColor: _backgroundColor,
       appBar: AppBar(
-        title: const Text('Business Profile'),
         backgroundColor: _backgroundColor,
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
@@ -251,105 +250,96 @@ class _PublicHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bannerUrl = profile.bannerUrl.trim();
+    final logoUrl = profile.logoUrl.trim();
+    final profileImageUrl = logoUrl.isNotEmpty ? logoUrl : bannerUrl;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: PublicBusinessProfilePage._cardColor,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: PublicBusinessProfilePage._goldColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.22),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(27),
-        child: SizedBox(
-          height: 265,
-          width: double.infinity,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (bannerUrl.isNotEmpty)
-                Image.network(
-                  bannerUrl,
-                  fit: BoxFit.cover,
-                  alignment: Alignment.center,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const _BannerPlaceholder();
-                  },
-                )
-              else
-                const _BannerPlaceholder(),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.02),
-                      PublicBusinessProfilePage._backgroundColor.withValues(
-                        alpha: 0.22,
-                      ),
-                      PublicBusinessProfilePage._backgroundColor.withValues(
-                        alpha: 0.96,
-                      ),
-                    ],
-                    stops: const [0.28, 0.58, 1],
-                  ),
-                ),
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: PublicBusinessProfilePage._cardColor,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: PublicBusinessProfilePage._goldColor),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.20),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
-              Positioned(
-                left: 16,
-                right: 16,
-                bottom: 16,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (profile.verified) ...[
-                      const _TinyBadge(
-                        icon: Icons.verified_outlined,
-                        text: 'Verified',
-                        highlighted: true,
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    Text(
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(23),
+            child: AspectRatio(
+              aspectRatio: 2,
+              child: profileImageUrl.isNotEmpty
+                  ? Image.network(
+                      profileImageUrl,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                      filterQuality: FilterQuality.high,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const _BannerPlaceholder();
+                      },
+                    )
+                  : const _BannerPlaceholder(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: PublicBusinessProfilePage._cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: PublicBusinessProfilePage._borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
                       title,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 28,
+                        fontSize: 21,
                         fontWeight: FontWeight.w900,
-                        height: 1.02,
-                        letterSpacing: -0.4,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 9,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        _HeroRatingChip(
-                          businessId: profile.id,
-                          onTap: onReviews,
-                        ),
-                        _OpenNowBadge(profile: profile),
-                      ],
+                  ),
+                  if (profile.verified)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Icon(
+                        Icons.verified,
+                        color: PublicBusinessProfilePage._goldColor,
+                        size: 21,
+                      ),
                     ),
-                  ],
-                ),
+                ],
+              ),
+              const SizedBox(height: 9),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _HeroRatingChip(
+                    businessId: profile.id,
+                    onTap: onReviews,
+                  ),
+                  _OpenNowBadge(profile: profile),
+                ],
               ),
             ],
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -866,30 +856,24 @@ class _QuickActionsCard extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: PublicBusinessProfilePage._cardColor,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: PublicBusinessProfilePage._borderColor),
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          const spacing = 10.0;
-          final buttonWidth = (constraints.maxWidth - spacing) / 2;
-
-          return Wrap(
-            spacing: spacing,
-            runSpacing: spacing,
-            children: [
-              for (final button in buttons)
-                SizedBox(
-                  width: buttonWidth,
-                  height: 58,
-                  child: button,
-                ),
-            ],
-          );
-        },
+      child: Row(
+        children: [
+          for (var index = 0; index < buttons.length; index++) ...[
+            if (index > 0) const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 48,
+                child: buttons[index],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1062,61 +1046,8 @@ class _BannerPlaceholder extends StatelessWidget {
         child: Icon(
           Icons.storefront_outlined,
           color: PublicBusinessProfilePage._goldColor,
-          size: 46,
+          size: 36,
         ),
-      ),
-    );
-  }
-}
-
-class _TinyBadge extends StatelessWidget {
-  const _TinyBadge({
-    required this.icon,
-    required this.text,
-    required this.highlighted,
-  });
-
-  final IconData icon;
-  final String text;
-  final bool highlighted;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: highlighted
-            ? PublicBusinessProfilePage._goldColor
-            : PublicBusinessProfilePage._fieldColor,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: highlighted
-              ? PublicBusinessProfilePage._goldColor
-              : PublicBusinessProfilePage._borderColor,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            color: highlighted
-                ? PublicBusinessProfilePage._backgroundColor
-                : PublicBusinessProfilePage._goldColor,
-            size: 15,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            text,
-            style: TextStyle(
-              color: highlighted
-                  ? PublicBusinessProfilePage._backgroundColor
-                  : Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
       ),
     );
   }

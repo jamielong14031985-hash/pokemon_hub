@@ -1,6 +1,7 @@
 import '../models/card_ownership.dart';
 import '../models/tcg_card.dart';
 import 'card_number_sorter.dart';
+import 'english_grand_master_extra_printings.dart';
 import 'english_grand_master_catalog.dart';
 
 enum MasterSetSlotKind {
@@ -9,6 +10,12 @@ enum MasterSetSlotKind {
   holo,
   pokeBallReverse,
   masterBallReverse,
+  energySymbolReverse,
+  duskBallReverse,
+  loveBallReverse,
+  friendBallReverse,
+  quickBallReverse,
+  teamRocketReverse,
   firstEditionNormal,
   firstEditionHolo,
   unlimitedNormal,
@@ -34,6 +41,12 @@ extension MasterSetSlotKindDetails on MasterSetSlotKind {
       case MasterSetSlotKind.holo: return 'Holo';
       case MasterSetSlotKind.pokeBallReverse: return 'Poke Ball Reverse';
       case MasterSetSlotKind.masterBallReverse: return 'Master Ball Reverse';
+      case MasterSetSlotKind.energySymbolReverse: return 'Energy Symbol Reverse';
+      case MasterSetSlotKind.duskBallReverse: return 'Dusk Ball Reverse';
+      case MasterSetSlotKind.loveBallReverse: return 'Love Ball Reverse';
+      case MasterSetSlotKind.friendBallReverse: return 'Friend Ball Reverse';
+      case MasterSetSlotKind.quickBallReverse: return 'Quick Ball Reverse';
+      case MasterSetSlotKind.teamRocketReverse: return 'Team Rocket Reverse';
       case MasterSetSlotKind.firstEditionNormal: return '1st Edition Normal';
       case MasterSetSlotKind.firstEditionHolo: return '1st Edition Holo';
       case MasterSetSlotKind.unlimitedNormal: return 'Unlimited Normal';
@@ -57,6 +70,12 @@ extension MasterSetSlotKindDetails on MasterSetSlotKind {
       case MasterSetSlotKind.holo: return 'H';
       case MasterSetSlotKind.pokeBallReverse: return 'PB';
       case MasterSetSlotKind.masterBallReverse: return 'MB';
+      case MasterSetSlotKind.energySymbolReverse: return 'ES';
+      case MasterSetSlotKind.duskBallReverse: return 'DB';
+      case MasterSetSlotKind.loveBallReverse: return 'LB';
+      case MasterSetSlotKind.friendBallReverse: return 'FB';
+      case MasterSetSlotKind.quickBallReverse: return 'QB';
+      case MasterSetSlotKind.teamRocketReverse: return 'TR';
       case MasterSetSlotKind.firstEditionNormal: return '1E';
       case MasterSetSlotKind.firstEditionHolo: return '1E H';
       case MasterSetSlotKind.unlimitedNormal: return 'UL';
@@ -85,10 +104,13 @@ class MasterSetCardSlot {
   final TcgCard card;
   final MasterSetSlotKind kind;
 
+  bool get _usesSinglePrintOwnership =>
+      isSinglePrintSetCard(card) && kind == MasterSetSlotKind.normal;
+
   String get shortLabel {
     switch (kind) {
       case MasterSetSlotKind.normal:
-        if (isSinglePrintSetCard(card)) return 'H';
+        if (_usesSinglePrintOwnership) return 'H';
         return _printedRarityLabel(card);
       case MasterSetSlotKind.reverseHolo:
         return 'RH';
@@ -99,6 +121,18 @@ class MasterSetCardSlot {
         return 'PB';
       case MasterSetSlotKind.masterBallReverse:
         return 'MB';
+      case MasterSetSlotKind.energySymbolReverse:
+        return 'ES';
+      case MasterSetSlotKind.duskBallReverse:
+        return 'DB';
+      case MasterSetSlotKind.loveBallReverse:
+        return 'LB';
+      case MasterSetSlotKind.friendBallReverse:
+        return 'FB';
+      case MasterSetSlotKind.quickBallReverse:
+        return 'QB';
+      case MasterSetSlotKind.teamRocketReverse:
+        return 'TR';
       default:
         return kind.compactLabel;
     }
@@ -107,7 +141,7 @@ class MasterSetCardSlot {
   String get label {
     switch (kind) {
       case MasterSetSlotKind.normal:
-        if (isSinglePrintSetCard(card)) return 'Holo';
+        if (_usesSinglePrintOwnership) return 'Holo';
         final rarity = (card.rarity ?? '').trim();
         return rarity.isEmpty ? 'Normal' : rarity;
       case MasterSetSlotKind.reverseHolo:
@@ -124,7 +158,7 @@ class MasterSetCardSlot {
   }
 
   int countFor(CardOwnership ownership) {
-    if (isSinglePrintSetCard(card)) {
+    if (_usesSinglePrintOwnership) {
       return ownership.collectionCount;
     }
 
@@ -150,7 +184,7 @@ class MasterSetCardSlot {
     final count = countFor(ownership);
     if (count <= 0) return const CardOwnership();
 
-    if (isSinglePrintSetCard(card)) {
+    if (_usesSinglePrintOwnership) {
       return CardOwnership(
         normal: true,
         copies: count,
@@ -198,7 +232,7 @@ class MasterSetCardSlot {
   }
 
   CardOwnership addOne(CardOwnership ownership) {
-    if (isSinglePrintSetCard(card)) {
+    if (_usesSinglePrintOwnership) {
       return ownership.copyWith(
         normal: true,
         reverseHolo: false,
@@ -247,7 +281,7 @@ class MasterSetCardSlot {
   }
 
   CardOwnership removeOne(CardOwnership ownership) {
-    if (isSinglePrintSetCard(card)) {
+    if (_usesSinglePrintOwnership) {
       final nextCount = (ownership.collectionCount - 1).clamp(0, 999999).toInt();
       return ownership.copyWith(
         normal: nextCount > 0,
@@ -307,7 +341,7 @@ class MasterSetCardSlot {
   }
 
   CardOwnership toggleOwnership(CardOwnership ownership) {
-    if (isSinglePrintSetCard(card) && isOwned(ownership)) {
+    if (_usesSinglePrintOwnership && isOwned(ownership)) {
       return ownership.copyWith(
         normal: false,
         reverseHolo: false,
@@ -356,6 +390,7 @@ class MasterSetCardSlot {
 
 bool isSinglePrintSetCard(TcgCard card) {
   final setId = card.setId.toLowerCase().trim();
+  final cardId = card.id.toLowerCase().trim();
   final setName = card.setName
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
@@ -364,6 +399,15 @@ bool isSinglePrintSetCard(TcgCard card) {
 
   return setId == '30th' ||
       setId == '30th-c' ||
+      setId == 'me55' ||
+      setId == 'me55c' ||
+      setId == 'mee' ||
+      setId == 'mep' ||
+      cardId.startsWith('30th-') ||
+      cardId.startsWith('me55-') ||
+      cardId.startsWith('me55c-') ||
+      cardId.startsWith('mee-') ||
+      cardId.startsWith('mep-') ||
       setName == '30th celebration' ||
       setName == '30th classic collection' ||
       setName.contains('30th anniversary');
@@ -469,27 +513,12 @@ bool _isHoloMasterSetRarity(TcgCard card) {
 
 class _MasterSetVariantProfile {
   const _MasterSetVariantProfile({
-    required this.hasExactData,
-    required this.supportsNormal,
-    required this.supportsReverseHolo,
-    required this.supportsHolo,
     required this.supportsBallPatternVariants,
   });
 
-  final bool hasExactData;
-  final bool supportsNormal;
-  final bool supportsReverseHolo;
-  final bool supportsHolo;
   final bool supportsBallPatternVariants;
 
   factory _MasterSetVariantProfile.fromCards(List<TcgCard> cards) {
-    final hasExactData = cards.any(
-      (card) =>
-          card.hasNormalVariant != null ||
-          card.hasReverseHoloVariant != null ||
-          card.hasHoloVariant != null,
-    );
-
     final setText = cards
         .map((card) => '${card.setId} ${card.setName}'.toLowerCase())
         .join(' ')
@@ -500,16 +529,38 @@ class _MasterSetVariantProfile {
         setText.contains('white flare') ||
         setText.contains('sv8pt5') ||
         setText.contains('sv08 5');
-
     return _MasterSetVariantProfile(
-      hasExactData: hasExactData,
-      supportsNormal: cards.any((card) => card.hasNormalVariant == true),
-      supportsReverseHolo:
-          cards.any((card) => card.hasReverseHoloVariant == true),
-      supportsHolo: cards.any((card) => card.hasHoloVariant == true),
       supportsBallPatternVariants: supportsBallPatternVariants,
     );
   }
+}
+
+List<MasterSetSlotKind> _curatedExtraPrintingKinds(TcgCard card) {
+  final mask = englishGrandMasterExtraPrintingMask(
+    setId: card.setId,
+    setName: card.setName,
+    cardNumber: card.number,
+  );
+  final kinds = <MasterSetSlotKind>[];
+  void add(int bit, MasterSetSlotKind kind) {
+    if ((mask & bit) != 0) kinds.add(kind);
+  }
+
+  add(englishGrandMasterReverseHoloBit, MasterSetSlotKind.reverseHolo);
+  add(englishGrandMasterPokeBallBit, MasterSetSlotKind.pokeBallReverse);
+  add(
+    englishGrandMasterEnergySymbolBit,
+    MasterSetSlotKind.energySymbolReverse,
+  );
+  add(englishGrandMasterDuskBallBit, MasterSetSlotKind.duskBallReverse);
+  add(englishGrandMasterLoveBallBit, MasterSetSlotKind.loveBallReverse);
+  add(englishGrandMasterFriendBallBit, MasterSetSlotKind.friendBallReverse);
+  add(englishGrandMasterQuickBallBit, MasterSetSlotKind.quickBallReverse);
+  add(
+    englishGrandMasterTeamRocketBit,
+    MasterSetSlotKind.teamRocketReverse,
+  );
+  return kinds;
 }
 
 List<MasterSetSlotKind> _availableMasterSetSlotKinds(
@@ -540,6 +591,9 @@ List<MasterSetSlotKind> _availableMasterSetSlotKinds(
     addCatalogueKind(64, MasterSetSlotKind.unlimitedHolo);
     addCatalogueKind(128, MasterSetSlotKind.shadowlessNormal);
     addCatalogueKind(256, MasterSetSlotKind.shadowlessHolo);
+    for (final kind in _curatedExtraPrintingKinds(card)) {
+      if (!catalogueKinds.contains(kind)) catalogueKinds.add(kind);
+    }
     if (catalogueKinds.isNotEmpty) return catalogueKinds;
   }
 
@@ -596,30 +650,52 @@ List<MasterSetSlotKind> _availableMasterSetSlotKinds(
     }
   }
 
-  if (profile.hasExactData) {
-    final specialRarity = _isSpecialMasterSetRarity(card);
-    final holoRarity = _isHoloMasterSetRarity(card);
-    final reverseEligible = _isReverseHoloEligibleRarity(card);
+  final hasCuratedExtraPrintings =
+      englishGrandMasterHasCuratedExtraPrintings(
+    setId: card.setId,
+    setName: card.setName,
+  );
+  if (hasCuratedExtraPrintings) {
+    final rarity = (card.rarity ?? '').toLowerCase().trim();
+    final numberMatch = RegExp(r'\d+').firstMatch(card.number);
+    final printedNumber = numberMatch == null
+        ? null
+        : int.tryParse(numberMatch.group(0)!);
+    final isHoloBase = (printedNumber ?? 0) > 217 ||
+        rarity == 'rare' ||
+        _isHoloMasterSetRarity(card) ||
+        card.name.toLowerCase().trim().endsWith(' ex');
+    add(isHoloBase ? MasterSetSlotKind.holo : MasterSetSlotKind.normal);
+    for (final kind in _curatedExtraPrintingKinds(card)) {
+      add(kind);
+    }
+    addEnglishGrandMasterPrintings();
+    return kinds;
+  }
 
-    if (card.hasNormalVariant == true ||
-        (profile.supportsNormal && !specialRarity && !holoRarity)) {
+  final cardHasExactVariantData = card.hasNormalVariant != null ||
+      card.hasReverseHoloVariant != null ||
+      card.hasHoloVariant != null;
+  if (cardHasExactVariantData) {
+    if (card.hasNormalVariant == true) {
       add(MasterSetSlotKind.normal);
     }
-    if (card.hasReverseHoloVariant == true ||
-        (profile.supportsReverseHolo && reverseEligible)) {
+    if (card.hasReverseHoloVariant == true) {
       add(MasterSetSlotKind.reverseHolo);
     }
-    if (card.hasHoloVariant == true ||
-        (profile.supportsHolo && (holoRarity || specialRarity))) {
+    if (card.hasHoloVariant == true) {
       add(MasterSetSlotKind.holo);
     }
-    if (profile.supportsBallPatternVariants && reverseEligible) {
+    if (profile.supportsBallPatternVariants &&
+        card.hasReverseHoloVariant == true) {
       add(MasterSetSlotKind.pokeBallReverse);
       add(MasterSetSlotKind.masterBallReverse);
     }
+    for (final kind in _curatedExtraPrintingKinds(card)) {
+      add(kind);
+    }
     addEnglishGrandMasterPrintings();
-    if (kinds.isEmpty) add(MasterSetSlotKind.normal);
-    return kinds;
+    if (kinds.isNotEmpty) return kinds;
   }
 
   final hasNormalPrice = _hasRawPriceLabel(card, 'normal market') ||
@@ -646,6 +722,9 @@ List<MasterSetSlotKind> _availableMasterSetSlotKinds(
   }
 
   addEnglishGrandMasterPrintings();
+  for (final kind in _curatedExtraPrintingKinds(card)) {
+    add(kind);
+  }
 
   if (kinds.isEmpty) add(MasterSetSlotKind.normal);
 

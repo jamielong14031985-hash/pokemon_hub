@@ -243,47 +243,45 @@ class _SetSearchCardsPageState extends State<SetSearchCardsPage> {
     });
   }
 
+
+  // Open one persistent viewer. Previously every swipe popped this route,
+  // exposed the set grid, then pushed another detail route.
   Future<void> _openCardDetails({
     required List<TcgCard> cards,
     required int index,
   }) async {
     if (index < 0 || index >= cards.length) return;
 
-    final navigator = Navigator.of(context);
-    var currentIndex = index;
-    while (mounted && currentIndex >= 0 && currentIndex < cards.length) {
-      final currentCard = cards[currentIndex];
-      final result = await navigator.push<SetCardDetailsResult>(
-        MaterialPageRoute<SetCardDetailsResult>(
-          builder: (_) => SetCardDetailsPage(
-            card: currentCard,
-            ownership: _ownershipFor(currentCard),
-            navigationCards: cards,
-            navigationIndex: currentIndex,
-            initialSlotKind: MasterSetSlotKind.normal,
-          ),
+    var navigatedBetweenCards = false;
+    final result = await Navigator.of(context).push<SetCardDetailsResult>(
+      MaterialPageRoute<SetCardDetailsResult>(
+        builder: (_) => _SearchSetSwipeViewer(
+          cards: cards,
+          initialIndex: index,
+          ownershipFor: _ownershipFor,
+          onCardLeft: (cardId, updatedOwnership) {
+            // Keep edits in memory during swipes. Sync only once on exit.
+            _ownershipByCardId[cardId] = updatedOwnership;
+            navigatedBetweenCards = true;
+          },
         ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (result != null) {
+      _ownershipByCardId[result.cardId] = result.ownership;
+    }
+
+    if (result != null || navigatedBetweenCards) {
+      setState(() {});
+      await LocalPokedexStore.saveSetOwnershipMap(
+        widget.set.id,
+        _ownershipByCardId,
       );
-
-      if (!mounted) return;
-
-      if (result != null) {
-        setState(() {
-          _ownershipByCardId[result.cardId] = result.ownership;
-        });
-        await LocalPokedexStore.saveSetOwnershipMap(widget.set.id, _ownershipByCardId);
-        await PokedexSyncService.syncCurrentSetForCurrentUser(widget.set.id);
-
-        final nextIndex = result.nextIndex;
-        if (nextIndex != null && nextIndex >= 0 && nextIndex < cards.length) {
-          currentIndex = nextIndex;
-          continue;
-        }
-      } else {
-        await _loadOwnership();
-      }
-
-      break;
+      await PokedexSyncService.syncCurrentSetForCurrentUser(widget.set.id);
+    } else {
+      await _loadOwnership();
     }
   }
 
@@ -476,6 +474,73 @@ class _SetSearchCardsPageState extends State<SetSearchCardsPage> {
           );
         },
       ),
+    );
+  }
+}
+
+
+// Keep the search-set card route mounted while swiping; the card detail widget
+// changes in place so the set grid does not appear between cards.
+class _SearchSetSwipeViewer extends StatefulWidget {
+  const _SearchSetSwipeViewer({
+    required this.cards,
+    required this.initialIndex,
+    required this.ownershipFor,
+    required this.onCardLeft,
+  });
+
+  final List<TcgCard> cards;
+  final int initialIndex;
+  final CardOwnership Function(TcgCard card) ownershipFor;
+  final void Function(String cardId, CardOwnership ownership) onCardLeft;
+
+  @override
+  State<_SearchSetSwipeViewer> createState() => _SearchSetSwipeViewerState();
+}
+
+class _SearchSetSwipeViewerState extends State<_SearchSetSwipeViewer> {
+  late int _index;
+  final Set<String> _preloadedImageUrls = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _preloadNeighbours();
+  }
+
+  void _preloadNeighbours() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final index in <int>[_index - 1, _index + 1]) {
+        if (index < 0 || index >= widget.cards.length) continue;
+        final card = widget.cards[index];
+        final url = (card.largeImageUrl ?? card.imageUrl ?? '').trim();
+        if (url.isEmpty || !_preloadedImageUrls.add(url)) continue;
+        precacheImage(NetworkImage(url), context).catchError((_) {});
+      }
+    });
+  }
+
+  void _onSwipeNavigate(int nextIndex, CardOwnership currentOwnership) {
+    if (!mounted || nextIndex < 0 || nextIndex >= widget.cards.length) return;
+    final currentCard = widget.cards[_index];
+    widget.onCardLeft(currentCard.id, currentOwnership);
+    setState(() => _index = nextIndex);
+    _preloadNeighbours();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final card = widget.cards[_index];
+    return SetCardDetailsPage(
+      key: ValueKey<String>('search-set-card-${card.id}-$_index'),
+      card: card,
+      ownership: widget.ownershipFor(card),
+      navigationCards: widget.cards,
+      navigationIndex: _index,
+      initialSlotKind: MasterSetSlotKind.normal,
+      onSwipeNavigate: _onSwipeNavigate,
     );
   }
 }

@@ -109,3 +109,50 @@ class SetLogoTile extends StatelessWidget {
     );
   }
 }
+
+class ScrollableSetLogoHeader extends StatelessWidget {
+  const ScrollableSetLogoHeader({
+    super.key,
+    required this.setId,
+    required this.setName,
+    required this.logoUrl,
+    this.onBack,
+  });
+
+  final String setId;
+  final String setName;
+  final String? logoUrl;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 92,
+      width: double.infinity,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              tooltip: 'Back',
+              onPressed: onBack ?? () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.arrow_back_rounded),
+              color: Colors.white,
+              iconSize: 28,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 58),
+            child: ResolvedSetLogo(
+              setId: setId,
+              setName: setName,
+              fallbackLogoUrl: logoUrl,
+              height: 68,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

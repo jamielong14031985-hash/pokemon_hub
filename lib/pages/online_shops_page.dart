@@ -145,17 +145,15 @@ class _OnlineShopsPageState extends State<OnlineShopsPage> {
               if (profiles.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                  sliver: SliverGrid(
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 12,
-                      mainAxisExtent: 350,
-                    ),
+                  sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (context, index) => _OnlineShopCard(
-                        profile: profiles[index],
+                      (context, index) => Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == profiles.length - 1 ? 0 : 14,
+                        ),
+                        child: _OnlineShopCard(
+                          profile: profiles[index],
+                        ),
                       ),
                       childCount: profiles.length,
                     ),
@@ -236,7 +234,6 @@ class _OnlineShopCard extends StatelessWidget {
     final title = profile.businessName.trim().isEmpty
         ? 'Online TCG Shop'
         : profile.businessName.trim();
-    final description = profile.description.trim();
 
     return Material(
       color: Colors.transparent,
@@ -261,169 +258,142 @@ class _OnlineShopCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SizedBox(
+            height: 154,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(14),
                 child: SizedBox(
-                  height: 62,
-                  width: double.infinity,
+                  width: 104,
+                  height: 154,
                   child: _OnlineShopBanner(profile: profile),
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _BusinessAvatar(profile: profile),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        height: 1.1,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
                       children: [
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14.5,
-                            height: 1.08,
-                            fontWeight: FontWeight.w900,
+                        if (profile.premiumIsActive)
+                          const _SmallBadge(
+                            icon: Icons.workspace_premium,
+                            label: 'Pro',
+                            highlighted: true,
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 5,
-                          runSpacing: 5,
-                          children: [
-                            const _SmallBadge(
-                              icon: Icons.language,
-                              label: 'Online',
-                              highlighted: false,
-                            ),
-                            if (profile.premiumIsActive)
-                              const _SmallBadge(
-                                icon: Icons.workspace_premium,
-                                label: 'Pro',
-                                highlighted: true,
-                              ),
-                            if (profile.hasAnyOpeningHours)
-                              _OnlineOpenStatusBadge(profile: profile),
-                          ],
-                        ),
+                        if (profile.hasAnyOpeningHours)
+                          _OnlineOpenStatusBadge(profile: profile),
                       ],
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 7),
-              BusinessRatingSummary(
-                businessId: profile.id,
-                starColor: _onlineGoldColor,
-                textColor: Colors.white,
-                mutedTextColor: _onlineSoftTextColor,
-                onTap: () => _openReviews(context),
-              ),
-              if (description.isNotEmpty) ...[
-                const SizedBox(height: 7),
-                Text(
-                  description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _onlineSoftTextColor,
-                    height: 1.25,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-              if (location.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.place_outlined,
-                      color: _onlineGoldColor,
-                      size: 15,
+                    const SizedBox(height: 7),
+                    BusinessRatingSummary(
+                      businessId: profile.id,
+                      starColor: _onlineGoldColor,
+                      textColor: Colors.white,
+                      mutedTextColor: _onlineSoftTextColor,
+                      onTap: () => _openReviews(context),
                     ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Text(
-                        location,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _onlineSoftTextColor,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              const Spacer(),
-              Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
-                      height: 36,
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _onlineGoldColor,
-                          foregroundColor: _onlineBackgroundColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                    if (location.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.place_outlined,
+                            color: _onlineGoldColor,
+                            size: 14,
                           ),
-                        ),
-                        onPressed: () => _openPublicProfile(context),
-                        child: const Text(
-                          'Profile',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (website.isNotEmpty) ...[
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: SizedBox(
-                        height: 36,
-                        child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _onlineGoldColor,
-                            side: const BorderSide(color: _onlineGoldColor),
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              location,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _onlineSoftTextColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                          onPressed: () => _openWebsite(context, website),
-                          child: const Text(
-                            'Website',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
+                        ],
+                      ),
+                    ],
+                    const Spacer(),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 32,
+                            child: FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _onlineGoldColor,
+                                foregroundColor: _onlineBackgroundColor,
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              onPressed: () => _openPublicProfile(context),
+                              child: const Text(
+                                'Profile',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        if (website.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: SizedBox(
+                              height: 32,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: _onlineGoldColor,
+                                  side: const BorderSide(color: _onlineGoldColor),
+                                  padding: EdgeInsets.zero,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                onPressed: () => _openWebsite(context, website),
+                                child: const Text(
+                                  'Website',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
-                ],
+                ),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -502,43 +472,6 @@ class _OnlineShopBanner extends StatelessWidget {
       errorBuilder: (context, error, stackTrace) {
         return _BannerFallback(profile: profile);
       },
-    );
-  }
-}
-
-class _BusinessAvatar extends StatelessWidget {
-  const _BusinessAvatar({required this.profile});
-
-  final BusinessProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final logoUrl = profile.logoUrl.trim();
-
-    return CircleAvatar(
-      radius: 22,
-      backgroundColor: _onlineFieldColor,
-      child: logoUrl.isEmpty
-          ? const Icon(
-              Icons.language,
-              color: _onlineGoldColor,
-              size: 24,
-            )
-          : ClipOval(
-              child: Image.network(
-                logoUrl,
-                width: 44,
-                height: 44,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Icon(
-                    Icons.language,
-                    color: _onlineGoldColor,
-                    size: 24,
-                  );
-                },
-              ),
-            ),
     );
   }
 }

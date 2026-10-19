@@ -32,6 +32,7 @@ class CommunityPostCard extends StatelessWidget {
     this.onSetMarketStatus,
     this.onBump,
     this.compact = false,
+    this.horizontal = false,
     this.canUserFeature = false,
     this.canAdminFeature = false,
     this.onToggleUserFeatured,
@@ -53,6 +54,7 @@ class CommunityPostCard extends StatelessWidget {
   final ValueChanged<String>? onSetMarketStatus;
   final VoidCallback? onBump;
   final bool compact;
+  final bool horizontal;
   final bool canUserFeature;
   final bool canAdminFeature;
   final VoidCallback? onToggleUserFeatured;
@@ -357,6 +359,146 @@ class CommunityPostCard extends StatelessWidget {
       }
 
       return items;
+    }
+
+    if (horizontal) {
+      return Material(
+        color: const Color(0xFF102754),
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onOpen,
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: post.isFeatured || isNew
+                    ? const Color(0xFFF7DE77).withValues(alpha: 0.40)
+                    : Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 108,
+                  height: 118,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: post.hasImages
+                        ? CommunityImageStrip(
+                            imageBase64List: post.imageBase64List,
+                            height: 118,
+                          )
+                        : Container(
+                            color: const Color(0xFF071B3F),
+                            alignment: Alignment.center,
+                            child: Icon(
+                              isDiscussion
+                                  ? Icons.forum_outlined
+                                  : Icons.storefront_outlined,
+                              color: const Color(0xFFF7DE77),
+                              size: 38,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 118,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CommunityUserAvatar(
+                              userId: post.authorId,
+                              displayName: post.authorName,
+                              size: 30,
+                              onTap: onAuthorTap,
+                            ),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    post.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      height: 1.12,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    formatCommunityRelativeTime(post.createdAt),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (canEdit || onReport != null || onBlock != null)
+                              SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: PopupMenuButton<CommunityPostMenuAction>(
+                                  padding: EdgeInsets.zero,
+                                  iconSize: 18,
+                                  iconColor: Colors.white70,
+                                  color: const Color(0xFF143163),
+                                  onSelected: handleMenuAction,
+                                  itemBuilder: (_) => buildMenuItems(),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 31,
+                          child: OutlinedButton.icon(
+                            onPressed: onOpen,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.16),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: const Icon(Icons.forum_outlined, size: 14),
+                            label: Text(
+                              isDiscussion ? 'Open' : 'View listing',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     if (compact) {

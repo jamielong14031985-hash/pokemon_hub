@@ -43,6 +43,7 @@ class CommunityPrivateChatPage extends StatefulWidget {
     required this.otherUserName,
     required this.relatedPostId,
     required this.relatedPostTitle,
+    this.initialDraft,
   });
 
   final String conversationId;
@@ -51,6 +52,7 @@ class CommunityPrivateChatPage extends StatefulWidget {
   final String otherUserName;
   final String relatedPostId;
   final String relatedPostTitle;
+  final String? initialDraft;
 
   @override
   State<CommunityPrivateChatPage> createState() =>
@@ -74,6 +76,7 @@ class _CommunityPrivateChatPageState extends State<CommunityPrivateChatPage> {
   @override
   void initState() {
     super.initState();
+    _messageController.text = widget.initialDraft ?? '';
     _ensureConversationExists();
   }
 
@@ -839,51 +842,23 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
   }
 
   Widget _buildRemoveFriendCard(AppUserProfile profile) {
-    return Card(
-      color: const Color(0xFF102754),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0B2250),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF294879)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Friend options',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Remove this person from your friends list. This does not block them.',
-              style: TextStyle(
-                color: Color(0xFFC8D4F0),
-                fontSize: 13,
-                height: 1.35,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => _removeFriend(profile),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                foregroundColor: const Color(0xFFFFCDD2),
-                side: const BorderSide(color: Color(0xFFE85D5D)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              icon: const Icon(Icons.person_remove_alt_1_outlined),
-              label: const Text(
-                'Remove friend',
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-          ],
+      child: TextButton.icon(
+        onPressed: () => _removeFriend(profile),
+        style: TextButton.styleFrom(
+          foregroundColor: const Color(0xFFFFB6C1),
+          minimumSize: const Size.fromHeight(42),
+        ),
+        icon: const Icon(Icons.person_remove_alt_1_outlined, size: 19),
+        label: const Text(
+          'Remove friend',
+          style: TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
     );
@@ -924,8 +899,8 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: GlassPageAppBar(
-        title: '$fallbackName profile',
-        subtitle: 'Friend profile',
+        title: 'Friend profile',
+        subtitle: fallbackName,
         icon: Icons.person_search_outlined,
       ),
       body: SafeArea(
@@ -949,8 +924,6 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                     onOpenTradeMatches: () => _openTradeMatches(friendProfile),
                     onMessage: () => _messageFriend(friendProfile),
                   ),
-                  const SizedBox(height: 12),
-                  _buildRemoveFriendCard(friendProfile),
                   if (profileSnapshot.hasError)
                     Card(
                       color: const Color(0xFF102754),
@@ -1033,7 +1006,7 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: ProfileStatCard(
-                                  title: 'Total Value',
+                                  title: 'Indicative Value',
                                   value: CurrencySettings.formatSelectedAmount(
                                     stats.totalEstimatedPrice,
                                   ),
@@ -1048,6 +1021,8 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                             copies: stats.mostExpensiveCardCopies,
                             onOpenCard: _openCardDetails,
                           ),
+                          const SizedBox(height: 18),
+                          _buildRemoveFriendCard(friendProfile),
                         ],
                       );
                     },

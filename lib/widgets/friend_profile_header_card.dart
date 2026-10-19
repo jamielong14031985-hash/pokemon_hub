@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../models/app_user_profile.dart';
-import 'community_meta_chip.dart';
 
 String _avatarInitial(String displayName, {String fallback = 'P'}) {
   final trimmed = displayName.trim();
@@ -51,7 +50,7 @@ class FriendProfileHeaderCard extends StatelessWidget {
     return Card(
       color: const Color(0xFF102754),
       elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       clipBehavior: Clip.antiAlias,
       child: Container(
         decoration: const BoxDecoration(
@@ -92,7 +91,7 @@ class FriendProfileHeaderCard extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -108,23 +107,13 @@ class FriendProfileHeaderCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Friend profile',
-                              style: TextStyle(
-                                color: Color(0xFFF7DE77),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
                             Text(
                               displayName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 25,
+                                fontSize: 23,
                                 height: 1.05,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -145,65 +134,6 @@ class FriendProfileHeaderCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: const [
-                      CommunityMetaChip(
-                        icon: Icons.favorite_outline_rounded,
-                        label: 'Wishlist',
-                        color: Color(0xFFB13B59),
-                      ),
-                      CommunityMetaChip(
-                        icon: Icons.emoji_events_outlined,
-                        label: 'Achievements',
-                        color: Color(0xFF875A16),
-                      ),
-                      CommunityMetaChip(
-                        icon: Icons.auto_awesome_outlined,
-                        label: 'Showcase',
-                        color: Color(0xFF6B4EFF),
-                      ),
-                      CommunityMetaChip(
-                        icon: Icons.collections_bookmark_outlined,
-                        label: 'Pokédex',
-                        color: Color(0xFF2C7A5B),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.055),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
-                    ),
-                    child: const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.info_outline_rounded,
-                          color: Color(0xFFF7DE77),
-                          size: 20,
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'View their collection progress, wishlist cards, trade matches, showcase, and achievement badges.',
-                            style: TextStyle(
-                              color: Color(0xFFE4ECFF),
-                              fontSize: 12.5,
-                              height: 1.35,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                   const SizedBox(height: 14),
                   Row(
                     children: [
@@ -212,7 +142,6 @@ class FriendProfileHeaderCard extends StatelessWidget {
                           label: 'Pokédex',
                           icon: Icons.collections_bookmark_outlined,
                           onPressed: onOpenPokedex,
-                          filled: true,
                           color: const Color(0xFF2C7A5B),
                         ),
                       ),
@@ -274,8 +203,8 @@ class _FriendAvatar extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         Container(
-          width: 86,
-          height: 86,
+          width: 72,
+          height: 72,
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
@@ -300,7 +229,7 @@ class _FriendAvatar extends StatelessWidget {
                     _avatarInitial(displayName),
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 30,
+                      fontSize: 26,
                       fontWeight: FontWeight.w900,
                     ),
                   )
@@ -311,8 +240,8 @@ class _FriendAvatar extends StatelessWidget {
           right: -1,
           bottom: 2,
           child: Container(
-            width: 30,
-            height: 30,
+            width: 27,
+            height: 27,
             decoration: BoxDecoration(
               color: const Color(0xFFF7DE77),
               shape: BoxShape.circle,
@@ -321,7 +250,7 @@ class _FriendAvatar extends StatelessWidget {
             child: const Icon(
               Icons.person_rounded,
               color: Color(0xFF071B43),
-              size: 17,
+              size: 15,
             ),
           ),
         ),
@@ -336,37 +265,15 @@ class _HeaderActionButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     required this.color,
-    this.filled = false,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback onPressed;
   final Color color;
-  final bool filled;
 
   @override
   Widget build(BuildContext context) {
-    if (filled) {
-      return FilledButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18),
-        label: Text(
-          label,
-          overflow: TextOverflow.ellipsis,
-        ),
-        style: FilledButton.styleFrom(
-          backgroundColor: color,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          textStyle: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      );
-    }
-
     return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18, color: color),
@@ -377,10 +284,10 @@ class _HeaderActionButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: Colors.white,
         side: BorderSide(color: color.withValues(alpha: 0.42)),
-        backgroundColor: Colors.white.withValues(alpha: 0.035),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        backgroundColor: Colors.white.withValues(alpha: 0.025),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         textStyle: const TextStyle(
-          fontSize: 13,
+          fontSize: 12.5,
           fontWeight: FontWeight.w900,
         ),
       ),

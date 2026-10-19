@@ -18,16 +18,16 @@ class GradedPricesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
-      appBar: AppBar(
-        title: const Text('Graded Prices'),
-        backgroundColor: const Color(0xFF041B4A),
-        foregroundColor: Colors.white,
-      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            SetLogoTile(setId: card.setId, setName: card.setName, logoUrl: card.setLogoUrl),
+            ScrollableSetLogoHeader(
+              setId: card.setId,
+              setName: card.setName,
+              logoUrl: card.setLogoUrl,
+            ),
+            const SizedBox(height: 8),
             Card(
               color: const Color(0xFF102754),
               margin: const EdgeInsets.only(bottom: 12),

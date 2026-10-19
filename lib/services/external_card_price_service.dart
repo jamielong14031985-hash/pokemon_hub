@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/tcg_card.dart';
+import 'currency_settings.dart';
+import 'local_card_price_store.dart';
 
 class ExternalCardPrice {
   const ExternalCardPrice({
@@ -10,12 +12,22 @@ class ExternalCardPrice {
     required this.currencyCode,
     required this.source,
     this.lastUpdatedMs,
+    this.lowAmount,
+    this.highAmount,
+    this.soldCount = 0,
+    this.confidence = '',
+    this.pricingMethod = '',
   });
 
   final double amount;
   final String currencyCode;
   final String source;
   final int? lastUpdatedMs;
+  final double? lowAmount;
+  final double? highAmount;
+  final int soldCount;
+  final String confidence;
+  final String pricingMethod;
 
   bool get isValid => amount > 0 && amount.isFinite;
 
@@ -30,6 +42,14 @@ class ExternalCardPrice {
         ? rawLastUpdated.toInt()
         : int.tryParse((rawLastUpdated ?? '').toString());
 
+    double? optionalAmount(String key) {
+      final value = data[key];
+      final parsed = value is num
+          ? value.toDouble()
+          : double.tryParse((value ?? '').toString());
+      return parsed != null && parsed > 0 && parsed.isFinite ? parsed : null;
+    }
+
     return ExternalCardPrice(
       amount: amount,
       currencyCode: (data['currencyCode'] ?? 'USD').toString().trim().isEmpty
@@ -39,6 +59,11 @@ class ExternalCardPrice {
           ? 'External pricing'
           : (data['source'] ?? 'External pricing').toString().trim(),
       lastUpdatedMs: lastUpdatedMs,
+      lowAmount: optionalAmount('lowAmount'),
+      highAmount: optionalAmount('highAmount'),
+      soldCount: (data['soldCount'] as num?)?.toInt() ?? 0,
+      confidence: (data['confidence'] ?? '').toString().trim(),
+      pricingMethod: (data['pricingMethod'] ?? '').toString().trim(),
     );
   }
 }
@@ -71,19 +96,19 @@ class ExternalCardPriceService {
           lower.contains('rate limit') ||
           lower.contains('rate_limit') ||
           lower.contains('429')) {
-        return 'JustTCG is rate limited. Please wait a minute, then try Refresh Raw Price again.';
+        return 'The card pricing service is busy. Please wait a minute, then try again.';
       }
 
       if (lower.contains('invalid api key') || lower.contains('401')) {
-        return 'JustTCG rejected the API key. Check the Firebase JUSTTCG_API_KEY secret.';
+        return 'The card pricing service rejected its credentials.';
       }
 
       if (message.isNotEmpty) {
-        return 'Could not check JustTCG price: $message';
+        return 'Could not check the card price: $message';
       }
     }
 
-    return 'Could not check JustTCG price right now. Please try again shortly.';
+    return 'Could not check the card price right now. Please try again shortly.';
   }
 
   static Future<ExternalCardPrice?> lookupRawPrice(TcgCard card) async {
@@ -99,6 +124,7 @@ class ExternalCardPriceService {
         'setName': card.setName,
         'number': card.number,
         'rarity': card.rarity ?? '',
+        'marketplaceCode': CurrencySettings.selectedMarketplaceCode,
       }).timeout(const Duration(seconds: 14));
 
       final data = result.data;
@@ -107,17 +133,31 @@ class ExternalCardPriceService {
         final reason = (data['reason'] ?? '').toString().trim();
         if (reason == 'rate_limited') {
           throw const ExternalCardPriceException(
-            'JustTCG is rate limited. Please wait a minute, then try Refresh Raw Price again.',
+            'The card pricing service is busy. Please wait a minute, then try again.',
           );
         }
+        await LocalCardPriceStore.remove(cardId);
         return null;
       }
 
       final price = ExternalCardPrice.fromMap(data);
-      return price.isValid ? price : null;
+      if (!price.isValid) return null;
+      await LocalCardPriceStore.save(
+        cardId: cardId,
+        amount: price.amount,
+        currencyCode: price.currencyCode,
+        source: price.source,
+        updatedAtMs: price.lastUpdatedMs,
+        lowAmount: price.lowAmount,
+        highAmount: price.highAmount,
+        soldCount: price.soldCount,
+        confidence: price.confidence,
+        pricingMethod: price.pricingMethod,
+      );
+      return price;
     } on TimeoutException {
       throw const ExternalCardPriceException(
-        'JustTCG took too long to reply. Please try again shortly.',
+        'The card pricing service took too long to reply. Please try again shortly.',
       );
     } on FirebaseFunctionsException catch (error) {
       throw ExternalCardPriceException(friendlyErrorMessage(error));
@@ -128,17 +168,22 @@ class ExternalCardPriceService {
     TcgCard card, {
     bool rethrowErrors = false,
   }) async {
-    if ((card.rawPrice ?? 0) > 0) return card;
-
     try {
       final price = await lookupRawPrice(card);
-      if (price == null || !price.isValid) return card;
+      if (price == null || !price.isValid) {
+        return card.copyWith(clearExternalRawPrice: true);
+      }
 
       return card.copyWith(
         externalRawPrice: price.amount,
         externalRawPriceCurrency: price.currencyCode,
         externalRawPriceSource: price.source,
         externalRawPriceUpdatedAtMs: price.lastUpdatedMs,
+        externalRawPriceLow: price.lowAmount,
+        externalRawPriceHigh: price.highAmount,
+        externalRawPriceSoldCount: price.soldCount,
+        externalRawPriceConfidence: price.confidence,
+        externalRawPriceMethod: price.pricingMethod,
       );
     } catch (_) {
       if (rethrowErrors) rethrow;

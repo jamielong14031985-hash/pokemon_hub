@@ -15,6 +15,28 @@ int _readInt(dynamic value) {
 }
 
 class PokedexSyncService {
+  static const String _combinedThirtySetId = '30th';
+  static const List<String> _legacyThirtySetIds = <String>[
+    '30th-c',
+    'me55',
+    'me55c',
+  ];
+
+  static Future<void> _mergeLegacyThirtyCelebrationSets() async {
+    final changed = await LocalPokedexStore.mergeSetsInto(
+      targetSetId: _combinedThirtySetId,
+      sourceSetIds: _legacyThirtySetIds,
+    );
+    if (!changed) return;
+
+    // Keep Firebase aligned with the one combined local binder. Empty legacy
+    // set documents are removed by syncSetFromLocal.
+    await syncCurrentSetForCurrentUser(_combinedThirtySetId);
+    for (final legacySetId in _legacyThirtySetIds) {
+      await syncCurrentSetForCurrentUser(legacySetId);
+    }
+  }
+
   static CollectionReference<Map<String, dynamic>> _setCollection(
     String ownerUid,
   ) =>
@@ -149,6 +171,9 @@ class PokedexSyncService {
   static Future<Map<String, CardOwnership>> loadCurrentUserSetOwnership(
     String setId,
   ) async {
+    if (setId.trim().toLowerCase() == _combinedThirtySetId) {
+      await _mergeLegacyThirtyCelebrationSets();
+    }
     Map<String, CardOwnership> localOwnership;
     try {
       localOwnership = await LocalPokedexStore.loadSetOwnershipMap(setId);
@@ -181,6 +206,7 @@ class PokedexSyncService {
   }) async {
     try {
       await ensureCurrentUserPokedexReady();
+      await _mergeLegacyThirtyCelebrationSets();
       return await LocalPokedexStore.savedCopyCountsBySetId(
         cleanEmptySets: cleanEmptySets,
       );
@@ -275,8 +301,8 @@ class PokedexSyncService {
         .where((entry) => LocalPokedexStore.hasSavedCopies(entry.value))
         .toList();
 
-    // Owning a card fulfils that wishlist item. Delete only the exact card IDs,
-    // so cards with the same name or number in other sets remain untouched.
+    // An owned card no longer belongs on the wishlist. Delete only exact card
+    // IDs so matching cards from other sets remain untouched.
     try {
       await WishlistService.removeOwnedCards(
         ownerUid: safeOwnerUid,
@@ -381,13 +407,10 @@ class PokedexSyncService {
           if (ownership == null) continue;
           if (!LocalPokedexStore.isOwned(ownership)) continue;
 
-          final existingCopies =
-              ownershipByCardId[cardDoc.id]?.collectionCount ?? 0;
-          final mergedCopies = existingCopies + ownership.collectionCount;
-
-          ownershipByCardId[cardDoc.id] = ownership.copyWith(
-            copies: mergedCopies,
-          );
+          final existing = ownershipByCardId[cardDoc.id];
+          ownershipByCardId[cardDoc.id] = existing == null
+              ? ownership
+              : _mergeOwnershipCopies(existing, ownership);
         }
       } catch (_) {
         // Skip one bad set instead of failing all owned cards.
@@ -395,6 +418,36 @@ class PokedexSyncService {
     }
 
     return ownershipByCardId;
+  }
+
+  static CardOwnership _mergeOwnershipCopies(
+    CardOwnership first,
+    CardOwnership second,
+  ) {
+    final extraVariants = <String, int>{...first.extraVariantCopies};
+    for (final entry in second.extraVariantCopies.entries) {
+      extraVariants.update(
+        entry.key,
+        (existingCount) => existingCount + entry.value,
+        ifAbsent: () => entry.value,
+      );
+    }
+
+    return CardOwnership(
+      normalCopies: first.normalCount + second.normalCount,
+      reverseHoloCopies:
+          first.reverseHoloCount + second.reverseHoloCount,
+      holoCopies: first.holoCount + second.holoCount,
+      pokeBallReverseCopies:
+          first.pokeBallReverseCount + second.pokeBallReverseCount,
+      masterBallReverseCopies:
+          first.masterBallReverseCount + second.masterBallReverseCount,
+      extraVariantCopies: Map<String, int>.unmodifiable(extraVariants),
+      condition: first.condition,
+      gradingCompany: first.gradingCompany,
+      grade: first.grade,
+      conditionNotes: first.conditionNotes,
+    );
   }
 
   static Stream<List<String>> ownedSetIdsStream(String ownerUid) async* {

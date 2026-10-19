@@ -6,6 +6,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 
+import 'admin_community_picture_review_page.dart';
+import 'admin_sealed_product_catalog_page.dart';
+
 class AdminToolsPage extends StatefulWidget {
   const AdminToolsPage({super.key});
 
@@ -32,11 +35,15 @@ class _AdminToolsPageState extends State<AdminToolsPage> {
     );
   }
 
-  Stream<int> _countStream(String collection, {String? status}) {
+  Stream<int> _countStream(
+    String collection, {
+    String? status,
+    String statusField = 'status',
+  }) {
     Query<Map<String, dynamic>> query = _firestore.collection(collection);
 
     if (status != null) {
-      query = query.where('status', isEqualTo: status);
+      query = query.where(statusField, isEqualTo: status);
     }
 
     return query.snapshots().map((snapshot) => snapshot.docs.length);
@@ -185,6 +192,19 @@ class _AdminToolsPageState extends State<AdminToolsPage> {
             onTap: () => _open(const AdminFeedbackReportsPage()),
           ),
           _toolCard(
+            icon: Icons.photo_library_outlined,
+            title: 'Picture Post Reviews',
+            subtitle:
+                'View and approve community posts containing pictures before they go public.',
+            countStream: _countStream(
+              'community_posts',
+              status: 'pending',
+              statusField: 'moderationStatus',
+            ),
+            countLabel: 'pending',
+            onTap: () => _open(const AdminCommunityPictureReviewPage()),
+          ),
+          _toolCard(
             icon: Icons.workspace_premium_outlined,
             title: 'User Pro Access',
             subtitle: 'Give or remove Pro access for testers and users.',
@@ -207,6 +227,15 @@ class _AdminToolsPageState extends State<AdminToolsPage> {
             countStream: _countStream('business_pro_requests', status: 'pending'),
             countLabel: 'pending',
             onTap: () => _open(const AdminBusinessToolsPage()),
+          ),
+          _toolCard(
+            icon: Icons.inventory_2_outlined,
+            title: 'Sealed Product Pictures',
+            subtitle:
+                'Assign approved retailer or official artwork to each exact sealed product.',
+            countStream: _countStream('sealed_product_catalog'),
+            countLabel: 'pictures',
+            onTap: () => _open(const AdminSealedProductCatalogPage()),
           ),
           _toolCard(
             icon: Icons.storefront_outlined,

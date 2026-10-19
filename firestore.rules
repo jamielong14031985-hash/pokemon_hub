@@ -1847,6 +1847,157 @@ service cloud.firestore {
         && validCommunityReportData(request.resource.data);
     }
 
+
+    // Deal proposals contain card descriptions, not ownership or money transfers.
+    function validTradeOfferCard(card) {
+      return card is map
+        && card.keys().hasOnly([
+          'cardId', 'name', 'setName', 'number', 'imageUrl', 'quantity'
+        ])
+        && card.keys().hasAll([
+          'cardId', 'name', 'setName', 'number', 'imageUrl', 'quantity'
+        ])
+        && card.cardId is string && card.cardId.size() > 0 && card.cardId.size() <= 200
+        && card.name is string && card.name.size() > 0 && card.name.size() <= 160
+        && card.setName is string && card.setName.size() <= 180
+        && card.number is string && card.number.size() <= 70
+        && card.imageUrl is string && card.imageUrl.size() <= 1500
+        && card.quantity is int && card.quantity >= 1 && card.quantity <= 99;
+    }
+
+    function validTradeOfferCardAt(cards, index) {
+      return cards.size() <= index || validTradeOfferCard(cards[index]);
+    }
+
+    // Firestore rules have no list iteration, so validate all 15 allowed slots.
+    function validTradeOfferCards(cards) {
+      return cards is list && cards.size() <= 15
+        && validTradeOfferCardAt(cards, 0)
+        && validTradeOfferCardAt(cards, 1)
+        && validTradeOfferCardAt(cards, 2)
+        && validTradeOfferCardAt(cards, 3)
+        && validTradeOfferCardAt(cards, 4)
+        && validTradeOfferCardAt(cards, 5)
+        && validTradeOfferCardAt(cards, 6)
+        && validTradeOfferCardAt(cards, 7)
+        && validTradeOfferCardAt(cards, 8)
+        && validTradeOfferCardAt(cards, 9)
+        && validTradeOfferCardAt(cards, 10)
+        && validTradeOfferCardAt(cards, 11)
+        && validTradeOfferCardAt(cards, 12)
+        && validTradeOfferCardAt(cards, 13)
+        && validTradeOfferCardAt(cards, 14);
+    }
+
+    function validNewTradeOffer(data) {
+      return data.keys().hasOnly([
+          'fromUid', 'toUid', 'fromName', 'toName', 'participants',
+          'offeredCards', 'requestedCards', 'offeredCard', 'requestedCard',
+          'cashAmountPence', 'cashPayerUid', 'currency', 'note',
+          'parentOfferId', 'status', 'createdAtMs', 'updatedAtMs',
+          'confirmedByFrom', 'confirmedByTo'
+        ])
+        && data.keys().hasAll([
+          'fromUid', 'toUid', 'fromName', 'toName', 'participants',
+          'offeredCards', 'requestedCards', 'offeredCard', 'requestedCard',
+          'cashAmountPence', 'cashPayerUid', 'currency', 'note',
+          'parentOfferId', 'status', 'createdAtMs', 'updatedAtMs',
+          'confirmedByFrom', 'confirmedByTo'
+        ])
+        && data.fromUid == request.auth.uid
+        && data.toUid is string && data.toUid != data.fromUid
+        && data.participants is list
+        && data.participants == [data.fromUid, data.toUid]
+        && data.fromName is string && data.fromName.size() <= 120
+        && data.toName is string && data.toName.size() <= 120
+        && validTradeOfferCards(data.offeredCards)
+        && validTradeOfferCards(data.requestedCards)
+        && (data.offeredCards.size() + data.requestedCards.size()) > 0
+        && data.offeredCard == (data.offeredCards.size() > 0 ? data.offeredCards[0] : null)
+        && data.requestedCard == (data.requestedCards.size() > 0 ? data.requestedCards[0] : null)
+        && data.cashAmountPence is int
+        && data.cashAmountPence >= 0 && data.cashAmountPence <= 10000000
+        && data.cashPayerUid is string
+        && (data.cashAmountPence == 0
+          ? data.cashPayerUid == ''
+          : data.cashPayerUid in data.participants)
+        && data.currency == 'GBP'
+        && data.note is string && data.note.size() <= 400
+        && data.parentOfferId is string && data.parentOfferId.size() <= 160
+        && data.status == 'pending'
+        && data.createdAtMs is int && data.createdAtMs > 0
+        && data.updatedAtMs == data.createdAtMs
+        && data.confirmedByFrom == false
+        && data.confirmedByTo == false;
+    }
+
+    // Updates can change only trade state and confirmation flags.
+    function validTradeOfferUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'updatedAtMs', 'confirmedByFrom', 'confirmedByTo'
+        ])
+        && request.resource.data.updatedAtMs is int
+        && request.resource.data.updatedAtMs >= resource.data.updatedAtMs
+        && (
+          // The recipient may accept, decline or issue a counteroffer.
+          (
+            request.auth.uid == resource.data.toUid
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['accepted', 'declined', 'countered']
+            && request.resource.data.confirmedByFrom == resource.data.confirmedByFrom
+            && request.resource.data.confirmedByTo == resource.data.confirmedByTo
+          )
+          ||
+          // The sender may cancel a pending or accepted offer.
+          (
+            request.auth.uid == resource.data.fromUid
+            && resource.data.status in ['pending', 'accepted']
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.confirmedByFrom == resource.data.confirmedByFrom
+            && request.resource.data.confirmedByTo == resource.data.confirmedByTo
+          )
+          ||
+          // Each party may confirm only their own side of an accepted trade.
+          (
+            resource.data.status == 'accepted'
+            && request.auth.uid in resource.data.participants
+            && (
+              (
+                request.auth.uid == resource.data.fromUid
+                && resource.data.confirmedByFrom == false
+                && request.resource.data.confirmedByFrom == true
+                && request.resource.data.confirmedByTo == resource.data.confirmedByTo
+              )
+              ||
+              (
+                request.auth.uid == resource.data.toUid
+                && resource.data.confirmedByTo == false
+                && request.resource.data.confirmedByTo == true
+                && request.resource.data.confirmedByFrom == resource.data.confirmedByFrom
+              )
+            )
+            && request.resource.data.status ==
+              (request.resource.data.confirmedByFrom && request.resource.data.confirmedByTo
+                ? 'completed' : 'accepted')
+          )
+        );
+    }
+
+    match /trade_offers/{offerId} {
+      // watchMyOffers uses participants arrayContains the signed-in UID.
+      allow get, list: if signedIn()
+        && request.auth.uid in resource.data.participants;
+
+      allow create: if canUseCommunity()
+        && validNewTradeOffer(request.resource.data)
+        && areFriends(request.auth.uid, request.resource.data.toUid);
+
+      allow update: if canUseCommunity()
+        && validTradeOfferUpdate();
+
+      allow delete: if false;
+    }
+
     match /chats/{chatId} {
       allow read: if isChatMember(chatId);
 
@@ -1912,8 +2063,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /{document=**} {
-      allow read: if true;
+    // Preserve the existing read fallback for other collections, but do not
+    // expose private trade proposals: overlapping allow rules are OR'ed.
+    match /{rootCollection}/{document=**} {
+      allow read: if rootCollection != 'trade_offers';
       allow write: if false;
     }
 

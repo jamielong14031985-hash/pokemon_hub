@@ -97,7 +97,7 @@ class WishlistService {
       return;
     }
 
-    final safeRawPrice = card.rawPrice;
+    final safeRawPrice = card.marketPrice;
     final rawPriceValue =
         (safeRawPrice != null && safeRawPrice.isFinite) ? safeRawPrice : null;
 
@@ -112,6 +112,8 @@ class WishlistService {
         'largeImageUrl': card.largeImageUrl,
         'setLogoUrl': card.setLogoUrl,
         if (rawPriceValue != null) 'rawPrice': rawPriceValue,
+        if (rawPriceValue != null)
+          'rawPriceCurrency': card.marketPriceCurrency,
         'createdAtMs': DateTime.now().millisecondsSinceEpoch,
       }, SetOptions(merge: true)).timeout(_kFirebaseWriteTimeout);
     } catch (_) {

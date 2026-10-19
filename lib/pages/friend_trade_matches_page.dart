@@ -10,6 +10,8 @@ import '../services/friend_trade_match_service.dart';
 import '../services/pokemon_tcg_service.dart';
 import '../widgets/community_meta_chip.dart';
 import '../widgets/friend_trade_match_widgets.dart';
+import 'trade_offer_compose_page.dart';
+import 'my_trades_page.dart';
 
 class FriendTradeMatchesPage extends StatefulWidget {
   const FriendTradeMatchesPage({
@@ -29,7 +31,7 @@ class FriendTradeMatchesPage extends StatefulWidget {
 
 class _FriendTradeMatchesPageState extends State<FriendTradeMatchesPage> {
   late Future<FriendTradeMatchSnapshot> _matchesFuture;
-  bool _showLikelySpareOnly = false;
+  bool _showLikelySpareOnly = true;
 
   @override
   void initState() {
@@ -68,6 +70,15 @@ class _FriendTradeMatchesPageState extends State<FriendTradeMatchesPage> {
         ),
       );
     }
+  }
+
+  Future<void> _makeDeal(FriendTradeMatchEntry item) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TradeOfferComposePage(
+      currentProfile: widget.currentProfile,
+      friendUid: widget.friendUid, friendName: widget.friendName,
+      initialOfferedCardId: item.ownerIsFriend ? null : item.entry.cardId,
+      initialRequestedCardId: item.ownerIsFriend ? item.entry.cardId : null,
+    )));
   }
 
   List<FriendTradeMatchEntry> _applyFilters(List<FriendTradeMatchEntry> items) {
@@ -211,7 +222,7 @@ class _FriendTradeMatchesPageState extends State<FriendTradeMatchesPage> {
                           const SizedBox(height: 14),
                           FilterChip(
                             selected: _showLikelySpareOnly,
-                            label: const Text('Likely spare copies only'),
+                            label: const Text('Duplicate copies only'),
                             onSelected: (value) {
                               setState(() {
                                 _showLikelySpareOnly = value;
@@ -231,26 +242,37 @@ class _FriendTradeMatchesPageState extends State<FriendTradeMatchesPage> {
                       ),
                     ),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => MyTradesPage(currentProfile: widget.currentProfile))),
+                      icon: const Icon(Icons.handshake_outlined),
+                      label: const Text('My Trades'),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   FriendTradeMatchSection(
                     title: 'They have cards from your wishlist',
                     subtitle: 'Cards you want that ${widget.friendName} already owns.',
                     emptyMessage: _showLikelySpareOnly
-                        ? '${widget.friendName} does not currently have any visible likely-spare matches for your wishlist.'
+                        ? '${widget.friendName} does not currently have duplicate copies of cards on your wishlist.'
                         : '${widget.friendName} does not currently own any cards from your wishlist.',
                     items: friendHasForYou,
                     onTapEntry: _openCard,
+                    onDeal: _makeDeal,
                   ),
                   const SizedBox(height: 16),
                   FriendTradeMatchSection(
                     title: 'You have cards from their wishlist',
                     subtitle: 'Cards ${widget.friendName} wants that already exist in your synced Pokédex.',
                     emptyMessage: _showLikelySpareOnly
-                        ? 'You do not currently have any visible likely-spare matches for ${widget.friendName}. '
-                            'Try turning the spare-only filter off.'
+                        ? 'You do not currently have duplicate copies of cards on ${widget.friendName}’s wishlist. '
+                            'Turn the duplicate filter off to see collection matches.'
                         : "You do not currently own any cards from ${widget.friendName}'s wishlist.",
                     items: youHaveForFriend,
                     onTapEntry: _openCard,
+                    onDeal: _makeDeal,
                   ),
                   if (!hasAnyVisibleMatches) ...[
                     const SizedBox(height: 16),

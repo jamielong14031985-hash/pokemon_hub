@@ -144,6 +144,25 @@ class CardOwnership {
       masterBallReverseCount +
       extraVariantCopies.values.fold<int>(0, (total, value) => total + (value > 0 ? value : 0));
 
+  /// Copies left after keeping one of every owned printing for the collection.
+  /// A normal and a reverse holo are different printings, so owning one of
+  /// each does not incorrectly create a trade duplicate.
+  int get duplicateCopies {
+    int extras(int count) => count > 1 ? count - 1 : 0;
+
+    return extras(normalCount) +
+        extras(reverseHoloCount) +
+        extras(holoCount) +
+        extras(pokeBallReverseCount) +
+        extras(masterBallReverseCount) +
+        extraVariantCopies.values.fold<int>(
+          0,
+          (total, count) => total + extras(count),
+        );
+  }
+
+  bool get hasDuplicateCopies => duplicateCopies > 0;
+
   bool get hasConditionDetails {
     return (condition.trim().isNotEmpty && condition.trim() != kDefaultCardCondition) ||
         gradingCompany.trim().isNotEmpty ||

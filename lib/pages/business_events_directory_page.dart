@@ -118,15 +118,6 @@ class _BusinessEventsDirectoryPageState
     }).toList();
   }
 
-  int _gridColumns(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-
-    if (width >= 900) return 3;
-    if (width >= 340) return 2;
-
-    return 1;
-  }
-
   InputDecoration _searchDecoration() {
     return InputDecoration(
       labelText: 'Search events',
@@ -179,12 +170,9 @@ class _BusinessEventsDirectoryPageState
 
   @override
   Widget build(BuildContext context) {
-    final crossAxisCount = _gridColumns(context);
-
     return Scaffold(
       backgroundColor: _backgroundColor,
       appBar: AppBar(
-        title: const Text('Shop Events'),
         backgroundColor: _backgroundColor,
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
@@ -232,14 +220,9 @@ class _BusinessEventsDirectoryPageState
               if (events.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                  sliver: SliverGrid.builder(
+                  sliver: SliverList.separated(
                     itemCount: events.length,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      mainAxisExtent: 310,
-                    ),
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final event = events[index];
 
@@ -543,119 +526,150 @@ class _DirectoryEventTile extends StatelessWidget {
         ? 'Business Pro shop'
         : event.businessName.trim();
     final title = event.title.trim().isEmpty ? 'Shop event' : event.title.trim();
-    final description = event.description.trim();
     final hasBooking = event.hasBookingUrl;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(
-          color: _BusinessEventsDirectoryPageState._cardColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _BusinessEventsDirectoryPageState._borderColor),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _TinyPill(
-                  icon: Icons.event_outlined,
-                  label: event.eventTypeLabel,
-                  highlighted: true,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          height: 168,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _BusinessEventsDirectoryPageState._cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: _BusinessEventsDirectoryPageState._borderColor,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 96,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  color: _BusinessEventsDirectoryPageState._fieldColor,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                if (event.onlineEvent)
-                  const _TinyPill(
-                    icon: Icons.language,
-                    label: 'Online',
-                    highlighted: false,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 9),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                height: 1.1,
-                fontWeight: FontWeight.w900,
+                clipBehavior: Clip.antiAlias,
+                child: event.hasImage
+                    ? Image.network(
+                        event.imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.event_outlined,
+                          color: _BusinessEventsDirectoryPageState._goldColor,
+                          size: 40,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.event_outlined,
+                        color: _BusinessEventsDirectoryPageState._goldColor,
+                        size: 40,
+                      ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              businessName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _BusinessEventsDirectoryPageState._softTextColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _MiniLine(
-              icon: Icons.schedule_outlined,
-              text: formatDateTime(event.startDate),
-            ),
-            const SizedBox(height: 5),
-            _MiniLine(
-              icon: event.onlineEvent ? Icons.language : Icons.location_on_outlined,
-              text: event.onlineEvent
-                  ? 'Online'
-                  : event.location.trim().isEmpty
-                      ? 'Location TBC'
-                      : event.location.trim(),
-            ),
-            if (event.hasEntryFee) ...[
-              const SizedBox(height: 5),
-              _MiniLine(
-                icon: Icons.confirmation_number_outlined,
-                text: event.entryFee.trim(),
-              ),
-            ],
-            if (description.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _BusinessEventsDirectoryPageState._softTextColor,
-                  fontSize: 12,
-                  height: 1.25,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            const Spacer(),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    hasBooking ? 'Link available' : 'Tap for details',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _BusinessEventsDirectoryPageState._goldColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 3),
+                    Text(
+                      businessName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _BusinessEventsDirectoryPageState._softTextColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: _TinyPill(
+                            icon: Icons.event_outlined,
+                            label: event.eventTypeLabel,
+                            highlighted: true,
+                          ),
+                        ),
+                        if (event.onlineEvent) ...[
+                          const SizedBox(width: 6),
+                          const _TinyPill(
+                            icon: Icons.language,
+                            label: 'Online',
+                            highlighted: false,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 7),
+                    _MiniLine(
+                      icon: Icons.schedule_outlined,
+                      text: formatDateTime(event.startDate),
+                    ),
+                    const SizedBox(height: 4),
+                    _MiniLine(
+                      icon: event.onlineEvent
+                          ? Icons.language
+                          : Icons.location_on_outlined,
+                      text: event.onlineEvent
+                          ? 'Online'
+                          : event.location.trim().isEmpty
+                              ? 'Location TBC'
+                              : event.location.trim(),
+                    ),
+                    const Spacer(),
+                    Row(
+                      children: [
+                        if (event.hasEntryFee)
+                          Expanded(
+                            child: Text(
+                              event.entryFee.trim(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _BusinessEventsDirectoryPageState
+                                    ._softTextColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          )
+                        else
+                          const Spacer(),
+                        Text(
+                          hasBooking ? 'Book / details' : 'View details',
+                          style: const TextStyle(
+                            color: _BusinessEventsDirectoryPageState._goldColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const Icon(
+                          Icons.chevron_right,
+                          color: _BusinessEventsDirectoryPageState._goldColor,
+                          size: 22,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                const Icon(
-                  Icons.chevron_right,
-                  color: _BusinessEventsDirectoryPageState._goldColor,
-                ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -709,7 +723,7 @@ class _EventsHeroCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Upcoming shop events',
+                  'Upcoming Events',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -718,17 +732,73 @@ class _EventsHeroCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 7),
-                Text(
-                  totalCount == 0
-                      ? 'Business Pro events will appear here.'
-                      : '$totalCount upcoming event${totalCount == 1 ? '' : 's'} from Business Pro shops.',
-                  style: const TextStyle(
+                const Text(
+                  'Discover tournaments, trade nights, releases and meetups.',
+                  style: TextStyle(
                     color: _BusinessEventsDirectoryPageState._softTextColor,
                     height: 1.35,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _HeroStatPill(
+                      icon: Icons.calendar_month_outlined,
+                      label: '$totalCount upcoming',
+                    ),
+                    const _HeroStatPill(
+                      icon: Icons.language,
+                      label: 'Local & online',
+                    ),
+                  ],
+                ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroStatPill extends StatelessWidget {
+  const _HeroStatPill({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: _BusinessEventsDirectoryPageState._fieldColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _BusinessEventsDirectoryPageState._borderColor,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: _BusinessEventsDirectoryPageState._goldColor,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ],

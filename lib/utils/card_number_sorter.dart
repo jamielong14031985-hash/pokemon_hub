@@ -28,7 +28,8 @@ CardNumberParts splitCardNumber(String value) {
 
   // The 30th Celebration master checklist has three groups outside the main
   // numeric set. Keep the Classic Collection together first, then the three
-  // RGB Mew cards as one group, followed by the eight MEE Energy cards.
+  // RGB Mew cards, the eight MEE Energy cards, and finally the genuine MEP
+  // Black Star Promos.
   final classicMatch = RegExp(r'^CC(\d+)$').firstMatch(normalized);
   if (classicMatch != null) {
     final number = int.tryParse(classicMatch.group(1) ?? '') ?? 0;
@@ -49,6 +50,16 @@ CardNumberParts splitCardNumber(String value) {
   if (energyMatch != null) {
     final number = int.tryParse(energyMatch.group(1) ?? '') ?? 0;
     return CardNumberParts(3000000 + number, normalized);
+  }
+
+  final promoMatch = RegExp(r'^MEP(\d+)(?:-PC)?$').firstMatch(normalized);
+  if (promoMatch != null) {
+    final number = int.tryParse(promoMatch.group(1) ?? '') ?? 0;
+    final stampedOffset = normalized.endsWith('-PC') ? 1 : 0;
+    return CardNumberParts(
+      4000000 + (number * 10) + stampedOffset,
+      normalized,
+    );
   }
 
   return CardNumberParts(999999, normalized);

@@ -113,6 +113,8 @@ class BusinessEvent {
 
     if (start == null) return true;
 
-    return start.add(const Duration(hours: 24)).isAfter(now);
+    // If no separate end time was supplied, the event stops being visible
+    // as soon as its scheduled start time has passed.
+    return start.isAfter(now);
   }
 }

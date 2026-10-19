@@ -26,9 +26,9 @@ class FriendTradeMatchService {
     final friendHasForYou = yourWishlist
         .where((entry) => (friendOwnedCards[entry.cardId]?.effectiveCopies ?? 0) > 0)
         .map(
-          (entry) => FriendTradeMatchEntry(
+          (entry) => _buildEntry(
             entry: entry,
-            ownerCopies: friendOwnedCards[entry.cardId]?.effectiveCopies ?? 0,
+            ownership: friendOwnedCards[entry.cardId]!,
             ownerIsFriend: true,
           ),
         )
@@ -38,9 +38,9 @@ class FriendTradeMatchService {
     final youHaveForFriend = friendWishlist
         .where((entry) => (yourOwnedCards[entry.cardId]?.effectiveCopies ?? 0) > 0)
         .map(
-          (entry) => FriendTradeMatchEntry(
+          (entry) => _buildEntry(
             entry: entry,
-            ownerCopies: yourOwnedCards[entry.cardId]?.effectiveCopies ?? 0,
+            ownership: yourOwnedCards[entry.cardId]!,
             ownerIsFriend: false,
           ),
         )
@@ -54,16 +54,33 @@ class FriendTradeMatchService {
       friendWishlistCount: friendWishlist.length,
       yourOwnedCount: yourOwnedCards.length,
       friendOwnedCount: friendOwnedCards.length,
+      yourOwnedCards: yourOwnedCards,
+      friendOwnedCards: friendOwnedCards,
     );
   }
 
   static int _sortFriendTradeMatchEntries(FriendTradeMatchEntry a, FriendTradeMatchEntry b) {
+    final spareCompare = b.ownerSpareCopies.compareTo(a.ownerSpareCopies);
+    if (spareCompare != 0) return spareCompare;
     final aPrice = a.entry.rawPrice ?? -1;
     final bPrice = b.entry.rawPrice ?? -1;
     if (aPrice != bPrice) {
       return bPrice.compareTo(aPrice);
     }
     return a.entry.name.toLowerCase().compareTo(b.entry.name.toLowerCase());
+  }
+
+  static FriendTradeMatchEntry _buildEntry({
+    required WishlistEntry entry,
+    required CardOwnership ownership,
+    required bool ownerIsFriend,
+  }) {
+    return FriendTradeMatchEntry(
+      entry: entry,
+      ownerCopies: ownership.effectiveCopies,
+      ownerSpareCopies: ownership.duplicateCopies,
+      ownerIsFriend: ownerIsFriend,
+    );
   }
 }
 
@@ -102,9 +119,9 @@ class WishlistTradeMatchCentreService {
         final friendHasForYou = yourWishlist
             .where((entry) => (friendOwnedCards[entry.cardId]?.effectiveCopies ?? 0) > 0)
             .map(
-              (entry) => FriendTradeMatchEntry(
+              (entry) => _buildEntry(
                 entry: entry,
-                ownerCopies: friendOwnedCards[entry.cardId]?.effectiveCopies ?? 0,
+                ownership: friendOwnedCards[entry.cardId]!,
                 ownerIsFriend: true,
               ),
             )
@@ -114,9 +131,9 @@ class WishlistTradeMatchCentreService {
         final youHaveForFriend = friendWishlist
             .where((entry) => (yourOwnedCards[entry.cardId]?.effectiveCopies ?? 0) > 0)
             .map(
-              (entry) => FriendTradeMatchEntry(
+              (entry) => _buildEntry(
                 entry: entry,
-                ownerCopies: yourOwnedCards[entry.cardId]?.effectiveCopies ?? 0,
+                ownership: yourOwnedCards[entry.cardId]!,
                 ownerIsFriend: false,
               ),
             )
@@ -157,11 +174,26 @@ class WishlistTradeMatchCentreService {
   }
 
   static int _sortTradeMatchEntries(FriendTradeMatchEntry a, FriendTradeMatchEntry b) {
+    final spareCompare = b.ownerSpareCopies.compareTo(a.ownerSpareCopies);
+    if (spareCompare != 0) return spareCompare;
     final aPrice = a.entry.rawPrice ?? -1;
     final bPrice = b.entry.rawPrice ?? -1;
     if (aPrice != bPrice) {
       return bPrice.compareTo(aPrice);
     }
     return a.entry.name.toLowerCase().compareTo(b.entry.name.toLowerCase());
+  }
+
+  static FriendTradeMatchEntry _buildEntry({
+    required WishlistEntry entry,
+    required CardOwnership ownership,
+    required bool ownerIsFriend,
+  }) {
+    return FriendTradeMatchEntry(
+      entry: entry,
+      ownerCopies: ownership.effectiveCopies,
+      ownerSpareCopies: ownership.duplicateCopies,
+      ownerIsFriend: ownerIsFriend,
+    );
   }
 }

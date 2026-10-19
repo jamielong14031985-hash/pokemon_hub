@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/card_ownership.dart';
@@ -133,7 +134,7 @@ class _JapaneseSetsPageState extends State<JapaneseSetsPage> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'Browse Japanese Pokémon TCG sets and cards from TCGdex.',
+                      'Browse modern Japanese Pokémon TCG sets from 2016 onward.',
                       style: TextStyle(
                         color: _softTextColor,
                         fontSize: 12.5,
@@ -193,7 +194,7 @@ class _JapaneseSetsPageState extends State<JapaneseSetsPage> {
                     ? 'Japanese set data could not be loaded.'
                     : hasQuery
                         ? '$visibleCount of $totalCount Japanese sets shown.'
-                        : '$totalCount Japanese sets loaded. Tap a set to view cards.',
+                        : '$totalCount modern Japanese sets loaded. Tap a set to view cards.',
             style: const TextStyle(
               color: _softTextColor,
               fontSize: 12,
@@ -326,14 +327,56 @@ class JapaneseSetSearchResultCard extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  String _seriesLabel(JapaneseTcgSet metadata) {
+    final id = metadata.id.trim().toLowerCase();
+    if (id.startsWith('sv')) return 'Scarlet & Violet';
+    if (id.startsWith('sm')) return 'Sun & Moon';
+    if (id.startsWith('s')) return 'Sword & Shield';
+    if (id.startsWith('xy') || id.startsWith('cp')) return 'XY';
+    if (id.startsWith('m')) return 'Mega Evolution';
+
+    final series = metadata.series.trim();
+    return series.isEmpty ? 'Japanese' : series;
+  }
+
+  String _releaseDateLabel(String value) {
+    return value.trim().replaceAll('-', '/');
+  }
+
+  Widget _buildMetadataRow(JapaneseTcgSet metadata) {
+    final cardCount = metadata.cardCount > 0
+        ? metadata.cardCount
+        : set.cardCount;
+    final releaseDate = _releaseDateLabel(metadata.releaseDate);
     final badges = <Widget>[
-      if (set.cardCount > 0) _SetBadge(label: '${set.cardCount} cards'),
-      _SetBadge(label: 'Japanese'),
-      if (set.releaseDate.trim().isNotEmpty) _SetBadge(label: set.releaseDate.trim()),
+      if (cardCount > 0) _SetBadge(label: '$cardCount cards'),
+      _SetBadge(label: _seriesLabel(metadata)),
+      if (releaseDate.isNotEmpty) _SetBadge(label: releaseDate),
     ];
 
+    return SizedBox(
+      width: double.infinity,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < badges.length; i++)
+              Padding(
+                padding: EdgeInsets.only(
+                  right: i == badges.length - 1 ? 0 : 8,
+                ),
+                child: badges[i],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Card(
       margin: EdgeInsets.zero,
       color: _cardColor,
@@ -361,25 +404,51 @@ class JapaneseSetSearchResultCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              if (badges.isNotEmpty)
-                SizedBox(
-                  width: double.infinity,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.center,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (var i = 0; i < badges.length; i++)
-                          Padding(
-                            padding: EdgeInsets.only(right: i == badges.length - 1 ? 0 : 8),
-                            child: badges[i],
-                          ),
-                      ],
-                    ),
-                  ),
+              const SizedBox(height: 8),
+              Text(
+                set.displayName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  height: 1.2,
+                  fontWeight: FontWeight.w900,
                 ),
+              ),
+              FutureBuilder<String>(
+                future: JapaneseTcgDexService.fetchSetEnglishName(set),
+                builder: (context, snapshot) {
+                  final englishName = (snapshot.data ?? '').trim();
+                  if (englishName.isEmpty ||
+                      englishName.toLowerCase() == set.displayName.toLowerCase()) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      englishName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: _softTextColor,
+                        fontSize: 14,
+                        height: 1.2,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              FutureBuilder<JapaneseTcgSetDetails>(
+                future: JapaneseTcgDexService.fetchSetDetails(set.id),
+                builder: (context, snapshot) {
+                  return _buildMetadataRow(snapshot.data ?? set);
+                },
+              ),
               const SizedBox(height: 10),
               Row(
                 children: const [
@@ -636,6 +705,38 @@ class _JapaneseSetDetailsPageState extends State<JapaneseSetDetailsPage> {
               largeLogo: true,
             ),
           ),
+          const SizedBox(height: 10),
+          Text(
+            details.displayName,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          FutureBuilder<String>(
+            future: JapaneseTcgDexService.fetchSetEnglishName(details),
+            builder: (context, snapshot) {
+              final englishName = (snapshot.data ?? '').trim();
+              if (englishName.isEmpty ||
+                  englishName.toLowerCase() == details.displayName.toLowerCase()) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  englishName,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFC8D4F0),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 14),
           Wrap(
             alignment: WrapAlignment.center,
@@ -842,6 +943,8 @@ class _JapaneseScrollableCardTile extends StatelessWidget {
                   candidates: _cardImageCandidates(card.imageUrl ?? ''),
                   fallback: Icons.image_not_supported_outlined,
                   fit: BoxFit.cover,
+                  placeholderTitle: card.name,
+                  placeholderSubtitle: '#${card.number}',
                 ),
               ),
             ),
@@ -1017,7 +1120,6 @@ class _JapaneseSetPokedexPageState extends State<JapaneseSetPokedexPage> {
     final slots = <MasterSetCardSlot>[];
     final seen = <String>{};
     final setId = widget.set.id.trim().toLowerCase();
-    final isJapanese151 = setId == 'sv2a';
 
     for (final card in cards) {
       void addSlot(MasterSetSlotKind kind) {
@@ -1035,19 +1137,17 @@ class _JapaneseSetPokedexPageState extends State<JapaneseSetPokedexPage> {
       }
 
       // Japanese sets list each printed card separately, so every card gets
-      // its printed-card slot first.
+      // its printed-card slot first. This includes cards from Japanese promo,
+      // deck, product-exclusive and special-release sets returned by TCGdex.
       addSlot(MasterSetSlotKind.normal);
 
-      // PocketChase counts Japanese 151 master set as 360 slots:
-      // 210 printed cards + 150 Poke Ball reverse slots for cards 001-150.
-      if (isJapanese151 && _isJapanese151ReverseEligible(card)) {
+      // Some Japanese high-class sets contain separate Poké Ball and Master
+      // Ball mirror printings. Keep both as independent Grand Master slots.
+      // The printed rarity/card number check prevents ex, AR, SR, SAR and UR
+      // cards from receiving mirror slots they were never printed with.
+      if (_supportsJapaneseBallPatternVariants(setId) &&
+          _isJapaneseBallPatternEligible(card)) {
         addSlot(MasterSetSlotKind.pokeBallReverse);
-      }
-
-      // The model/helper files now support Master Ball reverses separately.
-      // Leave this disabled unless you want Japanese 151 grand master to count
-      // Master Ball reverses in addition to the 360-card master set.
-      if (isJapanese151 && _includeJapanese151MasterBallReverseSlots && _isJapanese151MasterBallEligible(card)) {
         addSlot(MasterSetSlotKind.masterBallReverse);
       }
     }
@@ -1065,7 +1165,21 @@ class _JapaneseSetPokedexPageState extends State<JapaneseSetPokedexPage> {
     return slots;
   }
 
-  static const bool _includeJapanese151MasterBallReverseSlots = false;
+  bool _supportsJapaneseBallPatternVariants(String setId) {
+    final normalizedName = widget.set.name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+
+    // Confirmed Japanese sets with both Poké Ball and Master Ball mirrors.
+    // IDs are preferred; names keep the rule working if the upstream source
+    // changes an identifier while retaining the official set name.
+    return const <String>{'sv2a', 'sv8a', 'sv11b', 'sv11w'}.contains(setId) ||
+        normalizedName.contains('pokemon card 151') ||
+        normalizedName.contains('terastal festival ex') ||
+        normalizedName.contains('black bolt') ||
+        normalizedName.contains('white flare');
+  }
 
   int _leadingCardNumber(TcgCard card) {
     final match = RegExp(r'\d+').firstMatch(card.number.trim());
@@ -1073,14 +1187,40 @@ class _JapaneseSetPokedexPageState extends State<JapaneseSetPokedexPage> {
     return int.tryParse(match.group(0) ?? '') ?? 0;
   }
 
-  bool _isJapanese151ReverseEligible(TcgCard card) {
+  bool _isJapaneseBallPatternEligible(TcgCard card) {
     final number = _leadingCardNumber(card);
-    return number >= 1 && number <= 150;
-  }
+    if (number <= 0) return false;
 
-  bool _isJapanese151MasterBallEligible(TcgCard card) {
-    final number = _leadingCardNumber(card);
-    return number >= 1 && number <= 150;
+    final officialTotal = widget.set.cardCount;
+    if (officialTotal > 0 && number > officialTotal) return false;
+
+    final rarity = (card.rarity ?? '')
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+    final compactRarity = rarity.replaceAll(' ', '').toUpperCase();
+    final name = card.name.toLowerCase().trim();
+
+    // Ball-pattern mirrors belong to the regular C/U/R portion of these sets.
+    // Exclude every secret/special rarity and Pokémon ex even when an older
+    // upstream record has no rarity value yet.
+    const excludedRarityCodes = <String>{
+      'RR', 'AR', 'SR', 'SAR', 'UR', 'HR', 'CHR', 'CSR', 'SSR', 'ACE',
+    };
+    if (excludedRarityCodes.contains(compactRarity)) return false;
+    if (rarity.contains('double rare') ||
+        rarity.contains('art rare') ||
+        rarity.contains('illustration') ||
+        rarity.contains('secret') ||
+        rarity.contains('ultra') ||
+        rarity.contains('hyper') ||
+        rarity.contains('special art') ||
+        rarity.contains('ace spec')) {
+      return false;
+    }
+    if (RegExp(r'\bex\b', caseSensitive: false).hasMatch(name)) return false;
+
+    return true;
   }
 
   Widget _buildOwnedColourState({
@@ -1720,21 +1860,14 @@ class _JapaneseSetPreviewImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final existingDetails = details;
-    if (existingDetails != null) {
-      return _TcgDexCandidateImage(
-        candidates: _candidates(existingDetails),
-        fallback: Icons.style_outlined,
-        fit: BoxFit.contain,
-        padding: EdgeInsets.all(largeLogo ? 4 : 7),
-      );
-    }
-
-    return FutureBuilder<JapaneseTcgSetDetails>(
-      future: JapaneseTcgDexService.fetchSetDetails(set.id),
+    return FutureBuilder<String>(
+      future: JapaneseTcgDexService.fetchSetArtworkUrl(set),
       builder: (context, snapshot) {
         return _TcgDexCandidateImage(
-          candidates: _candidates(snapshot.data),
+          candidates: <String>[
+            if ((snapshot.data ?? '').trim().isNotEmpty) snapshot.data!.trim(),
+            ..._candidates(details),
+          ],
           fallback: Icons.style_outlined,
           fit: BoxFit.contain,
           padding: EdgeInsets.all(largeLogo ? 4 : 7),
@@ -1750,12 +1883,16 @@ class _TcgDexCandidateImage extends StatefulWidget {
     required this.fallback,
     this.fit = BoxFit.contain,
     this.padding = EdgeInsets.zero,
+    this.placeholderTitle = '',
+    this.placeholderSubtitle = '',
   });
 
   final List<String> candidates;
   final IconData fallback;
   final BoxFit fit;
   final EdgeInsets padding;
+  final String placeholderTitle;
+  final String placeholderSubtitle;
 
   @override
   State<_TcgDexCandidateImage> createState() => _TcgDexCandidateImageState();
@@ -1790,8 +1927,45 @@ class _TcgDexCandidateImageState extends State<_TcgDexCandidateImage> {
     final candidates = _cleanCandidates;
 
     if (candidates.isEmpty || _index >= candidates.length) {
-      return Center(
-        child: Icon(widget.fallback, color: const Color(0xFFF7DE77), size: 32),
+      return Padding(
+        padding: widget.padding,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(widget.fallback, color: const Color(0xFFF7DE77), size: 30),
+              if (widget.placeholderTitle.trim().isNotEmpty) ...[
+                const SizedBox(height: 7),
+                Text(
+                  widget.placeholderTitle.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    height: 1.15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+              if (widget.placeholderSubtitle.trim().isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(
+                  widget.placeholderSubtitle.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFC8D4F0),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       );
     }
 
@@ -1945,6 +2119,8 @@ class JapaneseTcgDexService {
 
   static const String _host = 'api.tcgdex.net';
   static const String _language = 'ja';
+  static final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'europe-west2');
 
   static List<JapaneseTcgSet>? _cachedSets;
   static Future<List<JapaneseTcgSet>>? _setsInFlight;
@@ -1952,17 +2128,23 @@ class JapaneseTcgDexService {
       <String, JapaneseTcgSetDetails>{};
   static final Map<String, Future<JapaneseTcgSetDetails>> _detailsInFlight =
       <String, Future<JapaneseTcgSetDetails>>{};
+  static final Map<String, String> _setArtworkCache = <String, String>{};
+  static final Map<String, String> _setEnglishNameCache = <String, String>{};
+  static final Map<String, Future<String>> _setArtworkInFlight =
+      <String, Future<String>>{};
 
   // The set endpoint returns CardBrief objects, which do not include rarity.
   // Cache the rarity from the full-card endpoint so every Japanese card can
   // display its own C / U / R / RR / AR / SR / SAR / UR etc. badge.
-  static final Map<String, String> _cardRarityCache = <String, String>{};
-  static final Map<String, Future<String>> _cardRarityInFlight =
-      <String, Future<String>>{};
+  static final Map<String, _JapaneseCardMetadata> _cardMetadataCache =
+      <String, _JapaneseCardMetadata>{};
+  static final Map<String, Future<_JapaneseCardMetadata>> _cardMetadataInFlight =
+      <String, Future<_JapaneseCardMetadata>>{};
+  static Future<Map<int, String>>? _englishPokemonNamesInFlight;
 
   static Future<List<JapaneseTcgSet>> fetchSets({bool forceRefresh = false}) async {
     final cached = _cachedSets;
-    if (!forceRefresh && cached != null) {
+    if (!forceRefresh && cached != null && cached.isNotEmpty) {
       return List<JapaneseTcgSet>.from(cached);
     }
 
@@ -1986,6 +2168,65 @@ class JapaneseTcgDexService {
   static Future<List<JapaneseTcgSet>> searchSetsForQuery(String query) async {
     final sets = await fetchSets();
     return filterSetsForQuery(sets, query).take(50).toList();
+  }
+
+  static Future<String> fetchSetArtworkUrl(JapaneseTcgSet set) async {
+    final key = set.id.trim();
+    if (key.isEmpty) return '';
+    final cached = _setArtworkCache[key];
+    if (cached != null) return cached;
+    final inFlight = _setArtworkInFlight[key];
+    if (inFlight != null) return inFlight;
+
+    final request = _fetchSetArtworkUrl(set);
+    _setArtworkInFlight[key] = request;
+    try {
+      final url = await request;
+      _setArtworkCache[key] = url;
+      return url;
+    } finally {
+      _setArtworkInFlight.remove(key);
+    }
+  }
+
+  static Future<String> fetchSetEnglishName(JapaneseTcgSet set) async {
+    final key = set.id.trim();
+    if (key.isEmpty) return '';
+    if (_setEnglishNameCache.containsKey(key)) {
+      return _setEnglishNameCache[key] ?? '';
+    }
+    // Reuse the artwork request. It also returns PokéWallet's English set
+    // title, and the shared in-flight cache prevents a duplicate API call.
+    await fetchSetArtworkUrl(set);
+    final fetched = (_setEnglishNameCache[key] ?? '').trim();
+    if (fetched.isNotEmpty) return fetched;
+
+    final fallback = _fallbackEnglishSetName(set);
+    _setEnglishNameCache[key] = fallback;
+    return fallback;
+  }
+
+  static Future<String> _fetchSetArtworkUrl(JapaneseTcgSet set) async {
+    try {
+      final callable = _functions.httpsCallable(
+        'lookupJapanesePokemonArtwork',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+      );
+      final result = await callable.call(<String, dynamic>{
+        'id': set.id,
+        'name': set.name,
+        'releaseDate': set.releaseDate,
+        'cardCount': set.cardCount,
+        'cards': const <Map<String, String>>[],
+      });
+      final payload = Map<String, dynamic>.from(result.data as Map);
+      _setEnglishNameCache[set.id.trim()] =
+          (payload['setEnglishName'] ?? '').toString().trim();
+      if (payload['matched'] != true) return '';
+      return (payload['setImageUrl'] ?? '').toString().trim();
+    } catch (_) {
+      return '';
+    }
   }
 
   static List<JapaneseTcgSet> filterSetsForQuery(
@@ -2084,6 +2325,22 @@ class JapaneseTcgDexService {
     }
 
     return aliases.toSet().toList();
+  }
+
+  static String _fallbackEnglishSetName(JapaneseTcgSet set) {
+    final aliases = _englishAliasesForSet(set)
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    // The final alias is the Japanese product's English/romanised title;
+    // earlier aliases can be the combined international equivalent.
+    if (aliases.isNotEmpty) return aliases.last;
+
+    final name = set.name.trim();
+    if (name.isNotEmpty && RegExp(r'[A-Za-z]').hasMatch(name)) return name;
+
+    final id = set.id.trim().toUpperCase();
+    return id.isEmpty ? 'Japanese set' : 'Japanese set $id';
   }
 
   static String _normalizeSetSearch(String value) {
@@ -2207,6 +2464,10 @@ class JapaneseTcgDexService {
         .whereType<Map>()
         .map((item) => JapaneseTcgSet.fromJson(Map<String, dynamic>.from(item)))
         .where((set) => set.id.isNotEmpty || set.name.isNotEmpty)
+        // The TCGdex Japanese set-list endpoint does not include releaseDate.
+        // Filter by known era codes. 2016 begins at CP3/XY10, followed by
+        // every Sun & Moon, Sword & Shield, Scarlet & Violet and Mega release.
+        .where((set) => _isJapaneseSetFrom2016Onward(set.id))
         .toList();
 
     sets.sort((a, b) {
@@ -2247,19 +2508,34 @@ class JapaneseTcgDexService {
   }
 
   static Future<JapaneseTcgSetDetails> _fetchSetDetailsFromApi(String setId) async {
+    // TCGdex exposes sm2+ as an empty duplicate. SM2p is the complete record
+    // for the same Japanese release (49 official cards plus secret cards).
+    final canonicalSetId = setId.toLowerCase() == 'sm2+' ? 'SM2p' : setId;
     final uri = Uri.https(
       _host,
-      '/v2/$_language/sets/${Uri.encodeComponent(setId)}',
+      '/v2/$_language/sets/${Uri.encodeComponent(canonicalSetId)}',
     );
-    final response = await http
-        .get(
-          uri,
-          headers: const <String, String>{'accept': 'application/json'},
-        )
-        .timeout(const Duration(seconds: 18));
+    http.Response? response;
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await http
+            .get(uri, headers: const <String, String>{'accept': 'application/json'})
+            .timeout(const Duration(seconds: 18));
+        if (response.statusCode == 200) break;
+      } catch (error) {
+        lastError = error;
+      }
+      if (attempt < 2) {
+        await Future<void>.delayed(Duration(milliseconds: 450 * (attempt + 1)));
+      }
+    }
 
-    if (response.statusCode != 200) {
-      throw Exception('TCGdex returned HTTP ${response.statusCode}.');
+    if (response == null || response.statusCode != 200) {
+      if (response != null) {
+        throw Exception('TCGdex returned HTTP ${response.statusCode}.');
+      }
+      throw Exception('TCGdex could not load this set: $lastError');
     }
 
     final decoded = jsonDecode(response.body);
@@ -2267,24 +2543,110 @@ class JapaneseTcgDexService {
       throw Exception('TCGdex returned unexpected set detail data.');
     }
 
-    final basicDetails = JapaneseTcgSetDetails.fromJson(
+    var basicDetails = JapaneseTcgSetDetails.fromJson(
       Map<String, dynamic>.from(decoded),
     );
 
-    // TCGdex's set endpoint contains CardBrief entries only. CardBrief does not
-    // include rarity, so load the full card records in controlled batches.
-    //
-    // Results are cached by card id, so once a Japanese card has been loaded
-    // during this app session it will not need another rarity request.
-    return _enrichSetDetailsWithCardRarities(basicDetails);
+    // A small number of TCGdex set records omit their embedded CardBrief list.
+    // Ask the cards endpoint for that set before showing an empty page.
+    if (basicDetails.cards.isEmpty) {
+      var fallbackCards = await _fetchCardsForSet(canonicalSetId);
+      if (fallbackCards.isEmpty) {
+        fallbackCards = await _fetchPokewalletCardsForSet(basicDetails);
+      }
+      if (fallbackCards.isNotEmpty) {
+        basicDetails = JapaneseTcgSetDetails(
+          id: basicDetails.id,
+          name: basicDetails.name,
+          series: basicDetails.series,
+          logoUrl: basicDetails.logoUrl,
+          symbolUrl: basicDetails.symbolUrl,
+          releaseDate: basicDetails.releaseDate,
+          cardCount: basicDetails.cardCount > 0
+              ? basicDetails.cardCount
+              : fallbackCards.length,
+          cards: fallbackCards,
+        );
+      }
+    }
+
+    // Most CardBrief records include their scan base URL and can be returned
+    // immediately. Some older complete sets (including SM2p) have card records
+    // but no TCGdex scans at all; use PokéWallet only for those image-less sets.
+    if (basicDetails.cards.isNotEmpty &&
+        !basicDetails.cards.any((card) => card.image.trim().isNotEmpty)) {
+      return _addPokewalletArtwork(basicDetails);
+    }
+
+    return basicDetails;
   }
 
+  static Future<List<JapaneseTcgCardBrief>> _fetchCardsForSet(String setId) async {
+    try {
+      final uri = Uri.https(
+        _host,
+        '/v2/$_language/cards',
+        <String, String>{
+          'set.id': setId,
+          'pagination:page': '1',
+          'pagination:itemsPerPage': '1000',
+        },
+      );
+      final response = await http
+          .get(uri, headers: const <String, String>{'accept': 'application/json'})
+          .timeout(const Duration(seconds: 18));
+      if (response.statusCode != 200) return const <JapaneseTcgCardBrief>[];
+      final decoded = jsonDecode(response.body);
+      if (decoded is! List) return const <JapaneseTcgCardBrief>[];
+      return decoded
+          .whereType<Map>()
+          .map((item) => JapaneseTcgCardBrief.fromJson(Map<String, dynamic>.from(item)))
+          .where((card) => card.id.isNotEmpty || card.name.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const <JapaneseTcgCardBrief>[];
+    }
+  }
+
+  static Future<List<JapaneseTcgCardBrief>> _fetchPokewalletCardsForSet(
+    JapaneseTcgSetDetails details,
+  ) async {
+    try {
+      final callable = _functions.httpsCallable(
+        'lookupJapanesePokemonArtwork',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 60)),
+      );
+      final result = await callable.call(<String, dynamic>{
+        'id': details.id,
+        'name': details.name,
+        'releaseDate': details.releaseDate,
+        'cardCount': details.cardCount,
+        'includeCards': true,
+        'cards': const <Map<String, String>>[],
+      });
+      final payload = Map<String, dynamic>.from(result.data as Map);
+      final rawCards = payload['catalogCards'];
+      if (rawCards is! List) return const <JapaneseTcgCardBrief>[];
+      return rawCards
+          .whereType<Map>()
+          .map((item) => JapaneseTcgCardBrief.fromJson(Map<String, dynamic>.from(item)))
+          .where((card) => card.id.isNotEmpty || card.name.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const <JapaneseTcgCardBrief>[];
+    }
+  }
+
+  // Kept for a future optional background metadata refresh. It must not block
+  // the initial set load, especially for sets containing 200+ cards.
+  // ignore: unused_element
   static Future<JapaneseTcgSetDetails> _enrichSetDetailsWithCardRarities(
     JapaneseTcgSetDetails details,
   ) async {
     if (details.cards.isEmpty) return details;
 
     final enrichedCards = <JapaneseTcgCardBrief>[];
+    final englishPokemonNames = await _fetchEnglishPokemonNames();
     const batchSize = 18;
 
     for (var start = 0; start < details.cards.length; start += batchSize) {
@@ -2292,13 +2654,15 @@ class JapaneseTcgDexService {
       final batch = details.cards.sublist(start, end);
 
       final enrichedBatch = await Future.wait(
-        batch.map(_enrichCardRarity),
+        batch.map(
+          (card) => _enrichCardMetadata(card, englishPokemonNames),
+        ),
       );
 
       enrichedCards.addAll(enrichedBatch);
     }
 
-    return JapaneseTcgSetDetails(
+    final enrichedDetails = JapaneseTcgSetDetails(
       id: details.id,
       name: details.name,
       series: details.series,
@@ -2308,32 +2672,98 @@ class JapaneseTcgDexService {
       cardCount: details.cardCount,
       cards: enrichedCards,
     );
+    return _addPokewalletArtwork(enrichedDetails);
   }
 
-  static Future<JapaneseTcgCardBrief> _enrichCardRarity(
-    JapaneseTcgCardBrief card,
+  static Future<JapaneseTcgSetDetails> _addPokewalletArtwork(
+    JapaneseTcgSetDetails details,
   ) async {
-    if (card.rarity.trim().isNotEmpty) {
-      return card;
+    try {
+      final callable = _functions.httpsCallable(
+        'lookupJapanesePokemonArtwork',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 60)),
+      );
+      final result = await callable.call(<String, dynamic>{
+        'id': details.id,
+        'name': details.name,
+        'releaseDate': details.releaseDate,
+        'cardCount': details.cardCount,
+        'cards': details.cards
+            .map((card) => <String, String>{
+                  'sourceId': card.id,
+                  'number': card.localId,
+                  'name': card.displayName,
+                })
+            .toList(),
+      });
+      final payload = Map<String, dynamic>.from(result.data as Map);
+      if (payload['matched'] != true) return details;
+      final rawImages = payload['cards'];
+      final images = rawImages is Map
+          ? Map<String, dynamic>.from(rawImages)
+          : const <String, dynamic>{};
+      final setImageUrl = (payload['setImageUrl'] ?? '').toString().trim();
+
+      return JapaneseTcgSetDetails(
+        id: details.id,
+        name: details.name,
+        series: details.series,
+        logoUrl: setImageUrl.isEmpty ? details.logoUrl : setImageUrl,
+        symbolUrl: details.symbolUrl,
+        releaseDate: details.releaseDate,
+        cardCount: details.cardCount,
+        cards: details.cards.map((card) {
+          // Modern Japanese cards already have working TCGdex scans. Keep
+          // those first; PokéWallet is only a fallback for missing artwork.
+          if (card.image.trim().isNotEmpty) return card;
+          final imageUrl = (images[card.id] ?? '').toString().trim();
+          return imageUrl.isEmpty ? card : card.copyWith(image: imageUrl);
+        }).toList(),
+      );
+    } catch (_) {
+      // Keep TCGdex data available if the artwork service is temporarily down.
+      return details;
     }
-
-    final rarity = await _fetchJapaneseCardRarity(card.id);
-
-    if (rarity.trim().isEmpty) {
-      return card;
-    }
-
-    return card.copyWith(rarity: rarity);
   }
 
-  static Future<String> _fetchJapaneseCardRarity(String cardId) async {
-    final cleanId = cardId.trim();
-    if (cleanId.isEmpty) return '';
+  static Future<JapaneseTcgCardBrief> _enrichCardMetadata(
+    JapaneseTcgCardBrief card,
+    Map<int, String> englishPokemonNames,
+  ) async {
+    if (card.rarity.trim().isNotEmpty &&
+        card.englishName.trim().isNotEmpty &&
+        card.image.trim().isNotEmpty) {
+      return card;
+    }
 
-    final cached = _cardRarityCache[cleanId];
+    final metadata = await _fetchJapaneseCardMetadata(card.id);
+    final englishName = metadata.dexId == null
+        ? ''
+        : (englishPokemonNames[metadata.dexId!] ?? '');
+
+    if (metadata.rarity.trim().isEmpty &&
+        englishName.trim().isEmpty &&
+        metadata.image.trim().isEmpty) {
+      return card;
+    }
+
+    return card.copyWith(
+      rarity: metadata.rarity.trim().isEmpty ? card.rarity : metadata.rarity,
+      englishName: englishName,
+      image: metadata.image.trim().isEmpty ? card.image : metadata.image,
+    );
+  }
+
+  static Future<_JapaneseCardMetadata> _fetchJapaneseCardMetadata(
+    String cardId,
+  ) async {
+    final cleanId = cardId.trim();
+    if (cleanId.isEmpty) return const _JapaneseCardMetadata();
+
+    final cached = _cardMetadataCache[cleanId];
     if (cached != null) return cached;
 
-    final inFlight = _cardRarityInFlight[cleanId];
+    final inFlight = _cardMetadataInFlight[cleanId];
     if (inFlight != null) return inFlight;
 
     final request = () async {
@@ -2351,30 +2781,83 @@ class JapaneseTcgDexService {
             .timeout(const Duration(seconds: 8));
 
         if (response.statusCode != 200) {
-          return '';
+          return const _JapaneseCardMetadata();
         }
 
         final decoded = jsonDecode(response.body);
         if (decoded is! Map) {
-          return '';
+          return const _JapaneseCardMetadata();
         }
 
         final rarity = _text(decoded['rarity']);
-        _cardRarityCache[cleanId] = rarity;
-        return rarity;
+        final rawDexIds = decoded['dexId'];
+        final dexId = rawDexIds is List && rawDexIds.isNotEmpty
+            ? _intValue(rawDexIds.first)
+            : _intValue(rawDexIds);
+        final metadata = _JapaneseCardMetadata(
+          rarity: rarity,
+          dexId: dexId > 0 ? dexId : null,
+          image: _text(decoded['image']),
+        );
+        _cardMetadataCache[cleanId] = metadata;
+        return metadata;
       } catch (_) {
-        return '';
+        return const _JapaneseCardMetadata();
       }
     }();
 
-    _cardRarityInFlight[cleanId] = request;
+    _cardMetadataInFlight[cleanId] = request;
 
     try {
       return await request;
     } finally {
-      _cardRarityInFlight.remove(cleanId);
+      _cardMetadataInFlight.remove(cleanId);
     }
   }
+
+  static Future<Map<int, String>> _fetchEnglishPokemonNames() {
+    return _englishPokemonNamesInFlight ??= () async {
+      try {
+        final uri = Uri.https(
+          'pokeapi.co',
+          '/api/v2/pokemon-species',
+          const <String, String>{'limit': '2000'},
+        );
+        final response = await http.get(uri).timeout(const Duration(seconds: 12));
+        if (response.statusCode != 200) return const <int, String>{};
+
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map) return const <int, String>{};
+        final results = decoded['results'];
+        if (results is! List) return const <int, String>{};
+
+        final names = <int, String>{};
+        for (final item in results.whereType<Map>()) {
+          final url = _text(item['url']);
+          final match = RegExp(r'/pokemon-species/(\d+)/?').firstMatch(url);
+          final dexId = int.tryParse(match?.group(1) ?? '');
+          final rawName = _text(item['name']);
+          if (dexId == null || rawName.isEmpty) continue;
+          names[dexId] = _formatEnglishPokemonName(rawName);
+        }
+        return names;
+      } catch (_) {
+        return const <int, String>{};
+      }
+    }();
+  }
+}
+
+class _JapaneseCardMetadata {
+  const _JapaneseCardMetadata({
+    this.rarity = '',
+    this.dexId,
+    this.image = '',
+  });
+
+  final String rarity;
+  final int? dexId;
+  final String image;
 }
 
 class JapaneseTcgSet {
@@ -2475,6 +2958,7 @@ class JapaneseTcgCardBrief {
     required this.image,
     required this.types,
     this.rarity = '',
+    this.englishName = '',
   });
 
   final String id;
@@ -2488,6 +2972,7 @@ class JapaneseTcgCardBrief {
   /// The set endpoint normally returns CardBrief objects without this field,
   /// so JapaneseTcgDexService enriches the cards from /cards/{id}.
   final String rarity;
+  final String englishName;
 
   factory JapaneseTcgCardBrief.fromJson(Map<String, dynamic> json) {
     return JapaneseTcgCardBrief(
@@ -2497,6 +2982,7 @@ class JapaneseTcgCardBrief {
       image: _text(json['image']),
       types: _stringList(json['types'] ?? json['type']),
       rarity: _text(json['rarity']),
+      englishName: _text(json['englishName']),
     );
   }
 
@@ -2507,6 +2993,7 @@ class JapaneseTcgCardBrief {
     String? image,
     List<String>? types,
     String? rarity,
+    String? englishName,
   }) {
     return JapaneseTcgCardBrief(
       id: id ?? this.id,
@@ -2515,10 +3002,14 @@ class JapaneseTcgCardBrief {
       image: image ?? this.image,
       types: types ?? this.types,
       rarity: rarity ?? this.rarity,
+      englishName: englishName ?? this.englishName,
     );
   }
 
-  String get displayName => name.trim().isEmpty ? id : name.trim();
+  String get displayName {
+    if (englishName.trim().isNotEmpty) return englishName.trim();
+    return name.trim().isEmpty ? id : name.trim();
+  }
 
   TcgCard toTcgCard(JapaneseTcgSetDetails set) {
     final cleanSetId = set.id.trim();
@@ -2526,21 +3017,23 @@ class JapaneseTcgCardBrief {
         ? localId.trim()
         : _localIdFromCardId(id, cleanSetId);
     final displayNumber = cleanLocalId.isNotEmpty ? cleanLocalId : id.trim();
-    final safeNumber = displayNumber
+    final identitySource = id.trim().isNotEmpty ? id.trim() : displayNumber;
+    final safeCardId = identitySource
         .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
         .replaceAll(RegExp(r'_+'), '_')
         .replaceAll(RegExp(r'^_|_$'), '');
-    final safeCardId = safeNumber.isEmpty ? id.trim() : safeNumber;
     final japaneseSetId = cleanSetId.isEmpty ? 'unknown' : cleanSetId;
 
-    final imageCandidates = <String>[
+    // Prefer the scan base supplied by TCGdex. Some CardBrief records omit it,
+    // even though the same scan exists at TCGdex's documented set/card path.
+    final imageCandidates = <String>{
       ..._cardImageCandidates(image),
       ..._cardImageCandidatesFromParts(
-        setId: japaneseSetId,
+        setId: cleanSetId,
         cardId: id,
         localId: cleanLocalId,
       ),
-    ];
+    }.toList();
 
     final setLogoCandidates = <String>[
       ..._englishEquivalentLogoCandidates(japaneseSetId),
@@ -2559,8 +3052,11 @@ class JapaneseTcgCardBrief {
       hp: null,
       artist: null,
       flavorText: null,
+      // Use the same verified primary scan on both the grid and detail page.
+      // The previous second candidate was often a guessed TCGdex path, which
+      // caused a 404 after tapping an otherwise correctly displayed card.
       imageUrl: imageCandidates.isEmpty ? null : imageCandidates.first,
-      largeImageUrl: imageCandidates.length > 1 ? imageCandidates[1] : null,
+      largeImageUrl: imageCandidates.isEmpty ? null : imageCandidates.first,
       setLogoUrl: setLogoCandidates.isEmpty ? null : setLogoCandidates.first,
       rawPrice: null,
       rawPriceCurrency: 'JPY',
@@ -2578,6 +3074,56 @@ Map<String, dynamic> _asMap(Object? value) {
 }
 
 String _text(Object? value) => value?.toString().trim() ?? '';
+
+bool _isJapaneseSetFrom2016Onward(String value) {
+  final id = value.trim().toUpperCase();
+  if (id.isEmpty) return false;
+
+  if (id.startsWith('SM') ||
+      id.startsWith('S') ||
+      id.startsWith('SV') ||
+      id.startsWith('M') ||
+      id.startsWith('CS')) {
+    return true;
+  }
+
+  final xyNumber = int.tryParse(
+    RegExp(r'^XY(\d+)').firstMatch(id)?.group(1) ?? '',
+  );
+  if (xyNumber != null && xyNumber >= 10) return true;
+
+  final cpNumber = int.tryParse(
+    RegExp(r'^CP(\d+)').firstMatch(id)?.group(1) ?? '',
+  );
+  return cpNumber != null && cpNumber >= 3;
+}
+
+String _formatEnglishPokemonName(String value) {
+  const specialNames = <String, String>{
+    'farfetchd': "Farfetch'd",
+    'mr-mime': 'Mr. Mime',
+    'mime-jr': 'Mime Jr.',
+    'nidoran-f': 'Nidoran ♀',
+    'nidoran-m': 'Nidoran ♂',
+    'type-null': 'Type: Null',
+    'flabebe': 'Flabébé',
+    'sirfetchd': "Sirfetch'd",
+    'mr-rime': 'Mr. Rime',
+    'wo-chien': 'Wo-Chien',
+    'chien-pao': 'Chien-Pao',
+    'ting-lu': 'Ting-Lu',
+    'chi-yu': 'Chi-Yu',
+  };
+  final clean = value.trim().toLowerCase();
+  final special = specialNames[clean];
+  if (special != null) return special;
+
+  return clean
+      .split('-')
+      .where((part) => part.isNotEmpty)
+      .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+      .join(' ');
+}
 
 List<String> _stringList(Object? value) {
   String cleanOne(Object? item) {
@@ -2865,6 +3411,10 @@ String _setAssetGroup(String setId) {
 List<String> _cardImageCandidates(String url) {
   final clean = _normaliseAssetUrl(url);
   if (clean.isEmpty) return const <String>[];
+
+  // Firebase image proxies already return the image bytes directly. Appending
+  // TCGdex-style /high.webp paths after their query string breaks the URL.
+  if (clean.contains('pokewalletJapaneseImage')) return <String>[clean];
 
   if (_hasImageExtension(clean)) {
     return <String>[clean];

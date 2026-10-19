@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../services/currency_settings.dart';
-import '../services/sealed_product_price_service.dart';
+import '../services/sealed_collection_store.dart';
+import '../services/sealed_product_catalog_service.dart';
 import '../utils/ebay_sold_search.dart';
+import 'sealed_collection_page.dart';
 
+/// Catalogue-only sealed products. No marketplace pricing or seller photos.
 class SealedProductPricePage extends StatefulWidget {
-  const SealedProductPricePage({
-    super.key,
-    this.embedded = false,
-  });
+  const SealedProductPricePage({super.key, this.embedded = false});
 
   final bool embedded;
 
@@ -21,22 +20,16 @@ class SealedProductPricePage extends StatefulWidget {
 class _SealedProductPricePageState extends State<SealedProductPricePage> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-
   SealedProductType? _selectedType;
-  List<SealedProductListing> _listings = const <SealedProductListing>[];
+  List<SealedCatalogProduct> _products = const [];
   bool _loading = false;
-  String? _errorMessage;
-  int? _lastUpdatedMs;
-  bool _resultsFromCache = false;
+  bool _hasSearched = false;
+  String? _error;
   int _requestVersion = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadListings();
-    });
-  }
+  List<SealedProductType> get _alphabeticalProductTypes =>
+      SealedProductType.values.toList()
+        ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
 
   @override
   void dispose() {
@@ -45,616 +38,465 @@ class _SealedProductPricePageState extends State<SealedProductPricePage> {
     super.dispose();
   }
 
-  String get _selectedTypeKey {
-    switch (_selectedType) {
-      case SealedProductType.boosterBox:
-        return 'boosterBox';
-      case SealedProductType.eliteTrainerBox:
-        return 'eliteTrainerBox';
-      case SealedProductType.boosterBundle:
-        return 'boosterBundle';
-      case SealedProductType.ultraPremiumCollection:
-        return 'ultraPremiumCollection';
-      case null:
-        return 'all';
-    }
-  }
-
-  Future<void> _loadListings() async {
-    final requestVersion = ++_requestVersion;
-    final marketplaceCode = CurrencySettings.selectedMarketplaceCode;
+  Future<void> _loadProducts() async {
     final query = _searchController.text.trim();
-
+    if (query.isEmpty) {
+      _message('Enter the set or sealed product name.');
+      _searchFocusNode.requestFocus();
+      return;
+    }
+    if (_selectedType == null) {
+      _message('Choose the sealed product type first.');
+      return;
+    }
+    final version = ++_requestVersion;
     setState(() {
       _loading = true;
-      _errorMessage = null;
+      _hasSearched = true;
+      _error = null;
     });
-
     try {
-      final result = await SealedProductPriceService.lookupCurrentListings(
-        marketplaceCode: marketplaceCode,
+      final products = await SealedProductCatalogService.searchProducts(
         query: query,
-        productType: _selectedTypeKey,
+        productType: _selectedType!.name,
       );
-
-      if (!mounted || requestVersion != _requestVersion) return;
+      if (!mounted || version != _requestVersion) return;
+      final alphabeticalProducts = products.toList()
+        ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      setState(() => _products = alphabeticalProducts);
+    } catch (_) {
+      if (!mounted || version != _requestVersion) return;
       setState(() {
-        _listings = result.items;
-        _lastUpdatedMs = result.lastUpdatedMs;
-        _resultsFromCache = result.cached;
-      });
-    } catch (error) {
-      if (!mounted || requestVersion != _requestVersion) return;
-      setState(() {
-        _errorMessage = SealedProductPriceService.friendlyErrorMessage(error);
+        _products = const [];
+        _error = 'The sealed-product catalogue could not be loaded. '
+            'Check the internet connection and try again.';
       });
     } finally {
-      if (mounted && requestVersion == _requestVersion) {
-        setState(() {
-          _loading = false;
-        });
+      if (mounted && version == _requestVersion) {
+        setState(() => _loading = false);
       }
     }
   }
 
-  Future<void> _openListing(SealedProductListing listing) async {
-    final rawUrl = listing.listingUrl.trim();
-    if (rawUrl.isEmpty) {
-      _showMessage('This eBay listing link is unavailable.');
-      return;
-    }
-
-    final uri = Uri.tryParse(rawUrl);
-    if (uri == null) {
-      _showMessage('This eBay listing link is unavailable.');
-      return;
-    }
-
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!opened && mounted) {
-      _showMessage('Could not open this eBay listing.');
-    }
-  }
-
-  void _showMessage(String message) {
+  void _message(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  String _formatUpdatedAt() {
-    final milliseconds = _lastUpdatedMs;
-    if (milliseconds == null || milliseconds <= 0) return '';
-
-    final date = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
-    String twoDigits(int value) => value.toString().padLeft(2, '0');
-    return '${twoDigits(date.day)}/${twoDigits(date.month)}/${date.year} '
-        '${twoDigits(date.hour)}:${twoDigits(date.minute)}';
-  }
-
-  Widget _buildTypeChip({
-    required String label,
-    required SealedProductType? type,
-  }) {
-    final selected = _selectedType == type;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: _loading
-          ? null
-          : (_) {
-              setState(() {
-                _selectedType = type;
-              });
-              _loadListings();
-            },
-      selectedColor: const Color(0xFFF7DE77),
-      backgroundColor: const Color(0xFF16366E),
-      side: BorderSide(
-        color: selected
-            ? const Color(0xFFF7DE77)
-            : Colors.white.withValues(alpha: 0.14),
-      ),
-      labelStyle: TextStyle(
-        color: selected ? Colors.black : Colors.white,
-        fontWeight: FontWeight.w800,
-      ),
+  Future<void> _openCollection() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SealedCollectionPage()),
     );
   }
 
-  Widget _buildSearchAndFilters() {
-    final marketplace = CurrencySettings.selectedMarketplace;
+  Future<void> _addToCollection(SealedCatalogProduct product) async {
+    final proposed = SealedCollectionItem.fromAverageProduct(
+      title: product.title,
+      imageUrl: product.imageUrl,
+      catalogueImageApproved: true,
+      imageSource: 'approvedCatalog',
+      productTypeLabel: product.productTypeLabel,
+      currencyCode: CurrencySettings.selectedCode,
+      averageMarketPrice: 0,
+      productIdentityKey: product.identityKey,
+    );
+    final saved = await SealedCollectionStore.load();
+    SealedCollectionItem? existing;
+    for (final item in saved) {
+      if (item.id == proposed.id) {
+        existing = item;
+        break;
+      }
+    }
+    final updated = existing == null
+        ? proposed
+        : existing.copyWith(
+            quantity: existing.quantity + 1,
+            imageUrl: product.imageUrl,
+            catalogueImageApproved: true,
+            imageSource: 'approvedCatalog',
+          );
+    await SealedCollectionStore.upsert(updated);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(existing == null
+              ? 'Added to My Sealed Collection.'
+              : 'Quantity updated to ${updated.quantity}.'),
+          action: SnackBarAction(label: 'VIEW', onPressed: _openCollection),
+        ),
+      );
+  }
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF102754),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF7DE77),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.inventory_2_outlined,
-                  color: Colors.black,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '10 sealed products for sale',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'Current Booster Boxes, Bundles, ETBs and UPCs on eBay.',
-                      style: TextStyle(
-                        color: Color(0xFFD8E3FB),
-                        fontSize: 12.5,
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+  InputDecoration _fieldDecoration() => InputDecoration(
+        filled: true,
+        fillColor: const Color(0xFF071D42),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 13,
+        ),
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 42,
+          minHeight: 44,
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFF315B92)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(
+            color: Color(0xFFF7DE77),
+            width: 1.5,
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _searchController,
-            focusNode: _searchFocusNode,
-            textCapitalization: TextCapitalization.words,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _loadListings(),
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'Search a set, for example Surging Sparks',
-              hintStyle: const TextStyle(color: Colors.white38),
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-                color: Color(0xFFF7DE77),
-              ),
-              suffixIcon: IconButton(
-                tooltip: 'Search sealed products',
-                onPressed: _loading ? null : _loadListings,
-                icon: _loading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(
-                        Icons.arrow_forward_rounded,
-                        color: Color(0xFFF7DE77),
-                      ),
-              ),
-              filled: true,
-              fillColor: const Color(0xFF071B3F),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(
-                  color: Color(0xFFF7DE77),
-                  width: 1.4,
-                ),
-              ),
+        ),
+      );
+
+  Widget _productTypeSelector() => DropdownButtonFormField<SealedProductType?>(
+        key: ValueKey<SealedProductType?>(_selectedType),
+        initialValue: _selectedType,
+        isExpanded: true,
+        dropdownColor: const Color(0xFF102754),
+        icon: const Icon(
+          Icons.keyboard_arrow_down_rounded,
+          color: Color(0xFFB2C9EB),
+        ),
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+        decoration: _fieldDecoration().copyWith(
+          prefixIcon: const Icon(
+            Icons.inventory_2_outlined,
+            color: Color(0xFFF7DE77),
+            size: 19,
+          ),
+        ),
+        items: <DropdownMenuItem<SealedProductType?>>[
+          const DropdownMenuItem(
+            value: null,
+            child: Text('Choose type'),
+          ),
+          ..._alphabeticalProductTypes.map(
+            (type) => DropdownMenuItem(
+              value: type,
+              child: Text(type.label, overflow: TextOverflow.ellipsis),
             ),
           ),
-          const SizedBox(height: 14),
-          const Text(
-            'Product type',
-            style: TextStyle(
-              color: Colors.white,
+        ],
+        onChanged: _loading
+            ? null
+            : (value) {
+                setState(() {
+                  _selectedType = value;
+                  _hasSearched = false;
+                  _products = const [];
+                });
+              },
+      );
+
+  Widget _searchProductsButton({bool compact = false}) => SizedBox(
+        height: 47,
+        width: compact ? 108 : double.infinity,
+        child: FilledButton.icon(
+          onPressed: _loading ? null : _loadProducts,
+          icon: _loading
+              ? const SizedBox.square(
+                  dimension: 17,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.search_rounded, size: 19),
+          label: Text(
+            _loading ? 'Wait...' : (compact ? 'Search' : 'Search products'),
+            maxLines: 1,
+          ),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFF7DE77),
+            foregroundColor: const Color(0xFF081D3F),
+            disabledBackgroundColor: const Color(0xFF947D3D),
+            disabledForegroundColor: const Color(0xFF081D3F),
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            textStyle: const TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
+        ),
+      );
+
+  Widget _searchPanel() => Container(
+        margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF123B70), Color(0xFF0B2857)],
+          ),
+          borderRadius: BorderRadius.circular(21),
+          border: Border.all(color: const Color(0xFF326DA7), width: 1.1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.13),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               children: [
-                _buildTypeChip(label: 'All', type: null),
-                const SizedBox(width: 8),
-                _buildTypeChip(
-                  label: SealedProductType.boosterBox.label,
-                  type: SealedProductType.boosterBox,
+                const Expanded(
+                  child: Text(
+                    'Find sealed products',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 8),
-                _buildTypeChip(
-                  label: SealedProductType.eliteTrainerBox.shortLabel,
-                  type: SealedProductType.eliteTrainerBox,
-                ),
-                const SizedBox(width: 8),
-                _buildTypeChip(
-                  label: SealedProductType.boosterBundle.shortLabel,
-                  type: SealedProductType.boosterBundle,
-                ),
-                const SizedBox(width: 8),
-                _buildTypeChip(
-                  label: SealedProductType.ultraPremiumCollection.shortLabel,
-                  type: SealedProductType.ultraPremiumCollection,
+                TextButton.icon(
+                  onPressed: _openCollection,
+                  icon: const Icon(Icons.inventory_2_outlined, size: 17),
+                  label: const Text('My collection'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFF7DE77),
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 5,
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              const Icon(
-                Icons.public_rounded,
-                color: Color(0xFFF7DE77),
-                size: 17,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Showing current listings from ${marketplace.label}.',
-                  style: const TextStyle(
-                    color: Color(0xFFD8E3FB),
-                    fontSize: 12,
-                    height: 1.25,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Refresh listings',
-                onPressed: _loading ? null : _loadListings,
-                icon: const Icon(
-                  Icons.refresh_rounded,
-                  color: Color(0xFFF7DE77),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusRow() {
-    if (_loading && _listings.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(16, 18, 16, 4),
-        child: Center(
-          child: Column(
-            children: [
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(height: 10),
-              Text(
-                'Loading products for sale...',
-                style: TextStyle(
-                  color: Color(0xFFD8E3FB),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_errorMessage != null) {
-      return Container(
-        margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF5B1D28),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.white, height: 1.35),
-            ),
             const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _loading ? null : _loadListings,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Try again'),
+            TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _loadProducts(),
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: _fieldDecoration().copyWith(
+                hintText: 'Search a set or product',
+                hintStyle: const TextStyle(color: Color(0xFFADBEDC)),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  color: Color(0xFFF7DE77),
+                  size: 21,
+                ),
+              ),
+            ),
+            const SizedBox(height: 11),
+            const Padding(
+              padding: EdgeInsets.only(left: 3, bottom: 6),
+              child: Text(
+                'PRODUCT TYPE',
+                style: TextStyle(
+                  color: Color(0xFFB9CEEA),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.7,
+                ),
+              ),
+            ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 307) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _productTypeSelector(),
+                      const SizedBox(height: 9),
+                      _searchProductsButton(),
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: _productTypeSelector()),
+                    const SizedBox(width: 9),
+                    _searchProductsButton(compact: true),
+                  ],
+                );
+              },
             ),
           ],
         ),
       );
-    }
 
-    if (_listings.isEmpty) {
-      return Container(
-        margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-        padding: const EdgeInsets.all(20),
+  Widget _productTile(SealedCatalogProduct product) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: const Color(0xFF102754),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         ),
-        child: const Column(
+        child: Row(
           children: [
-            Icon(
-              Icons.search_off_rounded,
-              color: Color(0xFFF7DE77),
-              size: 38,
-            ),
-            SizedBox(height: 10),
-            Text(
-              'No matching products found',
-              textAlign: TextAlign.center,
-              style: TextStyle(
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: ColoredBox(
                 color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 16,
+                child: SizedBox(
+                  width: 90,
+                  height: 106,
+                  child: Image.network(
+                    product.imageUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.inventory_2_outlined,
+                      color: Color(0xFFF7DE77),
+                      size: 38,
+                    ),
+                  ),
+                ),
               ),
             ),
-            SizedBox(height: 5),
-            Text(
-              'Try another set name or product-type filter.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFFC8D4F0), height: 1.3),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.title,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    product.productTypeLabel,
+                    style: const TextStyle(
+                      color: Color(0xFFF7DE77),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 35,
+                    child: FilledButton.icon(
+                      onPressed: () => _addToCollection(product),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text(
+                        'Add to collection',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFF7DE77),
+                        foregroundColor: Colors.black,
+                        textStyle:
+                            const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       );
-    }
 
-    final updatedAt = _formatUpdatedAt();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Row(
-        children: [
-          if (_loading)
-            const SizedBox(
-              width: 15,
-              height: 15,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            const Icon(
-              Icons.local_offer_outlined,
-              color: Color(0xFFF7DE77),
-              size: 17,
-            ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${_listings.length} ${_listings.length == 1 ? 'listing' : 'listings'}'
-              '${updatedAt.isEmpty ? '' : ' • updated $updatedAt'}'
-              '${_resultsFromCache ? ' • cached' : ''}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFFD8E3FB),
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  Widget _status() {
+    if (_error != null) return Text(_error!, textAlign: TextAlign.center);
+    if (!_hasSearched) return const SizedBox.shrink();
+    if (!_loading && _products.isEmpty) {
+      return const Text(
+        'No matching real product was found for this set and product type.',
+        textAlign: TextAlign.center,
+      );
+    }
+    return const SizedBox.shrink();
   }
 
-  Widget _buildListingTile(SealedProductListing listing) {
-    final currency = listing.currencyCode.isEmpty
-        ? CurrencySettings.selectedCode
-        : listing.currencyCode;
-    final priceText = CurrencySettings.formatAmount(
-      listing.priceAmount,
-      fromCurrency: currency,
-    );
-    final listingDateText = listing.listingDateText.isEmpty
-        ? 'Available now'
-        : 'Listed ${listing.listingDateText}';
-    final shippingText = listing.hasShippingCost
-        ? ' + ${CurrencySettings.formatAmount(listing.shippingAmount, fromCurrency: currency)} shipping'
-        : ' + shipping not shown';
-
-    return Material(
-      color: const Color(0xFF102754),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () => _openListing(listing),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 118,
-                height: 142,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    width: double.infinity,
-                    color: const Color(0xFF071B3F),
-                    child: listing.imageUrl.isEmpty
-                        ? const Center(
-                            child: Icon(
-                              Icons.inventory_2_outlined,
-                              color: Color(0xFFF7DE77),
-                              size: 38,
-                            ),
-                          )
-                        : Image.network(
-                            listing.imageUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const Center(
-                              child: Icon(
-                                Icons.broken_image_outlined,
-                                color: Color(0xFFF7DE77),
-                                size: 36,
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
+  /// Exact Sealed illustration from the approved mockup. No extra Flutter
+  /// backgrounds are drawn over it, so the Poké Ball stays authentic.
+  Widget _emptyStateBadgeShowcase() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: SizedBox(
+          width: double.infinity,
+          height: 280,
+          child: Image.asset(
+            'assets/images/pc_hero_sealed.png',
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (_, __, ___) => const Center(
+              child: Icon(
+                Icons.inventory_2_outlined,
+                size: 106,
+                color: Color(0xFFF7DE77),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      listing.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        height: 1.16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      listing.productTypeLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFF7DE77),
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      priceText,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      listingDateText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFF7DE77),
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      shippingText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFC8D4F0),
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 7),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 34,
-                      child: OutlinedButton(
-                        onPressed: () => _openListing(listing),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.18),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          textStyle: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        child: const Text('Open eBay'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
-      ),
-    );
-  }
+      );
 
-  Widget _buildListingsBody() {
-    return RefreshIndicator(
-      onRefresh: _loadListings,
-      child: CustomScrollView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        slivers: [
-          SliverToBoxAdapter(child: _buildSearchAndFilters()),
-          SliverToBoxAdapter(child: _buildStatusRow()),
-          if (_listings.isNotEmpty)
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => Padding(
-                    padding: EdgeInsets.only(
-                      bottom: index == _listings.length - 1 ? 0 : 12,
+  Widget _body() => RefreshIndicator(
+        onRefresh: _loadProducts,
+        child: CustomScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          slivers: [
+            SliverToBoxAdapter(child: _searchPanel()),
+            if (!_hasSearched && !_loading)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _emptyStateBadgeShowcase(),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                sliver: SliverToBoxAdapter(
+                  child: DefaultTextStyle(
+                    style: const TextStyle(color: Color(0xFFC8D4F0)),
+                    child: Column(
+                      children: [
+                        _status(),
+                        ..._products.map(_productTile),
+                      ],
                     ),
-                    child: _buildListingTile(_listings[index]),
                   ),
-                  childCount: _listings.length,
                 ),
               ),
-            )
-          else
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
-    final body = _buildListingsBody();
-
-    if (widget.embedded) {
-      return body;
-    }
-
+    final body = _body();
+    if (widget.embedded) return body;
     return Scaffold(
       backgroundColor: const Color(0xFF041B4A),
       appBar: AppBar(
-        title: const Text('Sealed Prices'),
+        title: const Text('Sealed Products'),
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
       ),

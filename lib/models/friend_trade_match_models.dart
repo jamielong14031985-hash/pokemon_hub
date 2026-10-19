@@ -1,21 +1,28 @@
 import '../services/currency_settings.dart';
 import 'friend_models.dart';
 import 'wishlist_entry.dart';
+import 'card_ownership.dart';
 
 class FriendTradeMatchEntry {
   const FriendTradeMatchEntry({
     required this.entry,
     required this.ownerCopies,
+    required this.ownerSpareCopies,
     required this.ownerIsFriend,
   });
 
   final WishlistEntry entry;
   final int ownerCopies;
+  final int ownerSpareCopies;
   final bool ownerIsFriend;
 
-  bool get hasLikelySpare => ownerCopies > 1;
+  bool get hasLikelySpare => ownerSpareCopies > 0;
 
-  String get copiesLabel => '${ownerIsFriend ? 'They own' : 'You own'} x$ownerCopies';
+  String get copiesLabel {
+    final owner = ownerIsFriend ? 'They own' : 'You own';
+    if (ownerSpareCopies <= 0) return '$owner x$ownerCopies';
+    return '$owner x$ownerCopies • $ownerSpareCopies spare';
+  }
 }
 
 class FriendTradeMatchSnapshot {
@@ -26,6 +33,8 @@ class FriendTradeMatchSnapshot {
     required this.friendWishlistCount,
     required this.yourOwnedCount,
     required this.friendOwnedCount,
+    this.yourOwnedCards = const <String, CardOwnership>{},
+    this.friendOwnedCards = const <String, CardOwnership>{},
   });
 
   final List<FriendTradeMatchEntry> friendHasForYou;
@@ -34,6 +43,8 @@ class FriendTradeMatchSnapshot {
   final int friendWishlistCount;
   final int yourOwnedCount;
   final int friendOwnedCount;
+  final Map<String, CardOwnership> yourOwnedCards;
+  final Map<String, CardOwnership> friendOwnedCards;
 
   int get totalMatches => friendHasForYou.length + youHaveForFriend.length;
 }
@@ -54,6 +65,11 @@ class FriendTradeMatchOverview {
         snapshot.youHaveForFriend.where((item) => item.hasLikelySpare).length;
   }
 
+  int get spareCopies => allEntries.fold<int>(
+        0,
+        (total, item) => total + item.ownerSpareCopies,
+      );
+
   double get estimatedSelectedValue {
     double total = 0;
     for (final item in allEntries) {
@@ -62,6 +78,20 @@ class FriendTradeMatchOverview {
             fromCurrency: item.entry.rawPriceCurrency,
           ) ??
           0;
+    }
+    return total;
+  }
+
+  double get estimatedSpareValue {
+    double total = 0;
+    for (final item in allEntries) {
+      if (item.ownerSpareCopies <= 0) continue;
+      final unitValue = CurrencySettings.convertAmountSync(
+            item.entry.rawPrice,
+            fromCurrency: item.entry.rawPriceCurrency,
+          ) ??
+          0;
+      total += unitValue * item.ownerSpareCopies;
     }
     return total;
   }
@@ -123,8 +153,19 @@ class WishlistTradeMatchCentreSnapshot {
         (runningTotal, overview) => runningTotal + overview.likelySpareMatches,
       );
 
+  int get spareCopies => overviews.fold<int>(
+        0,
+        (runningTotal, overview) => runningTotal + overview.spareCopies,
+      );
+
   double get estimatedSelectedValue => overviews.fold<double>(
         0,
         (runningTotal, overview) => runningTotal + overview.estimatedSelectedValue,
+      );
+
+  double get estimatedSpareValue => overviews.fold<double>(
+        0,
+        (runningTotal, overview) =>
+            runningTotal + overview.estimatedSpareValue,
       );
 }

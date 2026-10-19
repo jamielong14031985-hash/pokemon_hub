@@ -1,6 +1,10 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+} = require("firebase-functions/v2/firestore");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 
@@ -13,6 +17,7 @@ const REGION = "europe-west2";
 const NOTIFICATION_CHANNEL_ID = "pocketchase_notifications";
 
 const DEFAULT_CHECK_TIMEOUT_MS = 20000;
+const POKEWALLET_API_KEY = defineSecret("POKEWALLET_API_KEY");
 
 const DESKTOP_BROWSER_HEADERS = {
   "User-Agent":
@@ -1931,8 +1936,827 @@ exports.lookupExternalPokemonCardPrice =
 exports.lookupEbaySealedProducts =
   require('./lookup_ebay_sealed_products').lookupEbaySealedProducts;
 
+// UK sealed sold-price valuations use CompsAPI; active eBay search remains unchanged.
+exports.lookupCompsSealedSoldPrices =
+  require('./lookup_comps_sealed_sold_prices').lookupCompsSealedSoldPrices;
+
 exports.adminApproveTcgShopSubmission =
   require("./admin_tcg_shop_submissions").adminApproveTcgShopSubmission;
 
 exports.adminRejectTcgShopSubmission =
   require("./admin_tcg_shop_submissions").adminRejectTcgShopSubmission;
+
+// Japanese catalogue artwork is supplied by PokéWallet. The API key remains
+// in Firebase Secret Manager and is never included in the Flutter application.
+let japaneseSetCache = null;
+let japaneseSetCacheTime = 0;
+
+function normaliseJapaneseLookup(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+async function sendPushToAllUsersExcept({
+  excludedUserId,
+  title,
+  body,
+  data,
+  logContext,
+}) {
+  const cleanExcludedUserId = cleanString(excludedUserId);
+  const tokenSnapshot = await db.collectionGroup("fcmTokens").get();
+  const tokenRefsByToken = new Map();
+
+  tokenSnapshot.docs.forEach((tokenDoc) => {
+    const ownerUserId = tokenDoc.ref.parent.parent
+      ? cleanString(tokenDoc.ref.parent.parent.id)
+      : "";
+    const token = cleanString(tokenDoc.data().token);
+
+    if (!token || ownerUserId === cleanExcludedUserId) return;
+    tokenRefsByToken.set(token, tokenDoc.ref);
+  });
+
+  const tokens = Array.from(tokenRefsByToken.keys());
+  if (tokens.length === 0) {
+    logger.info("No FCM tokens found for community broadcast.", logContext || {});
+    return { successCount: 0, failureCount: 0, tokenCount: 0 };
+  }
+
+  let successCount = 0;
+  let failureCount = 0;
+  const invalidTokenDeletePromises = [];
+
+  for (let index = 0; index < tokens.length; index += 500) {
+    const tokenBatch = tokens.slice(index, index + 500);
+    const response = await messaging.sendEachForMulticast({
+      tokens: tokenBatch,
+      notification: {
+        title: truncateForNotification(title, 80),
+        body: truncateForNotification(body, 180),
+      },
+      data: cleanNotificationData(data || {}),
+      android: {
+        priority: "high",
+        notification: {
+          channelId: NOTIFICATION_CHANNEL_ID,
+          sound: "default",
+        },
+      },
+      apns: { payload: { aps: { sound: "default" } } },
+    });
+
+    successCount += response.successCount;
+    failureCount += response.failureCount;
+
+    response.responses.forEach((sendResponse, responseIndex) => {
+      if (sendResponse.success) return;
+      const token = tokenBatch[responseIndex];
+      const errorCode = sendResponse.error && sendResponse.error.code;
+      if (isInvalidFcmTokenError(errorCode)) {
+        const tokenRef = tokenRefsByToken.get(token);
+        if (tokenRef) invalidTokenDeletePromises.push(tokenRef.delete());
+      }
+    });
+  }
+
+  await Promise.all(invalidTokenDeletePromises);
+  logger.info("Community broadcast notification sent.", {
+    ...(logContext || {}),
+    successCount,
+    failureCount,
+    tokenCount: tokens.length,
+  });
+
+  return { successCount, failureCount, tokenCount: tokens.length };
+}
+
+function cardNumberKey(value) {
+  const first = String(value || "").trim().split("/")[0];
+  const numeric = first.match(/^0*(\d+)(.*)$/i);
+  if (numeric) return `${Number(numeric[1])}${numeric[2].toLowerCase()}`;
+  return normaliseJapaneseLookup(first);
+}
+
+async function pokewalletJson(path) {
+  const response = await fetch(`https://api.pokewallet.io${path}`, {
+    headers: { "X-API-Key": POKEWALLET_API_KEY.value() },
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    logger.error("PokéWallet request failed.", {
+      path,
+      status: response.status,
+      response: body.slice(0, 500),
+    });
+    throw new HttpsError(
+      "unavailable",
+      `Japanese artwork service returned HTTP ${response.status}.`
+    );
+  }
+  return response.json();
+}
+
+async function japanesePokewalletSets() {
+  const now = Date.now();
+  if (japaneseSetCache && now - japaneseSetCacheTime < 6 * 60 * 60 * 1000) {
+    return japaneseSetCache;
+  }
+  const payload = await pokewalletJson("/sets");
+  japaneseSetCache = (Array.isArray(payload.data) ? payload.data : [])
+    .filter((set) => {
+      const language = String(set.language || "").toLowerCase();
+      return ["jap", "ja", "jp", "japanese"].includes(language);
+    });
+  japaneseSetCacheTime = now;
+  return japaneseSetCache;
+}
+
+function bestJapaneseSetMatch(sets, requested) {
+  const wantedId = normaliseJapaneseLookup(requested.id);
+  const wantedName = normaliseJapaneseLookup(requested.name);
+  const wantedCount = Number(requested.cardCount || 0);
+  const wantedDate = String(requested.releaseDate || "").slice(0, 10);
+  const wantedYear = wantedDate.match(/\d{4}/)?.[0] || "";
+
+  let best = null;
+  let bestScore = 0;
+  for (const set of sets) {
+    const code = normaliseJapaneseLookup(set.set_code);
+    const name = normaliseJapaneseLookup(set.name);
+    const count = Number(set.card_count || 0);
+    const releaseDate = String(set.release_date || "").slice(0, 10);
+    const year = releaseDate.match(/\d{4}/)?.[0] || "";
+    let score = 0;
+    if (wantedId && code === wantedId) score += 120;
+    else if (wantedId && code && (code.startsWith(wantedId) || wantedId.startsWith(code))) score += 65;
+    if (wantedName && name === wantedName) score += 100;
+    else if (wantedName && name && (name.includes(wantedName) || wantedName.includes(name))) score += 45;
+    // An exact release date is the safest bridge between TCGdex's Japanese
+    // catalogue IDs and PokéWallet's numeric set IDs. Card count alone must
+    // never select a set (neo2 previously matched BW1 because both had 57).
+    if (wantedDate && releaseDate === wantedDate) score += 120;
+    else if (wantedYear && year === wantedYear) score += 10;
+    if (wantedCount && count === wantedCount) score += 25;
+    if (score > bestScore) {
+      best = set;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 60 ? best : null;
+}
+
+exports.lookupJapanesePokemonArtwork = onCall(
+  { region: REGION, secrets: [POKEWALLET_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in first.");
+    const input = request.data || {};
+    const suppliedCards = Array.isArray(input.cards) ? input.cards.slice(0, 300) : [];
+    const sets = await japanesePokewalletSets();
+    const matchedSet = bestJapaneseSetMatch(sets, input);
+    if (!matchedSet) {
+      logger.warn("No Japanese PokéWallet set match.", {
+        requestedId: input.id,
+        requestedName: input.name,
+        requestedCardCount: input.cardCount,
+        requestedReleaseDate: input.releaseDate,
+        availableJapaneseSets: sets.length,
+      });
+      return { matched: false, cards: {} };
+    }
+
+    const setId = String(matchedSet.set_id || matchedSet.set_code || "");
+    const remoteCards = [];
+    for (let page = 1; page <= 5; page += 1) {
+      const details = await pokewalletJson(
+        `/sets/${encodeURIComponent(setId)}?page=${page}&limit=200`
+      );
+      const pageCards = Array.isArray(details.cards) ? details.cards : [];
+      remoteCards.push(...pageCards);
+      if (pageCards.length < 200) break;
+    }
+    const collectibleCards = remoteCards
+      .filter((card) => String(card?.card_info?.product_type || "card") === "card");
+    const byNumber = new Map();
+    for (const remote of collectibleCards) {
+      const key = cardNumberKey(remote?.card_info?.card_number);
+      if (key && !byNumber.has(key)) byNumber.set(key, remote);
+    }
+
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+    const base = `https://${REGION}-${projectId}.cloudfunctions.net/pokewalletJapaneseImage`;
+    const cards = {};
+    const matchedRemoteIds = new Set();
+    for (const supplied of suppliedCards) {
+      const remote = byNumber.get(cardNumberKey(supplied.number));
+      const sourceId = String(supplied.sourceId || "");
+      const remoteId = String(remote?.id || "");
+      if (sourceId && remoteId) {
+        cards[sourceId] = `${base}?kind=card&id=${encodeURIComponent(remoteId)}`;
+        matchedRemoteIds.add(remoteId);
+      }
+    }
+
+    // Several early Japanese releases use PokéWallet numbering which differs
+    // from TCGdex even though both lists are in printed set order. When the set
+    // sizes agree, fill any unmatched entries by their catalogue position.
+    // Existing exact-number matches are always retained.
+    let positionalMatches = 0;
+    if (collectibleCards.length === suppliedCards.length) {
+      for (let index = 0; index < suppliedCards.length; index += 1) {
+        const supplied = suppliedCards[index];
+        const sourceId = String(supplied?.sourceId || "");
+        if (!sourceId || cards[sourceId]) continue;
+        const remoteId = String(collectibleCards[index]?.id || "");
+        if (!remoteId || matchedRemoteIds.has(remoteId)) continue;
+        cards[sourceId] = `${base}?kind=card&id=${encodeURIComponent(remoteId)}`;
+        matchedRemoteIds.add(remoteId);
+        positionalMatches += 1;
+      }
+    }
+    logger.info("Matched Japanese PokéWallet artwork.", {
+      requestedId: input.id,
+      matchedSetId: setId,
+      matchedSetCode: matchedSet.set_code,
+      matchedSetName: matchedSet.name,
+      suppliedCards: suppliedCards.length,
+      remoteCards: collectibleCards.length,
+      artworkMatches: Object.keys(cards).length,
+      positionalMatches,
+    });
+    return {
+      matched: true,
+      setId,
+      setImageUrl: `${base}?kind=set&id=${encodeURIComponent(setId)}`,
+      cards,
+    };
+  }
+);
+
+async function getTcgShopReviewers() {
+  const rolesSnapshot = await db.collection("app_roles").get();
+
+  return rolesSnapshot.docs
+    .filter((roleDoc) => {
+      const role = cleanLower(roleDoc.data().role);
+      return role === "admin" || role === "moderator";
+    })
+    .map((roleDoc) => roleDoc.id)
+    .filter(Boolean);
+}
+
+async function notifyAdminsForReviewItem({
+  snapshot,
+  itemId,
+  notificationType,
+  title,
+  body,
+  route,
+  extraData,
+}) {
+  if (!snapshot || !snapshot.exists) return;
+
+  const reviewers = await getTcgShopReviewers();
+  if (reviewers.length === 0) {
+    logger.warn("No admin or moderator accounts found for review notification.", {
+      notificationType,
+      itemId,
+    });
+    return;
+  }
+
+  const results = await sendNotificationToRecipientsOnce({
+    recipients: reviewers,
+    dedupePrefix: `${notificationType}:${itemId}`,
+    title,
+    body,
+    data: {
+      type: notificationType,
+      route,
+      itemId,
+      ...(extraData || {}),
+    },
+    logContext: { type: notificationType, itemId },
+  });
+
+  const totals = totalsFromNotificationResults(results);
+  await snapshot.ref.set(
+    {
+      adminNotificationAttemptedAt:
+        admin.firestore.FieldValue.serverTimestamp(),
+      adminNotificationSuccessCount: totals.successCount,
+      adminNotificationFailureCount: totals.failureCount,
+      adminNotificationTokenCount: totals.tokenCount,
+      adminNotificationRecipientCount: totals.recipientCount,
+    },
+    { merge: true }
+  );
+}
+
+exports.sendNewMarketplacePostNotification = onDocumentCreated(
+  {
+    document: "community_posts/{postId}",
+    region: REGION,
+  },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const postId = event.params.postId;
+    const post = snapshot.data() || {};
+    const postType = cleanString(post.postType);
+    const marketplaceTypes = new Set(["For Sale", "Swap", "Wanted"]);
+
+    if (!marketplaceTypes.has(postType) || post.hiddenFromUsers === true) return;
+
+    const shouldSend = await shouldSendNotificationOnce(
+      `community_marketplace_post:${postId}`,
+      { type: "community_marketplace_post", postId, postType }
+    );
+    if (!shouldSend) return;
+
+    const authorId = cleanString(post.authorId);
+    const authorName = cleanString(post.authorName) || "A collector";
+    const postTitle = cleanString(post.title) || "New marketplace post";
+    const price = Number(post.askingPrice);
+    const currency = cleanString(post.askingCurrency) || "GBP";
+    const priceText =
+      postType === "For Sale" && Number.isFinite(price) && price > 0
+        ? ` • ${currency} ${price.toFixed(2)}`
+        : "";
+
+    const result = await sendPushToAllUsersExcept({
+      excludedUserId: authorId,
+      title: `New ${postType.toLowerCase()} post`,
+      body: `${authorName}: ${postTitle}${priceText}`,
+      data: {
+        type: "community_marketplace_post",
+        route: "community_post",
+        postId,
+        postType,
+      },
+      logContext: { type: "community_marketplace_post", postId, postType },
+    });
+
+    await snapshot.ref.set(
+      {
+        notificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        notificationSuccessCount: result.successCount,
+        notificationFailureCount: result.failureCount,
+        notificationTokenCount: result.tokenCount,
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.sendCommunityReplyNotification = onDocumentCreated(
+  {
+    document: "community_posts/{postId}/replies/{replyId}",
+    region: REGION,
+  },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const postId = event.params.postId;
+    const replyId = event.params.replyId;
+    const reply = snapshot.data() || {};
+    const replyAuthorId = cleanString(reply.authorId);
+    const postSnapshot = await db.collection("community_posts").doc(postId).get();
+    if (!postSnapshot.exists) return;
+
+    const post = postSnapshot.data() || {};
+    const postAuthorId = cleanString(post.authorId);
+    if (!postAuthorId || postAuthorId === replyAuthorId) return;
+
+    const replyAuthorName =
+      cleanString(reply.authorName) || (await getUserDisplayName(replyAuthorId));
+    const postTitle = cleanString(post.title) || "your community post";
+    const message = cleanString(reply.message);
+    const result = await sendPushToUser({
+      userId: postAuthorId,
+      title: "New reply to your post",
+      body: message
+        ? `${replyAuthorName}: ${message}`
+        : `${replyAuthorName} replied to ${postTitle}`,
+      data: {
+        type: "community_post_reply",
+        route: "community_post",
+        postId,
+        replyId,
+      },
+      logContext: { type: "community_post_reply", postId, replyId },
+    });
+
+    await snapshot.ref.set(
+      {
+        notificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        notificationSuccessCount: result.successCount,
+        notificationFailureCount: result.failureCount,
+        notificationTokenCount: result.tokenCount,
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.sendFeedbackReportAdminNotification = onDocumentCreated(
+  { document: "feedback_reports/{reportId}", region: REGION },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+    const report = snapshot.data() || {};
+    await notifyAdminsForReviewItem({
+      snapshot,
+      itemId: event.params.reportId,
+      notificationType: "admin_feedback_report",
+      title: "New feedback report",
+      body: `${cleanString(report.type) || "Problem"}: ${cleanString(report.screen) || "PocketChase"}`,
+      route: "admin_feedback_reports",
+    });
+  }
+);
+
+exports.sendCommunityReportAdminNotification = onDocumentCreated(
+  { document: "community_reports/{reportId}", region: REGION },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+    const report = snapshot.data() || {};
+    await notifyAdminsForReviewItem({
+      snapshot,
+      itemId: event.params.reportId,
+      notificationType: "admin_community_report",
+      title: "New community safety report",
+      body: `${cleanString(report.reason) || "Report"}: ${cleanString(report.targetTitle) || cleanString(report.targetType) || "Community content"}`,
+      route: "admin_community_reports",
+    });
+  }
+);
+
+exports.sendBusinessProRequestAdminNotification = onDocumentCreated(
+  { document: "business_pro_requests/{requestId}", region: REGION },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+    const request = snapshot.data() || {};
+    if (cleanLower(request.status || "pending") !== "pending") return;
+    await notifyAdminsForReviewItem({
+      snapshot,
+      itemId: event.params.requestId,
+      notificationType: "admin_business_pro_request",
+      title: "New Business Pro request",
+      body: `${cleanString(request.businessName) || cleanString(request.name) || "A business"} needs reviewing.`,
+      route: "admin_business_requests",
+    });
+  }
+);
+
+exports.sendPendingBusinessProfileAdminNotification = onDocumentCreated(
+  { document: "business_profiles/{businessId}", region: REGION },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+    const profile = snapshot.data() || {};
+    if (cleanLower(profile.status || "pending") !== "pending") return;
+    await notifyAdminsForReviewItem({
+      snapshot,
+      itemId: event.params.businessId,
+      notificationType: "admin_business_profile",
+      title: "New business profile",
+      body: `${cleanString(profile.businessName) || "A business profile"} needs reviewing.`,
+      route: "admin_business_profiles",
+    });
+  }
+);
+
+exports.sendArchivedPostAdminNotification = onDocumentUpdated(
+  { document: "community_posts/{postId}", region: REGION },
+  async (event) => {
+    const before = event.data && event.data.before;
+    const after = event.data && event.data.after;
+    if (!before || !after) return;
+
+    const beforeData = before.data() || {};
+    const afterData = after.data() || {};
+    if (beforeData.archivedForAdmin === true || afterData.archivedForAdmin !== true) {
+      return;
+    }
+
+    await notifyAdminsForReviewItem({
+      snapshot: after,
+      itemId: event.params.postId,
+      notificationType: "admin_archived_community_post",
+      title: "Community post moved to archive",
+      body: `${cleanString(afterData.title) || "A community post"} needs admin review.`,
+      route: "admin_community_archive",
+    });
+  }
+);
+
+async function notifyTcgShopReviewers(snapshot, submissionId) {
+  if (!snapshot || !snapshot.exists) {
+    logger.warn("TCG shop submission snapshot is missing.", { submissionId });
+    return;
+  }
+
+  const submission = snapshot.data() || {};
+  if (cleanLower(submission.status) !== "pending") {
+    return;
+  }
+
+  // A timestamp on the submission lets the scheduled recovery job find old
+  // requests while preventing the same request from repeatedly alerting admins.
+  if (submission.adminNotificationAttemptedAt) {
+    return;
+  }
+
+  const reviewers = await getTcgShopReviewers();
+  if (reviewers.length === 0) {
+    logger.warn("No admin or moderator accounts found for TCG shop request.", {
+      submissionId,
+    });
+    return;
+  }
+
+  const shopName = cleanString(submission.name) || "A TCG shop";
+  const location = [
+    cleanString(submission.town),
+    cleanString(submission.county),
+  ].filter(Boolean).join(", ");
+
+  const results = await sendNotificationToRecipientsOnce({
+    recipients: reviewers,
+    dedupePrefix: `tcg-shop-submission:${submissionId}`,
+    title: "New TCG shop request",
+    body: location
+      ? `${shopName} in ${location} needs reviewing.`
+      : `${shopName} needs reviewing.`,
+    data: {
+      type: "tcg_shop_submission",
+      route: "admin_tcg_shop_submissions",
+      submissionId,
+    },
+    logContext: {
+      type: "tcg_shop_submission",
+      submissionId,
+    },
+  });
+
+  const totals = totalsFromNotificationResults(results);
+  await snapshot.ref.set(
+    {
+      adminNotificationAttemptedAt:
+        admin.firestore.FieldValue.serverTimestamp(),
+      adminNotificationSuccessCount: totals.successCount,
+      adminNotificationFailureCount: totals.failureCount,
+      adminNotificationTokenCount: totals.tokenCount,
+      adminNotificationRecipientCount: totals.recipientCount,
+    },
+    { merge: true }
+  );
+}
+
+exports.sendTcgShopSubmissionAdminNotification = onDocumentCreated(
+  {
+    document: "tcg_shop_submissions/{submissionId}",
+    region: REGION,
+  },
+  async (event) => {
+    await notifyTcgShopReviewers(event.data, event.params.submissionId);
+  }
+);
+
+// Covers pending submissions that were created before the push trigger was
+// deployed, including requests that an admin has not yet noticed.
+exports.recoverMissedTcgShopSubmissionNotifications = onSchedule(
+  {
+    schedule: "every 30 minutes",
+    region: REGION,
+    timeZone: "Europe/London",
+  },
+  async () => {
+    const pendingSnapshot = await db
+      .collection("tcg_shop_submissions")
+      .where("status", "==", "pending")
+      .limit(100)
+      .get();
+
+    for (const submissionDoc of pendingSnapshot.docs) {
+      await notifyTcgShopReviewers(submissionDoc, submissionDoc.id);
+    }
+
+    const reviewQueues = [
+      {
+        collection: "feedback_reports",
+        status: "new",
+        type: "admin_feedback_report",
+        title: "Feedback report waiting",
+        route: "admin_feedback_reports",
+        body: (data) =>
+          `${cleanString(data.type) || "Problem"}: ${cleanString(data.screen) || "PocketChase"}`,
+      },
+      {
+        collection: "community_reports",
+        status: "open",
+        type: "admin_community_report",
+        title: "Community safety report waiting",
+        route: "admin_community_reports",
+        body: (data) =>
+          `${cleanString(data.reason) || "Report"}: ${cleanString(data.targetTitle) || cleanString(data.targetType) || "Community content"}`,
+      },
+      {
+        collection: "business_pro_requests",
+        status: "pending",
+        type: "admin_business_pro_request",
+        title: "Business Pro request waiting",
+        route: "admin_business_requests",
+        body: (data) =>
+          `${cleanString(data.businessName) || cleanString(data.name) || "A business"} needs reviewing.`,
+      },
+      {
+        collection: "business_profiles",
+        status: "pending",
+        type: "admin_business_profile",
+        title: "Business profile waiting",
+        route: "admin_business_profiles",
+        body: (data) =>
+          `${cleanString(data.businessName) || "A business profile"} needs reviewing.`,
+      },
+    ];
+
+    for (const queue of reviewQueues) {
+      const queueSnapshot = await db
+        .collection(queue.collection)
+        .where("status", "==", queue.status)
+        .limit(100)
+        .get();
+
+      for (const itemDoc of queueSnapshot.docs) {
+        const data = itemDoc.data() || {};
+        if (data.adminNotificationAttemptedAt) continue;
+        await notifyAdminsForReviewItem({
+          snapshot: itemDoc,
+          itemId: itemDoc.id,
+          notificationType: queue.type,
+          title: queue.title,
+          body: queue.body(data),
+          route: queue.route,
+        });
+      }
+    }
+
+    const archivedPostsSnapshot = await db
+      .collection("community_posts")
+      .where("archivedForAdmin", "==", true)
+      .limit(100)
+      .get();
+
+    for (const postDoc of archivedPostsSnapshot.docs) {
+      const post = postDoc.data() || {};
+      if (post.adminNotificationAttemptedAt) continue;
+      await notifyAdminsForReviewItem({
+        snapshot: postDoc,
+        itemId: postDoc.id,
+        notificationType: "admin_archived_community_post",
+        title: "Archived community post waiting",
+        body: `${cleanString(post.title) || "A community post"} needs admin review.`,
+        route: "admin_community_archive",
+      });
+    }
+  }
+);
+
+exports.pokewalletJapaneseImage = onRequest(
+  { region: REGION, secrets: [POKEWALLET_API_KEY], timeoutSeconds: 30 },
+  async (request, response) => {
+    try {
+      const kind = request.query.kind === "set" ? "set" : "card";
+      const id = String(request.query.id || "").trim();
+      if (!/^[a-zA-Z0-9_-]{1,180}$/.test(id)) {
+        response.status(400).send("Invalid image identifier.");
+        return;
+      }
+      const cachedFile = admin.storage().bucket().file(
+        `pokewallet_japanese_artwork/${kind}/${id}`
+      );
+      try {
+        const [cachedBytes] = await cachedFile.download();
+        const [metadata] = await cachedFile.getMetadata();
+        response.set("Content-Type", metadata.contentType || "image/jpeg");
+        response.set("Cache-Control", "public, max-age=86400, s-maxage=604800");
+        response.status(200).send(cachedBytes);
+        return;
+      } catch (_) {
+        // The first request downloads and stores the image below.
+      }
+      const path = kind === "set"
+        ? `/sets/${encodeURIComponent(id)}/image`
+        : `/images/${encodeURIComponent(id)}?size=high`;
+      const upstream = await fetch(`https://api.pokewallet.io${path}`, {
+        headers: { "X-API-Key": POKEWALLET_API_KEY.value() },
+      });
+      if (!upstream.ok) {
+        response.status(upstream.status).send("Artwork unavailable.");
+        return;
+      }
+      const bytes = Buffer.from(await upstream.arrayBuffer());
+      const contentType = upstream.headers.get("content-type") || "image/jpeg";
+      await cachedFile.save(bytes, {
+        resumable: false,
+        metadata: {
+          contentType,
+          cacheControl: "public,max-age=31536000,immutable",
+        },
+      }).catch((error) => logger.warn("Could not cache Japanese artwork.", error));
+      response.set("Content-Type", contentType);
+      response.set("Cache-Control", "public, max-age=86400, s-maxage=604800");
+      response.status(200).send(bytes);
+    } catch (error) {
+      logger.error("Japanese artwork proxy failed.", error);
+      response.status(502).send("Artwork service unavailable.");
+    }
+  }
+);
+
+// Official Trade Matches proposals. Only the two participants can write or read
+// these documents (see firestore.rules). Notifications are best-effort and
+// deliberately do not transfer or reserve cards.
+exports.sendTradeOfferCreatedNotification = onDocumentCreated(
+  { document: "trade_offers/{offerId}", region: REGION },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const offer = snap.data() || {};
+    const offerId = event.params.offerId;
+    const recipientUid = cleanString(offer.toUid);
+    const senderUid = cleanString(offer.fromUid);
+    if (!recipientUid || !senderUid || recipientUid === senderUid || offer.status !== "pending") return;
+    const senderName = cleanString(offer.fromName) || (await getUserDisplayName(senderUid));
+    if (!(await shouldSendNotificationOnce(`trade_offer_new:${offerId}:${recipientUid}`, {
+      type: "trade_offer", offerId, recipientUid,
+    }))) return;
+    await sendPushToUser({
+      userId: recipientUid,
+      title: "New PocketChase trade offer",
+      body: `${senderName} wants to make a deal. Open My Trades to respond.`,
+      data: { type: "trade_offer", offerId, senderUid },
+      logContext: { type: "trade_offer", offerId },
+    });
+  }
+);
+
+exports.sendTradeOfferUpdatedNotification = onDocumentUpdated(
+  { document: "trade_offers/{offerId}", region: REGION },
+  async (event) => {
+    const before = event.data && event.data.before && event.data.before.data();
+    const after = event.data && event.data.after && event.data.after.data();
+    if (!before || !after) return;
+    const offerId = event.params.offerId;
+    const status = cleanString(after.status);
+    const changedStatus = before.status !== after.status;
+    const changedFromConfirmation = !before.confirmedByFrom && after.confirmedByFrom;
+    const changedToConfirmation = !before.confirmedByTo && after.confirmedByTo;
+    if (!changedStatus && !changedFromConfirmation && !changedToConfirmation) return;
+
+    // A counteroffer creates a new proposal and its own notification.
+    if (status === "countered") return;
+    const recipientUid = status === "completed" ? ""
+      : changedFromConfirmation ? cleanString(after.toUid)
+      : changedToConfirmation ? cleanString(after.fromUid)
+      : status === "accepted" || status === "declined" ? cleanString(after.fromUid)
+      : status === "cancelled" ? cleanString(after.toUid) : "";
+    if (status === "completed") {
+      for (const uid of [cleanString(after.fromUid), cleanString(after.toUid)]) {
+        if (!uid) continue;
+        if (!(await shouldSendNotificationOnce(`trade_offer_completed:${offerId}:${uid}`, {
+          type: "trade_offer_completed", offerId, recipientUid: uid,
+        }))) continue;
+        await sendPushToUser({ userId: uid, title: "Trade exchange confirmed",
+          body: "Both collectors confirmed the exchange. Remember to update your collections.",
+          data: { type: "trade_offer", offerId },
+          logContext: { type: "trade_offer_completed", offerId },
+        });
+      }
+      return;
+    }
+    if (!recipientUid) return;
+    const actionText = {
+      accepted: "Your trade offer was accepted. Arrange the exchange in Messages.",
+      declined: "Your trade offer was declined.",
+      cancelled: "A trade offer was cancelled.",
+    }[status] || "Your trade partner confirmed their side of the exchange.";
+    const key = `trade_offer_update:${offerId}:${status}:${recipientUid}:${after.confirmedByFrom}:${after.confirmedByTo}`;
+    if (!(await shouldSendNotificationOnce(key, {
+      type: "trade_offer_update", offerId, recipientUid,
+    }))) return;
+    await sendPushToUser({ userId: recipientUid,
+      title: "PocketChase trade update", body: actionText,
+      data: { type: "trade_offer", offerId },
+      logContext: { type: "trade_offer_update", offerId },
+    });
+  }
+);

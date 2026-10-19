@@ -111,15 +111,6 @@ class _BusinessDealsPageState extends State<BusinessDealsPage> {
     }).toList();
   }
 
-  int _gridColumns(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-
-    if (width >= 900) return 3;
-    if (width >= 340) return 2;
-
-    return 1;
-  }
-
   InputDecoration _searchDecoration() {
     return InputDecoration(
       labelText: 'Search deals',
@@ -172,8 +163,6 @@ class _BusinessDealsPageState extends State<BusinessDealsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final crossAxisCount = _gridColumns(context);
-
     return Scaffold(
       backgroundColor: _backgroundColor,
       appBar: AppBar(
@@ -226,14 +215,9 @@ class _BusinessDealsPageState extends State<BusinessDealsPage> {
               if (offers.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                  sliver: SliverGrid.builder(
+                  sliver: SliverList.separated(
                     itemCount: offers.length,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      mainAxisExtent: 295,
-                    ),
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final offer = offers[index];
 
@@ -565,120 +549,135 @@ class _DirectoryOfferTile extends StatelessWidget {
     final description = offer.description.trim();
     final hasLink = offer.websiteUrl.trim().isNotEmpty;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(
-          color: _BusinessDealsPageState._cardColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _BusinessDealsPageState._borderColor),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _TinyPill(
-                  icon: Icons.local_offer_outlined,
-                  label: offer.categoryLabel,
-                  highlighted: true,
-                ),
-                if (offer.hasCode)
-                  const _TinyPill(
-                    icon: Icons.confirmation_number_outlined,
-                    label: 'Code',
-                    highlighted: false,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 9),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                height: 1.1,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              businessName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _BusinessDealsPageState._softTextColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            if (description.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                description,
-                maxLines: offer.hasCode ? 3 : 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _BusinessDealsPageState._softTextColor,
-                  fontSize: 12,
-                  height: 1.25,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            if (offer.hasCode) ...[
-              const SizedBox(height: 9),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          height: 158,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _BusinessDealsPageState._cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _BusinessDealsPageState._borderColor),
+          ),
+          child: Row(
+            children: [
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+                width: 92,
+                height: double.infinity,
                 decoration: BoxDecoration(
                   color: _BusinessDealsPageState._fieldColor,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: _BusinessDealsPageState._goldColor
-                        .withValues(alpha: 0.55),
-                  ),
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Text(
-                  'Code: ${offer.code.trim()}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                  ),
+                clipBehavior: Clip.antiAlias,
+                child: offer.hasImage
+                    ? Image.network(
+                        offer.imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.local_offer_outlined,
+                          color: _BusinessDealsPageState._goldColor,
+                          size: 38,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.local_offer_outlined,
+                        color: _BusinessDealsPageState._goldColor,
+                        size: 38,
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      businessName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _BusinessDealsPageState._softTextColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: _TinyPill(
+                            icon: Icons.local_offer_outlined,
+                            label: offer.categoryLabel,
+                            highlighted: true,
+                          ),
+                        ),
+                        if (offer.hasCode) ...[
+                          const SizedBox(width: 6),
+                          const _TinyPill(
+                            icon: Icons.confirmation_number_outlined,
+                            label: 'Code',
+                            highlighted: false,
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 7),
+                      Text(
+                        description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _BusinessDealsPageState._softTextColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            offer.hasCode
+                                ? 'Code: ${offer.code.trim()}'
+                                : hasLink
+                                    ? 'View offer'
+                                    : 'View details',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _BusinessDealsPageState._goldColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        const Icon(
+                          Icons.chevron_right,
+                          color: _BusinessDealsPageState._goldColor,
+                          size: 22,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
-            const Spacer(),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    hasLink ? 'Link available' : 'Tap for details',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _BusinessDealsPageState._goldColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                const Icon(
-                  Icons.chevron_right,
-                  color: _BusinessDealsPageState._goldColor,
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );

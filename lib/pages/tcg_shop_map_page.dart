@@ -49,30 +49,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   final TextEditingController _areaController = TextEditingController();
 
   double _currentZoom = _initialZoom;
-  String _selectedGame = 'all';
-  String _selectedService = 'all';
   bool _updatingBusinessOpenToggle = false;
-
-  static const List<String> _games = <String>[
-    'all',
-    'pokemon',
-    'yugioh',
-    'mtg',
-    'lorcana',
-    'one piece',
-    'other',
-  ];
-
-  static const List<String> _services = <String>[
-    'all',
-    'sealed',
-    'singles',
-    'tournaments',
-    'trade nights',
-    'buys cards',
-    'grading',
-    'online shop',
-  ];
 
   @override
   void dispose() {
@@ -86,14 +63,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
     return shops.where((shop) {
       final matchesArea =
           areaSearch.isEmpty || shop.searchText.contains(areaSearch);
-
-      final matchesGame =
-          _selectedGame == 'all' || shop.games.contains(_selectedGame);
-
-      final matchesService =
-          _selectedService == 'all' || shop.services.contains(_selectedService);
-
-      return matchesArea && matchesGame && matchesService;
+      return matchesArea;
     }).toList();
   }
 
@@ -238,7 +208,7 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
   Future<void> _openOnlineShopsPage() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const OnlineShopsPage(),
+        builder: (_) => OnlineShopsPage(),
       ),
     );
   }
@@ -287,60 +257,6 @@ class _TcgShopMapPageState extends State<TcgShopMapPage> {
                       ),
               ),
               onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedGame,
-                    dropdownColor: _fieldColor,
-                    iconEnabledColor: _softTextColor,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    decoration: _filterDecoration(labelText: 'Game'),
-                    items: _games
-                        .map(
-                          (game) => DropdownMenuItem<String>(
-                            value: game,
-                            child: Text(_label(game)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _selectedGame = value);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedService,
-                    dropdownColor: _fieldColor,
-                    iconEnabledColor: _softTextColor,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    decoration: _filterDecoration(labelText: 'Service'),
-                    items: _services
-                        .map(
-                          (service) => DropdownMenuItem<String>(
-                            value: service,
-                            child: Text(_label(service)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _selectedService = value);
-                    },
-                  ),
-                ),
-              ],
             ),
           ],
         ),

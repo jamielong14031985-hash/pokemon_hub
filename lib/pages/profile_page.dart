@@ -14,6 +14,7 @@ import '../services/collection_refresh_notifier.dart';
 import '../services/community_image_services.dart';
 import '../services/currency_settings.dart';
 import '../services/local_image_store.dart';
+import '../services/local_pokedex_store.dart';
 import '../services/pro_status_service.dart';
 import '../services/user_profile_service.dart';
 import '../services/wishlist_service.dart';
@@ -21,12 +22,14 @@ import '../utils/auth_input_decoration.dart';
 import '../utils/profile_stats_helpers.dart';
 import '../widgets/achievement_badges.dart';
 import '../widgets/profile_collection_widgets.dart';
-import '../widgets/profile_stat_card.dart';
 import 'business_profile_page.dart';
 import 'card_details_page.dart';
+import 'card_scanner_page.dart';
+import 'collection_data_page.dart';
 import 'featured_online_shops_page.dart';
 import 'friend_requests_page.dart';
 import 'friends_page.dart';
+import 'master_sets_page.dart';
 import 'pro_upgrade_page.dart';
 import 'wishlist_page.dart';
 import 'wishlist_trade_match_centre_page.dart';
@@ -48,14 +51,17 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _loadingProfile = true;
   bool _savingName = false;
   bool _savingCurrency = false;
+  bool _refreshingCollectionPrices = false;
   final bool _deletingAccount = false;
   String _selectedCurrencyCode = CurrencySettings.selectedCode;
   late Future<ProfileStats> _statsFuture;
+  late Future<List<WishlistEntry>> _wishlistFuture;
 
   @override
   void initState() {
     super.initState();
     _statsFuture = _loadStats();
+    _wishlistFuture = WishlistService.fetchWishlist(widget.profile.uid);
     _loadProfile();
     collectionRefreshNotifier.addListener(_handleCollectionRefresh);
   }
@@ -270,16 +276,54 @@ class _ProfilePageState extends State<ProfilePage> {
       return await loadProfileStatsForOwner(
         widget.profile.uid,
         preferCurrentUserLocalCache: true,
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(minutes: 3));
     } catch (_) {
-      return _emptyProfileStats();
+      // Price enrichment can take longer for a large collection or when the
+      // card API is slow. Never replace a real local collection with zeroes.
+      try {
+        final localCopies = normalPokedexCardCopiesOnly(
+          await LocalPokedexStore.loadAllCardCopies(),
+        );
+        return basicProfileStatsFromCopies(localCopies);
+      } catch (_) {
+        return _emptyProfileStats();
+      }
     }
   }
 
   Future<void> _refreshStats() async {
     setState(() {
       _statsFuture = _loadStats();
+      _wishlistFuture = WishlistService.fetchWishlist(widget.profile.uid);
     });
+  }
+
+  Future<void> _refreshCollectionPrices() async {
+    if (_refreshingCollectionPrices) return;
+    setState(() {
+      _refreshingCollectionPrices = true;
+    });
+
+    try {
+      final result = await refreshMissingCollectionPrices(limit: 20);
+      if (!mounted) return;
+      await _refreshStats();
+      if (!mounted) return;
+      final message = result.attempted == 0
+          ? 'No missing card prices to check.'
+          : result.priced == 0
+              ? 'No new prices were available. Try again later.'
+              : 'Added ${result.priced} new price${result.priced == 1 ? '' : 's'}.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _refreshingCollectionPrices = false;
+        });
+      }
+    }
   }
 
 
@@ -326,6 +370,13 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Future<void> _openCollectionData() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const CollectionDataPage()),
+    );
+    if (mounted) await _refreshStats();
+  }
+
   Future<void> _openWishlist() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -335,6 +386,11 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
     );
+    if (mounted) {
+      setState(() {
+        _wishlistFuture = WishlistService.fetchWishlist(widget.profile.uid);
+      });
+    }
   }
 
   Future<void> _openProUpgrade() async {
@@ -365,6 +421,33 @@ class _ProfilePageState extends State<ProfilePage> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => CardDetailsPage(card: card)),
     );
+  }
+
+  Future<void> _openScanner() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CardScannerPage()),
+    );
+    if (mounted) await _refreshStats();
+  }
+
+  Future<void> _openSets() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: const Color(0xFF041B4A),
+          appBar: AppBar(
+            title: const Text('Sets'),
+            backgroundColor: const Color(0xFF041B4A),
+            foregroundColor: Colors.white,
+          ),
+          body: const SafeArea(
+            top: false,
+            child: MasterSetsPage(),
+          ),
+        ),
+      ),
+    );
+    if (mounted) await _refreshStats();
   }
 
   Future<void> _deleteAccount() async {
@@ -798,95 +881,76 @@ class _ProfilePageState extends State<ProfilePage> {
     return StreamBuilder<bool>(
       stream: _watchCurrentUserIsAdminOrModerator(),
       builder: (context, snapshot) {
-        final canUseAdminTools = snapshot.data == true;
-
-        if (!canUseAdminTools) {
-          return const SizedBox.shrink();
-        }
+        if (snapshot.data != true) return const SizedBox.shrink();
 
         return Padding(
-          padding: const EdgeInsets.only(top: 16),
+          padding: const EdgeInsets.only(top: 8),
           child: RepaintBoundary(
             child: Card(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
               color: const Color(0xFF102754),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(20),
                 side: BorderSide(
-                  color: const Color(0xFFF7DE77).withValues(alpha: 0.42),
+                  color: const Color(0xFFF7DE77).withValues(alpha: 0.32),
                 ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF7DE77).withValues(alpha: 0.16),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: const Color(0xFFF7DE77).withValues(alpha: 0.35),
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.admin_panel_settings_outlined,
-                            color: Color(0xFFF7DE77),
-                            size: 30,
-                          ),
+              child: InkWell(
+                onTap: _openAdminTools,
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 13,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(13),
                         ),
-                        const SizedBox(width: 14),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Admin tools',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                'Manage reports, Pro users, shop requests and business approvals.',
-                                style: TextStyle(
-                                  color: Color(0xFFC8D4F0),
-                                  fontSize: 12,
-                                  height: 1.35,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _openAdminTools,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFF7DE77),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        icon: const Icon(Icons.dashboard_customize_outlined),
-                        label: const Text(
-                          'Open Admin Tools',
-                          style: TextStyle(fontWeight: FontWeight.w900),
+                        child: const Icon(
+                          Icons.admin_panel_settings_outlined,
+                          color: Color(0xFFF7DE77),
+                          size: 23,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Admin tools',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Reports, users and shop approvals',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Color(0xFFB9CBE9),
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 26,
+                        color: Color(0xFFF7DE77),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -903,111 +967,138 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return RepaintBoundary(
       child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
         color: const Color(0xFF102754),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(22),
+          side: BorderSide(
+            color: const Color(0xFF4389C8).withValues(alpha: 0.46),
+          ),
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              GestureDetector(
-                onTap: _openProfileEditSheet,
-                child: Stack(
+        child: InkWell(
+          onTap: _openProfileEditSheet,
+          borderRadius: BorderRadius.circular(22),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     CircleAvatar(
-                      radius: 50,
-                      backgroundColor: Colors.white12,
+                      radius: 34,
+                      backgroundColor: const Color(0xFF1B4276),
                       backgroundImage: profileImageProvider,
                       child: profileImageProvider == null
                           ? const Icon(
-                              Icons.person,
-                              color: Colors.white,
-                              size: 50,
+                              Icons.person_rounded,
+                              color: Color(0xFFF7DE77),
+                              size: 38,
                             )
                           : null,
                     ),
                     Positioned(
-                      right: 0,
-                      bottom: 0,
+                      bottom: -1,
+                      right: -2,
                       child: Container(
-                        width: 34,
-                        height: 34,
+                        width: 23,
+                        height: 23,
                         decoration: BoxDecoration(
                           color: const Color(0xFFF7DE77),
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: const Color(0xFF041B4A),
+                            color: const Color(0xFF102754),
                             width: 2,
                           ),
                         ),
                         child: const Icon(
-                          Icons.edit,
-                          color: Colors.black,
-                          size: 18,
+                          Icons.edit_rounded,
+                          color: Color(0xFF071E48),
+                          size: 12,
                         ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                displayName,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  height: 1.1,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        displayName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 19,
+                          height: 1.1,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        widget.profile.isBusinessAccount
+                            ? 'Edit business profile'
+                            : 'Edit trainer profile',
+                        style: const TextStyle(
+                          color: Color(0xFFF7DE77),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                widget.profile.isBusinessAccount
-                    ? 'Tap the pencil to edit your business name, email, currency, eBay region and profile picture.'
-                    : 'Tap the pencil to edit your trainer name, email, currency, eBay region and profile picture.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 12,
-                  height: 1.35,
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Color(0xFFADC5E8),
+                  size: 26,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
   Widget _buildFriendsCard() {
     return RepaintBoundary(
       child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
         color: const Color(0xFF102754),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(22),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Friends & shared Pokédex',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
+              const Row(
+                children: [
+                  Icon(
+                    Icons.people_alt_outlined,
+                    color: Color(0xFFF7DE77),
+                    size: 21,
+                  ),
+                  SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'Friends & shared Pokédex',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'Open your friends list, review requests, and browse their synced Pokédex collections.',
-                style: TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 11),
               Row(
                 children: [
                   Expanded(
@@ -1015,39 +1106,48 @@ class _ProfilePageState extends State<ProfilePage> {
                       onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => FriendRequestsPage(currentProfile: widget.profile),
+                            builder: (_) => FriendRequestsPage(
+                              currentProfile: widget.profile,
+                            ),
                           ),
                         );
                       },
-                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
                       label: const Text('Requests'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFE6EEFF),
+                        side: const BorderSide(color: Color(0xFF436A9E)),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: _openFriends,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2C7A5B),
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.collections_bookmark_outlined),
+                      icon: const Icon(Icons.people_outline_rounded, size: 18),
                       label: const Text('Friends'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF247858),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
-                child: FilledButton.icon(
+                child: TextButton.icon(
                   onPressed: _openWishlistMatchCentre,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFF7DE77),
-                    foregroundColor: Colors.black,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 19),
+                  label: const Text('Duplicate & Trade Matches'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFF7DE77),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  icon: const Icon(Icons.auto_awesome_outlined),
-                  label: const Text('Wishlist Match Centre'),
                 ),
               ),
             ],
@@ -1057,55 +1157,37 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildWishlistCard() {
-    return RepaintBoundary(
-      child: StreamBuilder<List<WishlistEntry>>(
-        stream: WishlistService.wishlistStream(widget.profile.uid),
-        builder: (context, snapshot) {
-          final wishlistCount = (snapshot.data ?? const <WishlistEntry>[]).length;
-          return Card(
-            color: const Color(0xFF102754),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Wishlist',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    wishlistCount == 1
-                        ? '1 card saved for later.'
-                        : '$wishlistCount cards saved for later.',
-                    style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _openWishlist,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFB13B59),
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.favorite_outline_rounded),
-                      label: const Text('Open Wishlist'),
-                    ),
-                  ),
-                ],
+  Widget _buildCollectionDataCard() {
+    return Card(
+      color: const Color(0xFF102754),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: InkWell(
+        onTap: _openCollectionData,
+        borderRadius: BorderRadius.circular(24),
+        child: const Padding(
+          padding: EdgeInsets.all(18),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: Color(0x2EF7DE77),
+                child: Icon(Icons.cloud_done_outlined, color: Color(0xFFF7DE77)),
               ),
-            ),
-          );
-        },
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Import, export & backups', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                    SizedBox(height: 4),
+                    Text('Protect or move your card collection.', style: TextStyle(color: Color(0xFFB9C9E8))),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: Colors.white54),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1420,63 +1502,409 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildAccountSecurityCard() {
     return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
       color: const Color(0xFF102754),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Account & security',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        collapsedIconColor: const Color(0xFFACC1E2),
+        iconColor: const Color(0xFFF7DE77),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        leading: const Icon(
+          Icons.shield_outlined,
+          color: Color(0xFFF7DE77),
+        ),
+        title: const Text(
+          'Account & security',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        subtitle: const Text(
+          'Verification and account controls',
+          style: TextStyle(
+            color: Color(0xFFACC1E2),
+            fontSize: 11.5,
+          ),
+        ),
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.verified_user_outlined,
+                color: Color(0xFF54D39A),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  FirebaseAuth.instance.currentUser?.emailVerified == true
+                      ? 'Email verified: ${widget.profile.email}'
+                      : 'Email not verified yet: ${widget.profile.email}',
+                  style: const TextStyle(
+                    color: Color(0xFFD8E3FB),
+                    height: 1.35,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Deleting your account permanently removes your synced PocketChase data.',
+            style: TextStyle(
+              color: Color(0xFFB7C8E5),
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _deletingAccount ? null : _deleteAccount,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFFFB3C7),
+                side: const BorderSide(color: Color(0xFFB13B59)),
+              ),
+              icon: _deletingAccount
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_forever_outlined),
+              label: Text(
+                _deletingAccount ? 'Deleting account...' : 'Delete Account',
               ),
             ),
-            const SizedBox(height: 8),
-            Row(
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Lightweight collector overview. The detailed dashboards remain available
+  // below, but are no longer repeated in several large cards on the main view.
+  Widget _collectionStat({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B396B),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 19, color: const Color(0xFFF7DE77)),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.verified_user_outlined, color: Color(0xFF54D39A), size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    FirebaseAuth.instance.currentUser?.emailVerified == true
-                        ? 'Email verified: ${widget.profile.email}'
-                        : 'Email not verified yet: ${widget.profile.email}',
-                    style: const TextStyle(color: Color(0xFFD8E3FB), height: 1.35),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 17,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFB7C9E6),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            const Text(
-              'Deleting your account removes your synced PocketChase data and cannot be undone.',
-              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _deletingAccount ? null : _deleteAccount,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFFFB3C7),
-                  side: const BorderSide(color: Color(0xFFB13B59)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _collectionShortcut({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 16),
+        label: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFF7DE77),
+          side: const BorderSide(color: Color(0xFF456799)),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+          visualDensity: VisualDensity.compact,
+          textStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCollectionSnapshot(ProfileStats stats) {
+    final featuredCard = stats.mostExpensiveCard;
+    final imageUrl = featuredCard?.imageUrl?.trim() ?? '';
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102754),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF315581)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded,
+                  size: 22, color: Color(0xFFF7DE77)),
+              SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Collection at a glance',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-                icon: _deletingAccount
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.delete_forever_outlined),
-                label: Text(_deletingAccount ? 'Deleting account...' : 'Delete Account'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _collectionStat(
+                  icon: Icons.style_rounded,
+                  label: 'Total cards',
+                  value: '${stats.totalCards}',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _collectionStat(
+                  icon: Icons.collections_bookmark_outlined,
+                  label: 'Unique cards',
+                  value: '${stats.uniqueCards}',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _collectionStat(
+                  icon: Icons.copy_all_rounded,
+                  label: 'Duplicates',
+                  value: '${stats.duplicateCards}',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _collectionStat(
+                  icon: Icons.trending_up_rounded,
+                  label: 'Indicative value',
+                  value: CurrencySettings.formatSelectedAmount(
+                    stats.totalEstimatedPrice,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (stats.uniqueCards > 0) ...[
+            const SizedBox(height: 10),
+            Text(
+              '${stats.pricedUniqueCards}/${stats.uniqueCards} unique cards priced',
+              style: const TextStyle(
+                color: Color(0xFFB8CBE7),
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
               ),
             ),
           ],
+          if (featuredCard != null) ...[
+            const SizedBox(height: 12),
+            Material(
+              color: const Color(0xFF1A3664),
+              borderRadius: BorderRadius.circular(15),
+              child: InkWell(
+                onTap: () => _openCardDetails(featuredCard),
+                borderRadius: BorderRadius.circular(15),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(7),
+                        child: SizedBox(
+                          width: 38,
+                          height: 53,
+                          child: imageUrl.isEmpty
+                              ? const Icon(
+                                  Icons.style_rounded,
+                                  color: Color(0xFFF7DE77),
+                                )
+                              : Image.network(
+                                  imageUrl,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Icon(
+                                    Icons.style_rounded,
+                                    color: Color(0xFFF7DE77),
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Most valuable card',
+                              style: TextStyle(
+                                color: Color(0xFFF7DE77),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              featuredCard.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            Text(
+                              featuredCard.setName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFFBCCCE6),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFFF7DE77),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 11),
+          Row(
+            children: [
+              _collectionShortcut(
+                icon: Icons.document_scanner_outlined,
+                label: 'Scan',
+                onTap: _openScanner,
+              ),
+              const SizedBox(width: 7),
+              _collectionShortcut(
+                icon: Icons.collections_bookmark_outlined,
+                label: 'Sets',
+                onTap: _openSets,
+              ),
+              const SizedBox(width: 7),
+              _collectionShortcut(
+                icon: Icons.favorite_border_rounded,
+                label: 'Wishlist',
+                onTap: _openWishlist,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _collectionDetailsPanel({
+    required String keyName,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Widget child,
+  }) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: const Color(0xFF102754),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(19),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          // Use a normal identity key here. PageStorageKey persists a bool
+          // (ExpansionTile's expanded state); nested non-scrolling GridViews
+          // may attempt to read that stored bool as a double scroll offset.
+          // ValueKey keeps each panel's identity without sharing that state.
+          key: ValueKey<String>('profile_$keyName'),
+          maintainState: false,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 3),
+          childrenPadding: const EdgeInsets.fromLTRB(9, 0, 9, 10),
+          iconColor: const Color(0xFFF7DE77),
+          collapsedIconColor: const Color(0xFFA8C2E8),
+          leading: Icon(icon, size: 23, color: const Color(0xFFF7DE77)),
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: const TextStyle(
+              color: Color(0xFFB8CBE7),
+              fontSize: 11.5,
+            ),
+          ),
+          children: [child],
         ),
       ),
     );
@@ -1490,10 +1918,10 @@ class _ProfilePageState extends State<ProfilePage> {
           return Card(
             color: const Color(0xFF102754),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(22),
             ),
             child: const Padding(
-              padding: EdgeInsets.all(18),
+              padding: EdgeInsets.all(16),
               child: Row(
                 children: [
                   SizedBox(
@@ -1501,15 +1929,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     height: 22,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      'Loading collection stats...',
-                      style: TextStyle(
-                        color: Color(0xFFD8E3FB),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                  SizedBox(width: 12),
+                  Text(
+                    'Loading your collection...',
+                    style: TextStyle(color: Color(0xFFD8E3FB)),
                   ),
                 ],
               ),
@@ -1534,44 +1957,62 @@ class _ProfilePageState extends State<ProfilePage> {
 
         return Column(
           children: [
-            ProfileShowcaseCard(
-              profileName: widget.profile.displayName,
-              imageProvider: profileImageProvider,
-              stats: stats,
-              onOpenCard: _openCardDetails,
+            _buildCollectionSnapshot(stats),
+            const SizedBox(height: 9),
+            _collectionDetailsPanel(
+              keyName: 'showcase',
+              title: 'Collector showcase',
+              subtitle: 'Featured card and favourite set',
+              icon: Icons.auto_awesome_outlined,
+              child: ProfileShowcaseCard(
+                profileName: widget.profile.displayName,
+                imageProvider: profileImageProvider,
+                stats: stats,
+                onOpenCard: _openCardDetails,
+              ),
             ),
-            const SizedBox(height: 12),
-            RarityValueDashboard(
-              stats: stats,
-              onOpenCard: _openCardDetails,
+            const SizedBox(height: 9),
+            _collectionDetailsPanel(
+              keyName: 'overview',
+              title: 'Collection breakdown',
+              subtitle: 'Sets, wishlist and pricing coverage',
+              icon: Icons.dashboard_outlined,
+              // A stable one-time load avoids the single-subscription stream
+              // listener error seen when opening and closing this panel.
+              // Pull-to-refresh and returning from Wishlist reload the data.
+              child: FutureBuilder<List<WishlistEntry>>(
+                future: _wishlistFuture,
+                builder: (context, wishlistSnapshot) {
+                  return CollectionOverviewDashboard(
+                    stats: stats,
+                    wishlist: wishlistSnapshot.data ?? const <WishlistEntry>[],
+                    onOpenScanner: _openScanner,
+                    onOpenSets: _openSets,
+                    onOpenWishlist: _openWishlist,
+                  );
+                },
+              ),
             ),
-            const SizedBox(height: 12),
-            AchievementBadges(stats: stats),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ProfileStatCard(
-                    title: 'Total Cards',
-                    value: '${stats.totalCards}',
-                    icon: Icons.style_outlined,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ProfileStatCard(
-                    title: 'Total Value',
-                    value: CurrencySettings.formatSelectedAmount(stats.totalEstimatedPrice),
-                    icon: Icons.payment_outlined,
-                  ),
-                ),
-              ],
+            const SizedBox(height: 9),
+            _collectionDetailsPanel(
+              keyName: 'rarity',
+              title: 'Prices & rarity analysis',
+              subtitle: 'Rarity values, price sources and top cards',
+              icon: Icons.insights_outlined,
+              child: RarityValueDashboard(
+                stats: stats,
+                onOpenCard: _openCardDetails,
+                onRefreshPrices: _refreshCollectionPrices,
+                refreshingPrices: _refreshingCollectionPrices,
+              ),
             ),
-            const SizedBox(height: 12),
-            MostExpensiveCardWidget(
-              card: stats.mostExpensiveCard,
-              copies: stats.mostExpensiveCardCopies,
-              onOpenCard: _openCardDetails,
+            const SizedBox(height: 9),
+            _collectionDetailsPanel(
+              keyName: 'achievements',
+              title: 'Achievement badges',
+              subtitle: 'Show, hide or browse your badges',
+              icon: Icons.workspace_premium_outlined,
+              child: AchievementBadges(stats: stats),
             ),
           ],
         );
@@ -1589,17 +2030,25 @@ class _ProfilePageState extends State<ProfilePage> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         titleSpacing: 12,
-        toolbarHeight: 68,
+        toolbarHeight: 76,
         backgroundColor: const Color(0xFF041B4A),
         foregroundColor: Colors.white,
         title: Container(
-          height: 52,
+          height: 60,
           padding: const EdgeInsets.symmetric(horizontal: 6),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.08),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white.withValues(alpha: 0.16),
+                Colors.white.withValues(alpha: 0.07),
+                const Color(0xFF173A78).withValues(alpha: 0.20),
+              ],
+            ),
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
-              color: Colors.white.withValues(alpha: 0.12),
+              color: Colors.white.withValues(alpha: 0.18),
             ),
             boxShadow: [
               BoxShadow(
@@ -1665,7 +2114,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 builder: (context, constraints) {
                   return SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: EdgeInsets.fromLTRB(16, 12, 16, 28 + bottomSafePadding),
+                    padding: EdgeInsets.fromLTRB(12, 10, 12, 20 + bottomSafePadding),
                     child: ConstrainedBox(
                       constraints: BoxConstraints(minHeight: constraints.maxHeight),
                       child: Column(
@@ -1673,22 +2122,23 @@ class _ProfilePageState extends State<ProfilePage> {
                         children: [
                           _buildProfileSettingsCard(profileImageProvider),
                           _buildAdminToolsCard(),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 10),
                           if (widget.profile.isBusinessAccount) ...[
                             _buildBusinessDashboardCard(),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 10),
                             _buildBusinessProInfoCard(),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 10),
                             _buildAccountSecurityCard(),
                           ] else ...[
-                            _buildFriendsCard(),
-                            const SizedBox(height: 16),
-                            _buildWishlistCard(),
-                            const SizedBox(height: 16),
-                            _buildProUpgradeCard(),
-                            _buildAccountSecurityCard(),
-                            const SizedBox(height: 16),
                             _buildStatsSection(profileImageProvider),
+                            const SizedBox(height: 10),
+                            _buildFriendsCard(),
+                            const SizedBox(height: 10),
+                            _buildCollectionDataCard(),
+                            const SizedBox(height: 10),
+                            _buildProUpgradeCard(),
+                            const SizedBox(height: 10),
+                            _buildAccountSecurityCard(),
                           ],
                         ],
                       ),

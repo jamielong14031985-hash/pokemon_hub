@@ -5,9 +5,12 @@ import '../models/profile_stats.dart';
 import '../models/tcg_card.dart';
 import '../services/community_image_services.dart';
 import '../services/currency_settings.dart';
+import '../services/external_card_price_service.dart';
+import '../services/local_card_price_store.dart';
 import '../services/local_pokedex_store.dart';
 import '../services/pokedex_sync_service.dart';
 import '../services/pokemon_tcg_service.dart';
+import 'card_price_confidence.dart';
 
 String profileRarityLabel(TcgCard card) {
   final rarity = (card.rarity ?? '').trim();
@@ -140,6 +143,95 @@ Future<List<TcgCard>> fetchProfileCardsFast(Iterable<String> cardIds) async {
   return fetchedCards;
 }
 
+Future<List<TcgCard>> fetchCurrentUserProfileCardsBySet(
+  Map<String, int> cardCopies,
+) async {
+  if (cardCopies.isEmpty) return const <TcgCard>[];
+
+  final ownedIds = cardCopies.keys.toSet();
+  final setIds = (await LocalPokedexStore.allNonEmptySetIds()).toList();
+  final cardsById = <String, TcgCard>{};
+
+  // Loading whole sets is dramatically faster than making one request for
+  // every owned card, and it reuses the same cache as the Set Pokédex pages.
+  const setChunkSize = 3;
+  for (var start = 0; start < setIds.length; start += setChunkSize) {
+    final end = (start + setChunkSize) > setIds.length
+        ? setIds.length
+        : start + setChunkSize;
+    final chunk = setIds.sublist(start, end);
+    final results = await Future.wait<List<TcgCard>>(
+      chunk.map((setId) async {
+        try {
+          return await PokemonTcgService.fetchCardsBySet(setId).timeout(
+            const Duration(seconds: 30),
+          );
+        } catch (_) {
+          return const <TcgCard>[];
+        }
+      }),
+    );
+
+    for (final cards in results) {
+      for (final card in cards) {
+        if (ownedIds.contains(card.id)) cardsById[card.id] = card;
+      }
+    }
+  }
+
+  // A set feed can occasionally omit a promo or newly released card. Only
+  // fall back to individual lookups for those missing records.
+  final missingIds = ownedIds.where((id) => !cardsById.containsKey(id));
+  final missingCards = await fetchProfileCardsFast(missingIds);
+  for (final card in missingCards) {
+    cardsById[card.id] = card;
+  }
+
+  return cardsById.values.toList();
+}
+
+class CollectionPriceSyncResult {
+  const CollectionPriceSyncResult({required this.attempted, required this.priced});
+
+  final int attempted;
+  final int priced;
+}
+
+Future<CollectionPriceSyncResult> refreshMissingCollectionPrices({
+  int limit = 20,
+}) async {
+  final cardCopies = normalPokedexCardCopiesOnly(
+    await LocalPokedexStore.loadAllCardCopies(),
+  );
+  if (cardCopies.isEmpty) {
+    return const CollectionPriceSyncResult(attempted: 0, priced: 0);
+  }
+
+  final cards = await fetchCurrentUserProfileCardsBySet(cardCopies);
+  final cachedPrices = await LocalCardPriceStore.loadAll();
+  final missing = cards
+      .map((card) => cachedPrices[card.id]?.applyTo(card) ?? card)
+      .where((card) => (card.marketPrice ?? 0) <= 0)
+      .take(limit)
+      .toList();
+
+  var priced = 0;
+  const chunkSize = 4;
+  for (var start = 0; start < missing.length; start += chunkSize) {
+    final end = (start + chunkSize) > missing.length
+        ? missing.length
+        : start + chunkSize;
+    final results = await Future.wait<TcgCard>(
+      missing.sublist(start, end).map(
+            (card) => ExternalCardPriceService.enrichCardWithExternalPrice(card),
+          ),
+    );
+    priced += results.where((card) => (card.marketPrice ?? 0) > 0).length;
+  }
+
+  return CollectionPriceSyncResult(attempted: missing.length, priced: priced);
+}
+
 ImageProvider? profileImageProviderFromRef(String? imageRef) {
   final trimmed = imageRef?.trim() ?? '';
   if (trimmed.isEmpty) return null;
@@ -170,7 +262,8 @@ Future<ProfileStats> loadProfileStatsForOwner(
 
   Map<String, int> cardCopies;
 
-  if (FirebaseAuth.instance.currentUser?.uid == trimmedOwnerUid) {
+  final isCurrentUser = FirebaseAuth.instance.currentUser?.uid == trimmedOwnerUid;
+  if (isCurrentUser) {
     // For your own profile, use the same local Pokédex source that the
     // Pokédex screens use. This prevents old cloud data from showing deleted
     // cards on the profile when the local Pokédex is empty.
@@ -193,11 +286,24 @@ Future<ProfileStats> loadProfileStatsForOwner(
   if (cardCopies.isEmpty) return emptyProfileStats();
 
   final fallbackBasicStats = basicProfileStatsFromCopies(cardCopies);
-  final fetchedCards = await fetchProfileCardsFast(cardCopies.keys);
+  var fetchedCards = isCurrentUser
+      ? await fetchCurrentUserProfileCardsBySet(cardCopies)
+      : await fetchProfileCardsFast(cardCopies.keys);
+
+  if (isCurrentUser && fetchedCards.isNotEmpty) {
+    final cachedPrices = await LocalCardPriceStore.loadAll();
+    fetchedCards = fetchedCards
+        .map((card) => cachedPrices[card.id]?.applyTo(card) ?? card)
+        .toList();
+  }
 
   if (fetchedCards.isEmpty) return fallbackBasicStats;
 
   double totalEstimatedPrice = 0;
+  double salesSupportedValue = 0;
+  double guideOnlyValue = 0;
+  var highValueUnverifiedCards = 0;
+  var salesSupportedUniqueCards = 0;
   TcgCard? mostExpensiveCard;
   int mostExpensiveCardCopies = 0;
   double mostExpensivePrice = -1;
@@ -205,6 +311,8 @@ Future<ProfileStats> loadProfileStatsForOwner(
   final rarityCopies = <String, int>{};
   final rarityValues = <String, double>{};
   final topValueCards = <TcgCard>[];
+  var pricedUniqueCards = 0;
+  var lowConfidencePricedCards = 0;
 
   for (final card in fetchedCards) {
     final copies = cardCopies[card.id] ?? 0;
@@ -213,12 +321,28 @@ Future<ProfileStats> loadProfileStatsForOwner(
     final convertedUnitPrice = profileRawUnitPriceInSelectedCurrency(card);
     final cardTotalValue = convertedUnitPrice * copies;
     totalEstimatedPrice += cardTotalValue;
+    if (convertedUnitPrice > 0) {
+      if (CardPriceConfidence.isSalesSupported(card)) {
+        salesSupportedValue += cardTotalValue;
+        salesSupportedUniqueCards++;
+      } else {
+        guideOnlyValue += cardTotalValue;
+        if (CardPriceConfidence.isHighValueWithoutSales(card)) {
+          highValueUnverifiedCards++;
+        }
+      }
+    }
 
     final rarityLabel = profileRarityLabel(card);
     rarityCopies.update(rarityLabel, (existing) => existing + copies, ifAbsent: () => copies);
     rarityValues.update(rarityLabel, (existing) => existing + cardTotalValue, ifAbsent: () => cardTotalValue);
     if (convertedUnitPrice > 0) {
+      pricedUniqueCards++;
       topValueCards.add(card);
+      final confidence = card.externalRawPriceConfidence.toLowerCase();
+      if (confidence == 'low' || confidence == 'reference') {
+        lowConfidencePricedCards++;
+      }
     }
 
     if (card.setName.trim().isNotEmpty) {
@@ -263,5 +387,12 @@ Future<ProfileStats> loadProfileStatsForOwner(
     rarityCopies: rarityCopies,
     rarityValues: rarityValues,
     topValueCards: topValueCards.take(50).toList(),
+    pricedUniqueCards: pricedUniqueCards,
+    setsCollected: setCopies.length,
+    lowConfidencePricedCards: lowConfidencePricedCards,
+    salesSupportedValue: salesSupportedValue,
+    guideOnlyValue: guideOnlyValue,
+    highValueUnverifiedCards: highValueUnverifiedCards,
+    salesSupportedUniqueCards: salesSupportedUniqueCards,
   );
 }

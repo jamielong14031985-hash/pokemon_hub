@@ -11,6 +11,8 @@ class CardImageWithFallback extends StatefulWidget {
     this.cacheHeight,
     this.backgroundColor = const Color(0xFF102754),
     this.borderRadius,
+    this.placeholderTitle,
+    this.placeholderSubtitle,
   });
 
   final List<String> imageUrls;
@@ -21,6 +23,8 @@ class CardImageWithFallback extends StatefulWidget {
   final int? cacheHeight;
   final Color backgroundColor;
   final BorderRadius? borderRadius;
+  final String? placeholderTitle;
+  final String? placeholderSubtitle;
 
   @override
   State<CardImageWithFallback> createState() => _CardImageWithFallbackState();
@@ -64,15 +68,53 @@ class _CardImageWithFallbackState extends State<CardImageWithFallback> {
   }
 
   Widget _placeholder() {
+    final title = widget.placeholderTitle?.trim() ?? '';
+    final subtitle = widget.placeholderSubtitle?.trim() ?? '';
+
     return Container(
       width: widget.width,
       height: widget.height,
       color: widget.backgroundColor,
-      child: const Center(
-        child: Icon(
-          Icons.image_not_supported,
-          color: Colors.white70,
-          size: 34,
+      padding: const EdgeInsets.all(10),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.style_outlined,
+              color: Color(0xFFF7DE77),
+              size: 30,
+            ),
+            if (title.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  height: 1.15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+            if (subtitle.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

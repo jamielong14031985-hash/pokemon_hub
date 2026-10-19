@@ -78,6 +78,7 @@ class _SignInPageState extends State<SignInPage> {
 
     final picked = await showDatePicker(
       context: context,
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
       initialDate: initialDate.isAfter(now) ? now : initialDate,
       firstDate: DateTime(now.year - 120, 1, 1),
       lastDate: now,

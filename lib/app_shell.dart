@@ -10,6 +10,7 @@ import 'pages/business_profile_page.dart';
 import 'pages/card_scanner_page.dart';
 import 'pages/card_search_page.dart';
 import 'pages/community_page.dart';
+import 'pages/deal_builder_page.dart';
 import 'pages/master_sets_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/pocketchase_onboarding_page.dart';
@@ -320,23 +321,7 @@ class _AppShellState extends State<AppShell> {
         return 'Chat, swap, sell and trade safely';
       case _kCardsIndex:
       default:
-        return 'Search cards, sets and collection numbers';
-    }
-  }
-
-  IconData get _appBarIcon {
-    switch (_currentIndex) {
-      case _kScanIndex:
-        return Icons.document_scanner_outlined;
-      case _kMasterSetsIndex:
-        return Icons.collections_bookmark_outlined;
-      case _kMapIndex:
-        return Icons.map_outlined;
-      case _kCommunityIndex:
-        return Icons.forum_outlined;
-      case _kCardsIndex:
-      default:
-        return Icons.style_outlined;
+        return 'Search cards, sets and sealed products';
     }
   }
 
@@ -418,23 +403,6 @@ class _AppShellState extends State<AppShell> {
       decoration: _glassHeaderDecoration(),
       child: Row(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFF7DE77).withValues(alpha: 0.14),
-              border: Border.all(
-                color: const Color(0xFFF7DE77).withValues(alpha: 0.28),
-              ),
-            ),
-            child: Icon(
-              _appBarIcon,
-              color: const Color(0xFFF7DE77),
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
           Expanded(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
@@ -479,13 +447,25 @@ class _AppShellState extends State<AppShell> {
             ),
             color: const Color(0xFF102754),
             onSelected: (value) {
-              if (value == 'feedback') {
+              if (value == 'deal_builder') {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const DealBuilderPage()),
+                );
+              } else if (value == 'feedback') {
                 _openFeedback(appBarProfile);
               } else if (value == 'guide') {
                 _openOnboarding();
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem<String>(
+                value: 'deal_builder',
+                child: Row(children: [
+                  Icon(Icons.handshake_outlined, color: Color(0xFFF7DE77)),
+                  SizedBox(width: 10),
+                  Text('Deal Builder', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                ]),
+              ),
               PopupMenuItem<String>(
                 value: 'feedback',
                 child: Row(
